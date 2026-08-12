@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Kalkulator PPM + CAC – Gleba</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f0f4f8; padding: 20px; color: #1a202c; margin: 0; line-height: 1.45; }
+    .container { max-width: 980px; margin: 0 auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    h1 { text-align: center; color: #2d3748; margin: 0 0 8px 0; font-size: 1.7rem; }
+    .subtitle { text-align: center; color: #718096; font-size: 0.95rem; margin-bottom: 24px; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 24px; border-bottom: 2px solid #e2e8f0; }
+    .tab-btn { padding: 11px 22px; border: none; background: #edf2f7; cursor: pointer; border-radius: 8px 8px 0 0; font-weight: 600; font-size: 0.95rem; color: #4a5568; }
+    .tab-btn.active { background: #2b6cb0; color: #fff; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .section { background: #f7fafc; padding: 18px; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 20px; }
+    .section h2 { margin: 0 0 14px 0; font-size: 1.15rem; color: #2d3748; }
+    .section h3 { margin: 0 0 12px 0; font-size: 1.05rem; color: #2b6cb0; }
+    .input-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin-bottom: 12px; }
+    label { font-weight: 600; font-size: 0.84rem; display: block; margin-bottom: 5px; color: #4a5568; }
+    input { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; }
+    input:focus { outline: none; border-color: #3182ce; box-shadow: 0 0 0 3px rgba(49,130,206,0.15); }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+    th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    th { background: #2d3748; color: #fff; font-weight: 600; }
+    .badge { background: #edf2f7; padding: 3px 9px; border-radius: 5px; font-weight: 600; display: inline-block; min-width: 58px; text-align: center; }
+    .highlight { background: #fefcbf; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+    .note { font-size: 0.78rem; color: #718096; margin-top: 6px; line-height: 1.4; }
+    .explain { font-size: 0.75rem; color: #a0aec0; font-style: italic; margin-top: 3px; }
+    .lime-box { background: #f0fff4; border: 1px solid #9ae6b4; padding: 16px; border-radius: 8px; margin-top: 14px; }
+    .lime-box.no-lime { background: #fff5f5; border-color: #feb2b2; }
+    .no-lime-msg { background: #fed7d7; color: #9b2c2c; padding: 12px 14px; border-radius: 8px; font-weight: 600; margin-bottom: 12px; display: none; }
+    .no-lime-msg.visible { display: block; }
+    .big { font-size: 1.15rem; font-weight: 700; color: #276749; }
+    .quick-btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
+    .quick-btn { padding: 7px 14px; border: 1px solid #3182ce; background: #ebf8ff; color: #2b6cb0; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+    .quick-btn:hover { background: #bee3f8; }
+    .quick-btn.active { background: #3182ce; color: #fff; }
+    .dyn-table tr:nth-child(2) { background: #f0fff4; }
+    .pdf-box { background: #ebf8ff; border: 1px solid #90cdf4; padding: 16px; border-radius: 8px; margin-bottom: 18px; }
+    .col-btn { padding: 10px 18px; margin: 4px; border: 2px solid #3182ce; background: #fff; color: #2b6cb0; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .col-btn:hover { background: #bee3f8; }
+    .col-btn.selected { background: #3182ce; color: #fff; }
+    .file-label { display: inline-block; padding: 10px 18px; background: #2b6cb0; color: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; margin-bottom: 12px; }
+    .file-label:hover { background: #2c5282; }
+    #pdf-file { display: none; }
+    .status { font-size: 0.9rem; margin: 8px 0; min-height: 1.2em; }
+    .status.ok { color: #276749; font-weight: 600; }
+    .status.err { color: #c53030; font-weight: 600; }
+    #column-buttons { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Kalkulator składników odżywczych + CAC</h1>
+    <p class="subtitle">Roztwór wodny + analiza gleby (Logan Labs / Albrecht)</p>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('ppm')">PPM (roztwór)</button>
+      <button class="tab-btn" onclick="switchTab('cac')">CAC / Gleba</button>
+    </div>
+
+    <!-- TAB PPM -->
+    <div id="tab-ppm" class="tab-content active">
+      <div class="section">
+        <h2>1. Parametry zbiornika</h2>
+        <div class="input-group">
+          <div>
+            <label>Objętość wody (litry)</label>
+            <input type="number" id="water_volume" value="5" step="0.1" oninput="calculatePPM()">
+            <div class="explain">Objętość roztworu, w którym rozpuszczasz nawozy</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>2. Dawki produktów</h2>
+        <div class="input-group">
+          <div><label>Biobizz Bio-Bloom (ml)</label><input type="number" id="dose_biobloom" value="5" step="0.1" oninput="calculatePPM()"></div>
+          <div><label>Agro-Sorb L-Amino+ K (ml)</label><input type="number" id="dose_agrosorb_k" value="15" step="0.1" oninput="calculatePPM()"></div>
+          <div><label>Agro-Sorb L-Amino+ Ca (ml)</label><input type="number" id="dose_agrosorb_ca" value="5" step="0.1" oninput="calculatePPM()"></div>
+        </div>
+        <div class="input-group">
+          <div><label>Siarczan wapnia / Gips (g)</label><input type="number" id="dose_gips" value="0.81" step="0.01" oninput="calculatePPM()"></div>
+          <div><label>Siarczan potasu (g)</label><input type="number" id="dose_sk" value="0" step="0.01" oninput="calculatePPM()"></div>
+          <div><label>Kompost Logan Labs Comp (ml)</label><input type="number" id="dose_kompost" value="100" step="1" oninput="calculatePPM()"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>3. Profil roztworu (PPM)</h2>
+        <table>
+          <thead><tr><th>Pierwiastek</th><th>Minimum (wodne)</th><th>Maksimum (glebowe)</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Azot (N)</strong></td><td><span id="ppm_n_min" class="badge">0.00</span> ppm</td><td><span id="ppm_n_max" class="badge">0.00</span> ppm</td></tr>
+            <tr><td><strong>Fosfor (P)</strong></td><td><span id="ppm_p_min" class="badge">0.00</span> ppm</td><td><span id="ppm_p_max" class="badge">0.00</span> ppm</td></tr>
+            <tr><td><strong>Potas (K)</strong></td><td><span id="ppm_k_min" class="badge">0.00</span> ppm</td><td><span id="ppm_k_max" class="badge">0.00</span> ppm</td></tr>
+            <tr><td><strong>Wapń (Ca)</strong></td><td><span id="ppm_ca_min" class="badge">0.00</span> ppm</td><td><span id="ppm_ca_max" class="badge">0.00</span> ppm</td></tr>
+            <tr><td><strong>Siarka (S)</strong></td><td><span id="ppm_s_min" class="badge">0.00</span> ppm</td><td><span id="ppm_s_max" class="badge">0.00</span> ppm</td></tr>
+            <tr><td><strong>Magnez (Mg)</strong></td><td><span id="ppm_mg_min" class="badge">0.00</span> ppm</td><td><span id="ppm_mg_max" class="badge">0.00</span> ppm</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB CAC -->
+    <div id="tab-cac" class="tab-content">
+      <div class="section pdf-box">
+        <h3 style="margin-top:0; color:#2b6cb0;">Wczytaj raport Logan Labs (PDF)</h3>
+        <p class="note" style="margin-bottom:12px;">
+          Wybierz plik PDF z raportem Logan Labs. Po wczytaniu pojawią się przyciski kolumn (Sample Location).
+          Wybierz kolumnę – zostaną zaimportowane: <strong>pH, Ca, Mg, K, Na</strong> (Value Found).
+        </p>
+        <label class="file-label" for="pdf-file">Wybierz plik PDF…</label>
+        <input type="file" id="pdf-file" accept="application/pdf,.pdf" onchange="handlePdfUpload(event)">
+        <div id="pdf-status" class="status"></div>
+        <div id="column-buttons"></div>
+        <div id="pdf-info" class="note" style="font-weight:600; color:#2b6cb0; margin-top:8px;"></div>
+      </div>
+
+      <div class="section">
+        <h2>1. Dane z testu glebowego</h2>
+        <div class="input-group">
+          <div>
+            <label>pH gleby</label>
+            <input type="number" id="cac_ph" value="5.8" step="0.1" min="3" max="8" oninput="calculateCAC()">
+            <div class="explain">Mierzy kwasowość. Poniżej 6,5 gleba jest kwaśna.</div>
+          </div>
+          <div>
+            <label>Ca (Value Found / „ppm”)</label>
+            <input type="number" id="cac_ca" value="1500" step="1" oninput="calculateCAC()">
+            <div class="explain">Wapń z raportu (Value Found lbs/acre).</div>
+          </div>
+          <div>
+            <label>Mg (Value Found)</label>
+            <input type="number" id="cac_mg" value="200" step="1" oninput="calculateCAC()">
+          </div>
+          <div>
+            <label>K (Value Found)</label>
+            <input type="number" id="cac_k" value="300" step="1" oninput="calculateCAC()">
+          </div>
+          <div>
+            <label>Na (Value Found)</label>
+            <input type="number" id="cac_na" value="42" step="1" oninput="calculateCAC()">
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="section">
+          <h3>Wyniki podstawowe</h3>
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>Aktualne</th>
+                <th>Po wapnowaniu</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Other Bases</td>
+                <td><span id="cac_other" class="badge">—</span></td>
+                <td><span id="cac_other_after" class="badge highlight">—</span></td>
+              </tr>
+              <tr>
+                <td>Ex H (wymienny wodór)</td>
+                <td><span id="cac_exh" class="badge">—</span></td>
+                <td><span id="cac_exh_after" class="badge highlight">—</span></td>
+              </tr>
+              <tr>
+                <td><strong>TCEC</strong></td>
+                <td><span id="cac_tcec" class="badge">—</span></td>
+                <td><span id="cac_tcec_after" class="badge highlight">—</span></td>
+              </tr>
+              <tr>
+                <td>Ca / Mg</td>
+                <td><span id="cac_camg" class="badge">—</span></td>
+                <td><span id="cac_camg_after" class="badge">—</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="note">
+            Kolumna „Po wapnowaniu” powstaje z założonego nowego pH → nowego Ex H (wzór Logan Labs).
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>Nasycenie kationowe</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Pierwiastek</th>
+                <th>Aktualne %</th>
+                <th>Po wapnowaniu %</th>
+                <th>Cel</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Ca</td>
+                <td><span id="cac_sat_ca" class="badge">—</span></td>
+                <td><span id="cac_sat_ca_after" class="badge highlight">—</span></td>
+                <td>68–75%</td>
+              </tr>
+              <tr>
+                <td>Mg</td>
+                <td><span id="cac_sat_mg" class="badge">—</span></td>
+                <td><span id="cac_sat_mg_after" class="badge">—</span></td>
+                <td>10–15%</td>
+              </tr>
+              <tr>
+                <td>K</td>
+                <td><span id="cac_sat_k" class="badge">—</span></td>
+                <td><span id="cac_sat_k_after" class="badge">—</span></td>
+                <td>3–5%</td>
+              </tr>
+              <tr>
+                <td>Na</td>
+                <td><span id="cac_sat_na" class="badge">—</span></td>
+                <td><span id="cac_sat_na_after" class="badge">—</span></td>
+                <td>&lt; 2%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Jak nasycenie wapniem wpływa na pH</h3>
+        <table class="dyn-table">
+          <thead>
+            <tr>
+              <th>Cel nasycenia Ca</th>
+              <th>Brakuje Ca</th>
+              <th>Nowe Ca</th>
+              <th>Oczekiwany efekt na pH</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>68%</strong></td>
+              <td>+ <span id="dyn_inc_68">—</span> ppm</td>
+              <td><span id="dyn_new_68">—</span> ppm</td>
+              <td>pH ~6,5</td>
+            </tr>
+            <tr>
+              <td><strong>72%</strong> (zalecane)</td>
+              <td>+ <span id="dyn_inc_72">—</span> ppm</td>
+              <td><span id="dyn_new_72">—</span> ppm</td>
+              <td>pH ~6,7</td>
+            </tr>
+            <tr>
+              <td><strong>75%</strong></td>
+              <td>+ <span id="dyn_inc_75">—</span> ppm</td>
+              <td><span id="dyn_new_75">—</span> ppm</td>
+              <td>pH ~6,8</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <h2>2. Wapnowanie – dawka</h2>
+        <div class="quick-btns">
+          <button class="quick-btn" onclick="setSat(68)">68%</button>
+          <button class="quick-btn active" onclick="setSat(72)">72% – zalecane</button>
+          <button class="quick-btn" onclick="setSat(75)">75%</button>
+        </div>
+        <div class="input-group">
+          <div>
+            <label>Docelowe nasycenie Ca (%)</label>
+            <input type="number" id="lime_target_sat" value="72" step="1" min="60" max="85" oninput="calculateLime()">
+          </div>
+          <div>
+            <label>Objętość gleby (litry)</label>
+            <input type="number" id="lime_volume_l" value="10" step="0.1" min="0.1" oninput="calculateLime()">
+          </div>
+          <div>
+            <label>Gęstość nasypowa (g/cm³)</label>
+            <input type="number" id="lime_bd" value="1.3" step="0.05" min="0.8" max="1.8" oninput="calculateLime()">
+          </div>
+        </div>
+        <div class="input-group">
+          <div>
+            <label>Węglan wapnia – czystość / CCE (%)</label>
+            <input type="number" id="lime_caco3_cce" value="95" step="1" min="50" max="110" oninput="calculateLime()">
+          </div>
+          <div>
+            <label>Wolastenit – zawartość Ca (%)</label>
+            <input type="number" id="lime_woll_ca" value="34" step="0.5" min="20" max="40" oninput="calculateLime()">
+          </div>
+          <div>
+            <label>Wolastenit – efektywność CCE (%)</label>
+            <input type="number" id="lime_woll_cce" value="70" step="1" min="20" max="100" oninput="calculateLime()">
+          </div>
+        </div>
+
+        <div class="lime-box" id="lime-box">
+          <div id="no-lime-msg" class="no-lime-msg">
+            pH gleby ≥ 7 — wapnowanie nie jest potrzebne. Gleba nie jest kwaśna, a dodatek węglanu wapnia nie jest zalecany.
+          </div>
+          <div id="lime-results">
+            <table>
+              <tr><td>Aktualne nasycenie Ca</td><td><span id="lime_curr_sat" class="badge">—</span> %</td></tr>
+              <tr><td>Docelowe nasycenie Ca</td><td><span id="lime_tgt_sat" class="badge highlight">—</span> %</td></tr>
+              <tr><td>Deficyt Ca (meq/100g)</td><td><span id="lime_deficit_meq" class="badge">—</span></td></tr>
+              <tr><td><strong>Brakuje Ca</strong></td><td class="big">+ <span id="lime_ca_increase">—</span> ppm</td></tr>
+              <tr><td>Nowe Ca</td><td><span id="lime_new_ca" class="badge highlight">—</span> ppm</td></tr>
+            </table>
+            <h3 style="margin:16px 0 8px; color:#276749;">Dawka na podaną objętość</h3>
+            <table>
+              <tr><td><strong>Czysty CaCO₃ (100%)</strong></td><td class="big"><span id="lime_pure_vol">—</span> g</td></tr>
+              <tr><td><strong>Węglan wapnia (Twoja czystość)</strong></td><td class="big"><span id="lime_caco3_vol">—</span> g</td></tr>
+              <tr><td><strong>Wolastenit</strong></td><td class="big"><span id="lime_woll_vol">—</span> g</td></tr>
+              <tr><td>Czysty wapń (Ca)</td><td><span id="lime_ca_vol">—</span> g</td></tr>
+            </table>
+            <h3 style="margin:16px 0 8px; color:#276749;">Na 1 litr gleby</h3>
+            <table>
+              <tr><td>Czysty CaCO₃</td><td><span id="lime_pure_l">—</span> g/l</td></tr>
+              <tr><td>Węglan wapnia</td><td><span id="lime_caco3_l">—</span> g/l</td></tr>
+              <tr><td>Wolastenit</td><td><span id="lime_woll_l">—</span> g/l</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
+
+    // ===== PDF PARSER =====
+    window.parsedColumns = [];
+
+    function setStatus(msg, isErr = false) {
+      const el = document.getElementById('pdf-status');
+      el.textContent = msg;
+      el.className = 'status ' + (isErr ? 'err' : 'ok');
+    }
+
+    async function handlePdfUpload(ev) {
+      const file = ev.target.files[0];
+      if (!file) return;
+      setStatus('Wczytywanie PDF…');
+      document.getElementById('column-buttons').innerHTML = '';
+      document.getElementById('pdf-info').innerText = '';
+      window.parsedColumns = [];
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = '';
+        const items = [];
+
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const page = await pdf.getPage(p);
+          const content = await page.getTextContent();
+          content.items.forEach(it => {
+            if (it.str && it.str.trim()) {
+              items.push({
+                str: it.str.trim(),
+                x: it.transform[4],
+                y: it.transform[5],
+                page: p
+              });
+              fullText += it.str + ' ';
+            }
+          });
+          fullText += '\n';
+        }
+
+        const columns = parseLoganReport(items, fullText);
+        if (!columns.length) {
+          setStatus('Nie udało się wykryć kolumn próbek. Sprawdź, czy to standardowy raport Logan Labs.', true);
+          return;
+        }
+
+        window.parsedColumns = columns;
+        setStatus(`Wykryto ${columns.length} kolumn(ę/y). Wybierz jedną poniżej.`);
+        const btnContainer = document.getElementById('column-buttons');
+        columns.forEach((col, idx) => {
+          const btn = document.createElement('button');
+          btn.className = 'col-btn';
+          btn.textContent = col.label || `Kolumna ${idx + 1}`;
+          btn.onclick = () => loadParsedColumn(idx, btn);
+          btnContainer.appendChild(btn);
+        });
+      } catch (e) {
+        console.error(e);
+        setStatus('Błąd odczytu PDF: ' + (e.message || e), true);
+      }
+    }
+    window.handlePdfUpload = handlePdfUpload;
+
+    function parseLoganReport(items, fullText) {
+      // Group items into approximate rows by Y (tolerance ~3-4)
+      const yTol = 4;
+      const rows = [];
+      const sorted = [...items].sort((a, b) => {
+        if (a.page !== b.page) return a.page - b.page;
+        if (Math.abs(a.y - b.y) > yTol) return b.y - a.y; // higher Y first (PDF coords)
+        return a.x - b.x;
+      });
+
+      let currentY = null;
+      let currentPage = null;
+      let currentRow = [];
+      sorted.forEach(it => {
+        if (currentY === null || currentPage !== it.page || Math.abs(it.y - currentY) > yTol) {
+          if (currentRow.length) rows.push(currentRow);
+          currentRow = [it];
+          currentY = it.y;
+          currentPage = it.page;
+        } else {
+          currentRow.push(it);
+        }
+      });
+      if (currentRow.length) rows.push(currentRow);
+
+      // Helper: find row containing label
+      function findRow(labelPart) {
+        return rows.find(r => r.some(i => i.str.toLowerCase().includes(labelPart.toLowerCase())));
+      }
+
+      // Extract numbers from a row (right side of labels)
+      function extractNumbers(row) {
+        if (!row) return [];
+        const nums = [];
+        row.forEach(i => {
+          // match numbers like 6.60, 3170, -53, 66.88
+          const m = i.str.match(/-?\d+\.?\d*/g);
+          if (m) m.forEach(n => {
+            const v = parseFloat(n);
+            if (!isNaN(v)) nums.push({ val: v, x: i.x });
+          });
+        });
+        // sort by x
+        nums.sort((a, b) => a.x - b.x);
+        return nums;
+      }
+
+      // Find Sample Location / Sample ID labels to get column headers
+      const locRow = findRow('Sample Location') || findRow('Sample ID');
+      let labels = [];
+      if (locRow) {
+        // take text items that look like sample names (not the header itself)
+        labels = locRow
+          .filter(i => !/sample|location|id|lab|number/i.test(i.str) && i.str.length > 0)
+          .map(i => ({ text: i.str, x: i.x }))
+          .sort((a, b) => a.x - b.x);
+      }
+
+      // pH row
+      const phRow = findRow('pH of Soil Sample') || findRow('pH of Soil');
+      const phNums = extractNumbers(phRow);
+
+      // Calcium Value Found – look for row with "Value Found" near Calcium
+      let caRow = null;
+      for (let i = 0; i < rows.length; i++) {
+        const hasCa = rows[i].some(it => /CALCIUM/i.test(it.str));
+        if (hasCa) {
+          // next few rows may contain Value Found
+          for (let j = i; j < Math.min(i + 4, rows.length); j++) {
+            if (rows[j].some(it => /Value Found/i.test(it.str))) {
+              caRow = rows[j];
+              break;
+            }
+          }
+          if (caRow) break;
+        }
+      }
+      // fallback: any "Value Found" after seeing CALCIUM in text
+      if (!caRow) {
+        const vfRows = rows.filter(r => r.some(it => /Value Found/i.test(it.str)));
+        if (vfRows.length) caRow = vfRows[0];
+      }
+      const caNums = extractNumbers(caRow);
+
+      // Magnesium Value Found
+      let mgRow = null;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].some(it => /MAGNESIUM/i.test(it.str))) {
+          for (let j = i; j < Math.min(i + 4, rows.length); j++) {
+            if (rows[j].some(it => /Value Found/i.test(it.str))) {
+              mgRow = rows[j];
+              break;
+            }
+          }
+          if (mgRow) break;
+        }
+      }
+      if (!mgRow && rows.filter(r => r.some(it => /Value Found/i.test(it.str))).length > 1) {
+        mgRow = rows.filter(r => r.some(it => /Value Found/i.test(it.str)))[1];
+      }
+      const mgNums = extractNumbers(mgRow);
+
+      // Potassium Value Found
+      let kRow = null;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].some(it => /POTASSIUM/i.test(it.str))) {
+          for (let j = i; j < Math.min(i + 4, rows.length); j++) {
+            if (rows[j].some(it => /Value Found/i.test(it.str))) {
+              kRow = rows[j];
+              break;
+            }
+          }
+          if (kRow) break;
+        }
+      }
+      if (!kRow && rows.filter(r => r.some(it => /Value Found/i.test(it.str))).length > 2) {
+        kRow = rows.filter(r => r.some(it => /Value Found/i.test(it.str)))[2];
+      }
+      const kNums = extractNumbers(kRow);
+
+      // Sodium – often just "SODIUM: lbs / acre" followed by numbers
+      let naRow = findRow('SODIUM');
+      // sometimes Na is on the same line or next
+      let naNums = extractNumbers(naRow);
+      // if too few, try next row
+      if (naNums.length < 1 && naRow) {
+        const idx = rows.indexOf(naRow);
+        if (idx >= 0 && idx + 1 < rows.length) naNums = extractNumbers(rows[idx + 1]);
+      }
+
+      // Determine number of columns – take the most consistent count of numeric values
+      const counts = [phNums.length, caNums.length, mgNums.length, kNums.length, naNums.length].filter(c => c > 0);
+      if (!counts.length) return [];
+      const colCount = Math.max(...counts);
+      // Prefer the mode
+      const mode = counts.sort((a, b) =>
+        counts.filter(v => v === a).length - counts.filter(v => v === b).length
+      ).pop();
+      const nCols = mode || colCount;
+
+      const result = [];
+      for (let c = 0; c < nCols; c++) {
+        const label = (labels[c] && labels[c].text) ? labels[c].text : `Kolumna ${c + 1}`;
+        result.push({
+          label: label,
+          ph: phNums[c] ? phNums[c].val : null,
+          ca: caNums[c] ? caNums[c].val : null,
+          mg: mgNums[c] ? mgNums[c].val : null,
+          k:  kNums[c]  ? kNums[c].val  : null,
+          na: naNums[c] ? naNums[c].val : null
+        });
+      }
+
+      // Filter out completely empty columns
+      return result.filter(col => col.ph != null || col.ca != null || col.mg != null);
+    }
+
+    function loadParsedColumn(idx, btnEl) {
+      const col = window.parsedColumns[idx];
+      if (!col) return;
+
+      if (col.ph != null) document.getElementById('cac_ph').value = col.ph;
+      if (col.ca != null) document.getElementById('cac_ca').value = Math.round(col.ca);
+      if (col.mg != null) document.getElementById('cac_mg').value = Math.round(col.mg);
+      if (col.k  != null) document.getElementById('cac_k').value  = Math.round(col.k);
+      if (col.na != null) document.getElementById('cac_na').value = Math.round(col.na);
+
+      document.querySelectorAll('.col-btn').forEach(b => b.classList.remove('selected'));
+      if (btnEl) btnEl.classList.add('selected');
+
+      document.getElementById('pdf-info').innerText =
+        `Wczytano: ${col.label} → pH ${col.ph ?? '—'} | Ca ${col.ca ?? '—'} | Mg ${col.mg ?? '—'} | K ${col.k ?? '—'} | Na ${col.na ?? '—'}`;
+
+      calculateCAC();
+    }
+    window.loadParsedColumn = loadParsedColumn;
+
+    // ===== REST OF THE CALCULATOR (unchanged logic) =====
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      // find the button that was clicked
+      const btns = document.querySelectorAll('.tab-btn');
+      btns.forEach(b => {
+        if (b.textContent.toLowerCase().includes(tab === 'ppm' ? 'ppm' : 'cac')) b.classList.add('active');
+      });
+    }
+    window.switchTab = switchTab;
+
+    function setSat(val) {
+      document.getElementById('lime_target_sat').value = val;
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      if (event && event.target) event.target.classList.add('active');
+      calculateLime();
+    }
+    window.setSat = setSat;
+
+    function calculatePPM() {
+      const V = parseFloat(document.getElementById('water_volume').value) || 1;
+      const d_bloom = parseFloat(document.getElementById('dose_biobloom').value) || 0;
+      const d_sorbK = parseFloat(document.getElementById('dose_agrosorb_k').value) || 0;
+      const d_sorbCa = parseFloat(document.getElementById('dose_agrosorb_ca').value) || 0;
+      const d_gips = parseFloat(document.getElementById('dose_gips').value) || 0;
+      const d_sk = parseFloat(document.getElementById('dose_sk').value) || 0;
+      const d_kompost = parseFloat(document.getElementById('dose_kompost').value) || 0;
+
+      const kg_komp = (d_kompost * 0.425) / 1000;
+      const mg_bloom = d_bloom * 1180;
+      const mg_sorbK = d_sorbK * 1250;
+      const mg_sorbCa = d_sorbCa * 1200;
+      const mg_gips = d_gips * 1000;
+      const mg_sk = d_sk * 1000;
+
+      const n_total = (mg_bloom * 0.02) + (mg_sorbK * 0.01) + (mg_sorbCa * 0.05) + (612.9 * kg_komp);
+      const p_base = mg_bloom * 0.07 * 0.4364;
+      const p_min = p_base + 10.24 * kg_komp;
+      const p_max = p_base + 161.0 * kg_komp;
+      const k_base = (mg_bloom * 0.04 * 0.8302) + (mg_sorbK * 0.24 * 0.8302) + (mg_sk * 0.50 * 0.8302);
+      const k_min = k_base + 1376.0 * kg_komp;
+      const k_max = k_base + 1829.0 * kg_komp;
+      const ca_base = (mg_sorbCa * 0.08 * 0.7147) + (mg_gips * 0.2328);
+      const ca_min = ca_base + 805.0 * kg_komp;
+      const ca_max = ca_base + 3736.0 * kg_komp;
+      const s_total = (mg_gips * 0.1862) + (mg_sk * 0.1800) + 56.0 * kg_komp;
+      const mg_min = 186.0 * kg_komp;
+      const mg_max = 464.0 * kg_komp;
+
+      document.getElementById('ppm_n_min').innerText = (n_total / V).toFixed(2);
+      document.getElementById('ppm_n_max').innerText = (n_total / V).toFixed(2);
+      document.getElementById('ppm_p_min').innerText = (p_min / V).toFixed(2);
+      document.getElementById('ppm_p_max').innerText = (p_max / V).toFixed(2);
+      document.getElementById('ppm_k_min').innerText = (k_min / V).toFixed(2);
+      document.getElementById('ppm_k_max').innerText = (k_max / V).toFixed(2);
+      document.getElementById('ppm_ca_min').innerText = (ca_min / V).toFixed(2);
+      document.getElementById('ppm_ca_max').innerText = (ca_max / V).toFixed(2);
+      document.getElementById('ppm_s_min').innerText = (s_total / V).toFixed(2);
+      document.getElementById('ppm_s_max').innerText = (s_total / V).toFixed(2);
+      document.getElementById('ppm_mg_min').innerText = (mg_min / V).toFixed(2);
+      document.getElementById('ppm_mg_max').innerText = (mg_max / V).toFixed(2);
+    }
+    window.calculatePPM = calculatePPM;
+
+    function getOtherBases(ph) {
+      if (ph > 6.1) return 11.4 - ph;
+      if (ph > 3.0) return 17.4 - (2 * ph);
+      if (ph > 2.2) return 13.3 - (0.6 * ph);
+      return 17.4 - (2 * ph);
+    }
+
+    function getExH(ph) {
+      if (ph > 7.0) return 0;
+      if (ph > 6.0) return (7 - ph) * 15;
+      if (ph > 5.0) return 195 - (30 * ph);
+      if (ph > 4.0) return 145 - (20 * ph);
+      if (ph >= 3.0) return 105 - (10 * ph);
+      if (ph > 2.2) return 93 - (6 * ph);
+      return 155 - (25 * ph);
+    }
+
+    function getTargetPh(sat) {
+      if (sat >= 75) return 6.8;
+      if (sat >= 72) return 6.7;
+      return 6.5;
+    }
+
+    function calculateCAC() {
+      const ph = parseFloat(document.getElementById('cac_ph').value) || 7;
+      const ca = parseFloat(document.getElementById('cac_ca').value) || 0;
+      const mg = parseFloat(document.getElementById('cac_mg').value) || 0;
+      const k = parseFloat(document.getElementById('cac_k').value) || 0;
+      const na = parseFloat(document.getElementById('cac_na').value) || 0;
+
+      const other = getOtherBases(ph);
+      const exh = getExH(ph);
+      const meqCa = ca / 200;
+      const meqMg = mg / 120;
+      const meqK = k / 390;
+      const meqNa = na / 230;
+      const sumMeq = meqCa + meqMg + meqK + meqNa;
+      const denom = 100 - (other + exh);
+      const tcec = denom > 0 ? (sumMeq * 100) / denom : sumMeq;
+
+      const satCa = tcec > 0 ? (meqCa / tcec) * 100 : 0;
+      const satMg = tcec > 0 ? (meqMg / tcec) * 100 : 0;
+      const satK = tcec > 0 ? (meqK / tcec) * 100 : 0;
+      const satNa = tcec > 0 ? (meqNa / tcec) * 100 : 0;
+
+      document.getElementById('cac_other').innerText = other.toFixed(1);
+      document.getElementById('cac_exh').innerText = exh.toFixed(1);
+      document.getElementById('cac_tcec').innerText = tcec.toFixed(2);
+      document.getElementById('cac_camg').innerText = mg > 0 ? (ca / mg).toFixed(1) : '—';
+      document.getElementById('cac_sat_ca').innerText = satCa.toFixed(1);
+      document.getElementById('cac_sat_mg').innerText = satMg.toFixed(1);
+      document.getElementById('cac_sat_k').innerText = satK.toFixed(1);
+      document.getElementById('cac_sat_na').innerText = satNa.toFixed(1);
+
+      window._cac = { tcec, meqCa, meqMg, meqK, meqNa, satCa, satMg, satK, satNa, ca, mg, k, na, other, exh, ph };
+      updateDynTable();
+      calculateLime();
+    }
+    window.calculateCAC = calculateCAC;
+
+    function updateDynTable() {
+      if (!window._cac) return;
+      const d = window._cac;
+
+      // Przy pH ≥ 7 nie pokazujemy deficytu Ca do wapnowania
+      if (d.ph >= 7) {
+        [68, 72, 75].forEach(function(pct) {
+          document.getElementById('dyn_inc_' + pct).innerText = '0';
+          document.getElementById('dyn_new_' + pct).innerText = d.ca.toFixed(0);
+        });
+        return;
+      }
+
+      [68, 72, 75].forEach(function(pct) {
+        const targetPh = getTargetPh(pct);
+        const newExH = getExH(targetPh);
+        const newOther = getOtherBases(targetPh);
+        const meqOthers = d.meqMg + d.meqK + d.meqNa;
+        let deficitMeq = 0;
+        for (let i = 0; i < 8; i++) {
+          const newMeqCa = d.meqCa + deficitMeq;
+          const newSum = newMeqCa + meqOthers;
+          const newDenom = 100 - (newOther + newExH);
+          const newTcec = newDenom > 0 ? (newSum * 100) / newDenom : newSum;
+          const needed = newTcec * (pct / 100);
+          deficitMeq = Math.max(0, needed - d.meqCa);
+        }
+        const increase = deficitMeq * 200;
+        const newCa = d.ca + increase;
+        document.getElementById('dyn_inc_' + pct).innerText = increase.toFixed(0);
+        document.getElementById('dyn_new_' + pct).innerText = newCa.toFixed(0);
+      });
+    }
+
+    function calculateLime() {
+      if (!window._cac) return;
+      const d = window._cac;
+      const targetSat = parseFloat(document.getElementById('lime_target_sat').value) || 72;
+      const volumeL = parseFloat(document.getElementById('lime_volume_l').value) || 10;
+      const bd = parseFloat(document.getElementById('lime_bd').value) || 1.3;
+      const cce = parseFloat(document.getElementById('lime_caco3_cce').value) || 95;
+      const wollCa = parseFloat(document.getElementById('lime_woll_ca').value) || 34;
+      const wollCce = parseFloat(document.getElementById('lime_woll_cce').value) || 70;
+
+      const limeBox = document.getElementById('lime-box');
+      const noLimeMsg = document.getElementById('no-lime-msg');
+      const limeResults = document.getElementById('lime-results');
+
+      // pH ≥ 7 → wapnowanie nie jest potrzebne
+      if (d.ph >= 7) {
+        limeBox.classList.add('no-lime');
+        noLimeMsg.classList.add('visible');
+        // „Po wapnowaniu” = bez zmian (nie wapnujemy)
+        document.getElementById('cac_other_after').innerText = d.other.toFixed(1);
+        document.getElementById('cac_exh_after').innerText = d.exh.toFixed(1);
+        document.getElementById('cac_tcec_after').innerText = d.tcec.toFixed(2);
+        document.getElementById('cac_camg_after').innerText = d.mg > 0 ? (d.ca / d.mg).toFixed(1) : '—';
+        document.getElementById('cac_sat_ca_after').innerText = d.satCa.toFixed(1);
+        document.getElementById('cac_sat_mg_after').innerText = d.satMg.toFixed(1);
+        document.getElementById('cac_sat_k_after').innerText = d.satK.toFixed(1);
+        document.getElementById('cac_sat_na_after').innerText = d.satNa.toFixed(1);
+
+        document.getElementById('lime_curr_sat').innerText = d.satCa.toFixed(1);
+        document.getElementById('lime_tgt_sat').innerText = '—';
+        document.getElementById('lime_deficit_meq').innerText = '0';
+        document.getElementById('lime_ca_increase').innerText = '0';
+        document.getElementById('lime_new_ca').innerText = d.ca.toFixed(0);
+        document.getElementById('lime_pure_vol').innerText = '0';
+        document.getElementById('lime_caco3_vol').innerText = '0';
+        document.getElementById('lime_woll_vol').innerText = '0';
+        document.getElementById('lime_ca_vol').innerText = '0';
+        document.getElementById('lime_pure_l').innerText = '0';
+        document.getElementById('lime_caco3_l').innerText = '0';
+        document.getElementById('lime_woll_l').innerText = '0';
+        return;
+      }
+
+      // pH < 7 → normalne liczenie dawek
+      limeBox.classList.remove('no-lime');
+      noLimeMsg.classList.remove('visible');
+
+      const targetPh = getTargetPh(targetSat);
+      const newExH = getExH(targetPh);
+      const newOther = getOtherBases(targetPh);
+      const meqOthers = d.meqMg + d.meqK + d.meqNa;
+      let deficitMeq = 0;
+      for (let i = 0; i < 10; i++) {
+        const newMeqCa = d.meqCa + deficitMeq;
+        const newSum = newMeqCa + meqOthers;
+        const newDenom = 100 - (newOther + newExH);
+        const newTcec = newDenom > 0 ? (newSum * 100) / newDenom : newSum;
+        const needed = newTcec * (targetSat / 100);
+        deficitMeq = Math.max(0, needed - d.meqCa);
+      }
+      const newMeqCa = d.meqCa + deficitMeq;
+      const newSum = newMeqCa + meqOthers;
+      const newDenom = 100 - (newOther + newExH);
+      const newTcec = newDenom > 0 ? (newSum * 100) / newDenom : newSum;
+      const newSatCa = newTcec > 0 ? (newMeqCa / newTcec) * 100 : 0;
+      const newSatMg = newTcec > 0 ? (d.meqMg / newTcec) * 100 : 0;
+      const newSatK = newTcec > 0 ? (d.meqK / newTcec) * 100 : 0;
+      const newSatNa = newTcec > 0 ? (d.meqNa / newTcec) * 100 : 0;
+      const caIncrease = deficitMeq * 200;
+      const newCa = d.ca + caIncrease;
+      const newCaMg = d.mg > 0 ? (newCa / d.mg) : 0;
+
+      document.getElementById('cac_other_after').innerText = newOther.toFixed(1);
+      document.getElementById('cac_exh_after').innerText = newExH.toFixed(1);
+      document.getElementById('cac_tcec_after').innerText = newTcec.toFixed(2);
+      document.getElementById('cac_camg_after').innerText = newCaMg > 0 ? newCaMg.toFixed(1) : '—';
+      document.getElementById('cac_sat_ca_after').innerText = newSatCa.toFixed(1);
+      document.getElementById('cac_sat_mg_after').innerText = newSatMg.toFixed(1);
+      document.getElementById('cac_sat_k_after').innerText = newSatK.toFixed(1);
+      document.getElementById('cac_sat_na_after').innerText = newSatNa.toFixed(1);
+
+      const pure_g_l = deficitMeq * 0.5 * bd;
+      const caco3_g_l = pure_g_l * (100 / cce);
+      const pureCa_g_l = pure_g_l * 0.4;
+      let woll_g_l = 0;
+      if (wollCa > 0) woll_g_l = (pureCa_g_l / (wollCa / 100)) * (100 / wollCce);
+
+      document.getElementById('lime_curr_sat').innerText = d.satCa.toFixed(1);
+      document.getElementById('lime_tgt_sat').innerText = targetSat;
+      document.getElementById('lime_deficit_meq').innerText = deficitMeq.toFixed(2);
+      document.getElementById('lime_ca_increase').innerText = caIncrease.toFixed(0);
+      document.getElementById('lime_new_ca').innerText = newCa.toFixed(0);
+      document.getElementById('lime_pure_vol').innerText = (pure_g_l * volumeL).toFixed(1);
+      document.getElementById('lime_caco3_vol').innerText = (caco3_g_l * volumeL).toFixed(1);
+      document.getElementById('lime_woll_vol').innerText = (woll_g_l * volumeL).toFixed(1);
+      document.getElementById('lime_ca_vol').innerText = (pureCa_g_l * volumeL).toFixed(1);
+      document.getElementById('lime_pure_l').innerText = pure_g_l.toFixed(2);
+      document.getElementById('lime_caco3_l').innerText = caco3_g_l.toFixed(2);
+      document.getElementById('lime_woll_l').innerText = woll_g_l.toFixed(2);
+    }
+    window.calculateLime = calculateLime;
+
+    window.onload = function() {
+      calculatePPM();
+      calculateCAC();
+    };
+  </script>
+</body>
+</html>
