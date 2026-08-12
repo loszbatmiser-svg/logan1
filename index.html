@@ -1201,19 +1201,60 @@
     // Automatyczna dawka dotyczy WYŁĄCZNIE mikroelementów (nie makroelementów N/P/K/S/Ca/Mg/Na).
     const MICRO_TARGET_ELEMENTS = ['B', 'Fe', 'Mn', 'Cu', 'Zn', 'Co', 'Mo', 'Se', 'Si'];
 
+    function formatRatioBounds(r) {
+      return r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`;
+    }
+
     // Dla pierwiastków obecnych w kontroli proporcji (Fe, Mn, Cu, Zn, B) liczy, jaką wartość
     // narzucałaby sama proporcja (przy obecnej wartości powiązanego pierwiastka), biorąc granicę
     // proporcji dającą NAJWYŻSZY wynik dla danego pierwiastka (spójnie z "bazuj na maksimum").
+    // Zwraca obiekty z uzasadnieniem, żeby krok 2 mógł pokazać, DLACZEGO dana ilość jest potrzebna.
     function getRatioDerivedTargets(el, total) {
       const candidates = [];
       TARGET_RATIOS.forEach(r => {
         if (r.a === el) {
-          candidates.push(r.max * (total[r.b] || 0));
+          // Pierwiastek jest licznikiem proporcji, np. Fe w Fe:Mn → Fe = krotność × Mn.
+          const otherVal = total[r.b] || 0;
+          const value = r.max * otherVal;
+          candidates.push({
+            value, ratio: r, otherEl: r.b, otherVal,
+            explain: `${r.label} ma wynosić ${formatRatioBounds(r)} → przy ${r.b} = ${otherVal.toFixed(1)} ppm, ${el} powinno sięgać ${value.toFixed(1)} ppm (${otherVal.toFixed(1)} × ${r.max})`
+          });
         } else if (r.b === el && r.min > 0) {
-          candidates.push((total[r.a] || 0) / r.min);
+          // Pierwiastek jest mianownikiem, np. Fe w K:Fe → Fe = K ÷ krotność.
+          const otherVal = total[r.a] || 0;
+          const value = otherVal / r.min;
+          candidates.push({
+            value, ratio: r, otherEl: r.a, otherVal,
+            explain: `${r.label} ma wynosić ${formatRatioBounds(r)} → przy ${r.a} = ${otherVal.toFixed(1)} ppm, ${el} powinno sięgać ${value.toFixed(1)} ppm (${otherVal.toFixed(1)} ÷ ${r.min})`
+          });
         }
       });
       return candidates;
+    }
+
+    // Wiążące (najwyższe) wymaganie proporcji dla danego pierwiastka + pozostałe, dla kontekstu.
+    function getBindingRatioTarget(el, total) {
+      const cands = getRatioDerivedTargets(el, total);
+      if (!cands.length) return null;
+      const binding = cands.reduce((best, c) => (c.value > best.value ? c : best), cands[0]);
+      const others = cands.filter(c => c !== binding);
+      return { value: binding.value, explain: binding.explain, others };
+    }
+
+    // Które produkty z listy już dostarczają dany pierwiastek (do pokazania „pokryte przez…”).
+    function getCartCoverageFor(el) {
+      const soilKg = getSoilMassKg();
+      const out = [];
+      if (soilKg <= 0) return out;
+      window._amendmentCart.forEach((item, i) => {
+        const p = getAmendment(item.productId);
+        if (!p || !p.pct[el]) return;
+        const g = getCartItemGrams(item, i);
+        if (g <= 0.0001) return;
+        out.push({ name: p.name, grams: g, ppm: (g * p.pct[el] * 1000) / soilKg });
+      });
+      return out;
     }
 
     // Dawkowanie liczone DWUETAPOWO i w tej kolejności:
@@ -1232,7 +1273,7 @@
       const ratioRows = [];
       if (soilKg <= 0) return { targetRows, ratioRows };
 
-      function buildProductRows(el, fromLevel, toLevel, step, sink) {
+      function buildProductRows(el, fromLevel, toLevel, step, sink, extra) {
         AMENDMENTS.forEach(p => {
           const pct = p.pct[el];
           if (!pct) return;
@@ -1242,7 +1283,7 @@
             if (oe === el) return;
             others[oe] = (gramsNeeded * p.pct[oe] * 1000) / soilKg;
           });
-          sink.push({ el, step, status: 'need', product: p, fromLevel, toLevel, gramsNeeded, others });
+          sink.push(Object.assign({ el, step, status: 'need', product: p, fromLevel, toLevel, gramsNeeded, others }, extra || {}));
         });
       }
 
@@ -1255,20 +1296,21 @@
 
         // KROK 1: do targetu Mehlich 3.
         if (current >= baseTarget) {
-          targetRows.push({ el, step: 'target', status: 'ok', current, toLevel: baseTarget });
+          targetRows.push({ el, step: 'target', status: 'ok', current, toLevel: baseTarget, coverage: getCartCoverageFor(el) });
         } else {
           buildProductRows(el, current, baseTarget, 'target', targetRows);
         }
 
-        // KROK 2: dopłata wg proporcji, licząc od poziomu po osiągnięciu targetu.
-        const ratioTargets = getRatioDerivedTargets(el, total);
-        if (!ratioTargets.length) return;
-        const ratioTarget = Math.max(...ratioTargets);
+        // KROK 2: dopłata wg proporcji (wg tabeli „Kontrola proporcji”), licząc od poziomu
+        // PO osiągnięciu targetu z kroku 1 — czyli tylko brakujący balans, nie cała dawka od nowa.
+        const binding = getBindingRatioTarget(el, total);
+        if (!binding) return;
         const afterTarget = Math.max(current, baseTarget);
-        if (ratioTarget <= afterTarget + 0.05) {
-          ratioRows.push({ el, step: 'ratio', status: 'ok', current: afterTarget, toLevel: ratioTarget });
+        const extra = { explain: binding.explain, otherExplains: binding.others.map(o => o.explain) };
+        if (binding.value <= afterTarget + 0.05) {
+          ratioRows.push(Object.assign({ el, step: 'ratio', status: 'ok', current: afterTarget, toLevel: binding.value, coverage: getCartCoverageFor(el) }, extra));
         } else {
-          buildProductRows(el, afterTarget, ratioTarget, 'ratio', ratioRows);
+          buildProductRows(el, afterTarget, binding.value, 'ratio', ratioRows, extra);
         }
       });
       return { targetRows, ratioRows };
@@ -1288,26 +1330,42 @@
       const flat = targetRows.concat(ratioRows);
       window._autoDoseRows = flat;
 
-      function renderBlock(rows, offset, emptyMsg) {
+      function coverageText(r) {
+        if (!r.coverage || !r.coverage.length) return '';
+        const parts = r.coverage.map(c => `${c.name} (${c.grams.toFixed(2)} g → +${c.ppm.toFixed(1)} ppm)`);
+        return ` <span class="explain">— pokryte przez: ${parts.join(', ')}</span>`;
+      }
+
+      // withWhy = true → dodatkowa kolumna z uzasadnieniem z tabeli „Kontrola proporcji”.
+      function renderBlock(rows, offset, emptyMsg, withWhy) {
         if (!rows.length) return `<p class="note">${emptyMsg}</p>`;
-        let html = '<table><thead><tr><th>Pierwiastek</th><th>Produkt</th><th>Z ppm → do ppm</th>'
+        let html = '<table><thead><tr><th>Pierwiastek</th>'
+          + (withWhy ? '<th>Dlaczego — z kontroli proporcji</th>' : '')
+          + '<th>Produkt</th><th>Z ppm → do ppm</th>'
           + '<th>Dawka (g)</th><th>Dostarczy też</th><th></th></tr></thead><tbody>';
         let lastEl = null;
         rows.forEach((r, i) => {
           const idx = offset + i;
+          const whyCell = withWhy
+            ? `<td>${lastEl === r.el ? '' : `<span class="explain">${r.explain || '—'}</span>`
+                + ((lastEl !== r.el && r.otherExplains && r.otherExplains.length)
+                    ? `<br><span class="explain" style="opacity:0.75;">pozostałe: ${r.otherExplains.join('; ')}</span>` : '')}</td>`
+            : '';
           if (r.status === 'ok') {
             const excess = r.current - r.toLevel;
             const statusText = excess > 0.05
               ? `nadmiar +${excess.toFixed(1)} ppm ponad ${r.toLevel.toFixed(1)} ppm — nic nie trzeba dodawać`
-              : `w normie (${r.toLevel.toFixed(1)} ppm) — nic nie trzeba dodawać`;
+              : `balans zachowany (${r.toLevel.toFixed(1)} ppm) — nic nie trzeba dodawać`;
             html += `<tr class="${elementRowClass(r.el)}"><td>${ELEMENT_LABELS[r.el] || r.el}</td>`
-              + `<td colspan="4" style="color:#276749; font-weight:600;">${statusText}</td><td></td></tr>`;
+              + (withWhy ? `<td><span class="explain">${r.explain || '—'}</span></td>` : '')
+              + `<td colspan="4" style="color:#276749; font-weight:600;">${statusText}${coverageText(r)}</td><td></td></tr>`;
             lastEl = r.el;
             return;
           }
           const othersText = Object.keys(r.others).map(oe => `${ELEMENT_LABELS[oe] || oe} +${r.others[oe].toFixed(1)} ppm`).join(', ') || '—';
           html += `<tr class="${elementRowClass(r.el)}">`
             + `<td>${lastEl === r.el ? '' : ELEMENT_LABELS[r.el] || r.el}</td>`
+            + whyCell
             + `<td>${r.product.name}</td>`
             + `<td>${r.fromLevel.toFixed(1)} → ${r.toLevel.toFixed(1)} <span class="explain">(+${(r.toLevel - r.fromLevel).toFixed(1)} ppm)</span></td>`
             + `<td>${r.gramsNeeded.toFixed(2)} g</td>`
@@ -1319,11 +1377,11 @@
       }
 
       let html = '<h4 style="margin:6px 0 4px; color:#2b6cb0;">Krok 1 — do targetu Mehlich 3</h4>';
-      html += renderBlock(targetRows, 0, 'Brak mikroelementów do uzupełnienia w tym kroku.');
+      html += renderBlock(targetRows, 0, 'Brak mikroelementów do uzupełnienia w tym kroku.', false);
       html += '<h4 style="margin:18px 0 4px; color:#2b6cb0;">Krok 2 — dopłata wg kontroli proporcji</h4>';
-      html += '<p class="note" style="margin-top:0;">Liczone od poziomu <strong>po</strong> osiągnięciu targetu z kroku 1 — pokazana jest wyłącznie nadwyżka ponad target, a nie cała dawka od nowa.</p>';
-      html += renderBlock(ratioRows, targetRows.length, 'Żadna proporcja nie wymaga dopłaty ponad target.');
-      html += '<p class="note">Kolejność jest celowa: najpierw dochodzisz do targetu Mehlich 3 dla wybranego etapu, dopiero potem dokładasz to, czego dodatkowo wymagają proporcje (Fe, Mn, Cu, Zn, B). Wszystko przelicza się na żywo przy zmianie etapu, masy gleby i zawartości listy.</p>';
+      html += '<p class="note" style="margin-top:0;">Po zbalansowaniu wg targetu: ile ppm danego pierwiastka trzeba <strong>jeszcze</strong> dodać, żeby proporcje z tabeli „Kontrola proporcji” się zgadzały. Kolumna „Dlaczego” pokazuje, która proporcja tego wymaga i skąd wynika liczba. Liczone od poziomu <strong>po</strong> kroku 1 — to sama brakująca nadwyżka, a nie cała dawka od nowa.</p>';
+      html += renderBlock(ratioRows, targetRows.length, 'Żadna proporcja nie wymaga dopłaty ponad target.', true);
+      html += '<p class="note">Kolejność jest celowa: najpierw dochodzisz do targetu Mehlich 3 dla wybranego etapu, dopiero potem dokładasz to, czego dodatkowo wymagają proporcje (Fe, Mn, Cu, Zn, B). Po dodaniu produktu do listy jego pierwiastek znika z propozycji (zostaje wiersz statusu z informacją, co go pokryło). Wszystko przelicza się na żywo przy zmianie etapu, masy gleby i zawartości listy.</p>';
       box.innerHTML = html;
     }
 
@@ -1367,8 +1425,8 @@
         if (item.step === 'ratio') {
           // Krok 2: tylko nadwyżka ponad target Mehlich 3 wymagana przez proporcje.
           const afterTarget = Math.max(current, baseTarget);
-          const ratioTargets = getRatioDerivedTargets(item.targetElement, totalBefore);
-          const ratioTarget = ratioTargets.length ? Math.max(...ratioTargets) : afterTarget;
+          const binding = getBindingRatioTarget(item.targetElement, totalBefore);
+          const ratioTarget = binding ? binding.value : afterTarget;
           delta = Math.max(0, ratioTarget - afterTarget);
         } else {
           // Krok 1: dojście do targetu Mehlich 3 wybranego etapu.
