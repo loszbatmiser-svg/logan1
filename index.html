@@ -460,11 +460,11 @@
         <div class="input-group">
           <div>
             <label>Produkt</label>
-            <select id="am_product_select" onchange="renderAmendmentPreview()"></select>
+            <select id="am_product_select" onchange="onProductOrTargetElementChange()"></select>
           </div>
           <div>
             <label>Tryb dawkowania</label>
-            <select id="am_mode" onchange="renderAmendmentPreview()">
+            <select id="am_mode" onchange="onProductOrTargetElementChange()">
               <option value="ppm">Cel: podnieś pierwiastek o ppm</option>
               <option value="grams">Podana dawka (g)</option>
             </select>
@@ -473,10 +473,10 @@
         <div class="input-group" id="am_mode_ppm_inputs">
           <div>
             <label>Pierwiastek docelowy</label>
-            <select id="am_target_element" onchange="renderAmendmentPreview()"></select>
+            <select id="am_target_element" onchange="onProductOrTargetElementChange()"></select>
           </div>
           <div>
-            <label>Podnieś o (ppm)</label>
+            <label>Podnieś o (ppm) — liczone automatycznie do celu etapu, można nadpisać</label>
             <input type="number" id="am_target_ppm" value="50" step="1" min="0" oninput="renderAmendmentPreview()">
           </div>
         </div>
@@ -486,7 +486,7 @@
             <input type="number" id="am_manual_grams" value="10" step="0.1" min="0" oninput="renderAmendmentPreview()">
           </div>
         </div>
-        <button class="col-btn" style="margin-bottom:10px;" onclick="fillTargetDeficit()">Uzupełnij do celu (etap: <span id="am_stage_label_btn">Kwitnienie</span>)</button>
+        <button class="col-btn" style="margin-bottom:10px;" onclick="fillTargetDeficit()">Przelicz ponownie do celu (etap: <span id="am_stage_label_btn">Kwitnienie</span>)</button>
 
         <div id="am_preview" class="lime-box" style="margin-top:14px;"></div>
         <button class="col-btn selected" style="margin-top:10px;" onclick="addAmendmentToCart()">+ Dodaj do listy</button>
@@ -866,7 +866,7 @@
       B: 'Bor (B)', Mn: 'Mangan (Mn)', Cu: 'Miedź (Cu)', Fe: 'Żelazo (Fe)',
       Zn: 'Cynk (Zn)', Mo: 'Molibden (Mo)', Co: 'Kobalt (Co)', Se: 'Selen (Se)', Al: 'Glin (Al)', Si: 'Krzem (Si)'
     };
-    const MACRO_ELEMENTS = ['N', 'P', 'K', 'S', 'Ca', 'Mg'];
+    const MACRO_ELEMENTS = ['Ca', 'Mg', 'K', 'N', 'P', 'S'];
 
     const AMENDMENTS = [
       { id: 'fishbone', name: 'Kość rybia (Fish bone)', group: 'Organiczne', pct: { N: 0.04, P: 0.09, Ca: 0.19, Mg: 0.003 } },
@@ -890,11 +890,11 @@
       { id: 'ksulfate', name: 'Siarczan potasu (K Sulfate)', group: 'Mineralne', pct: { K: 0.42, S: 0.175 }, cupG: 140 },
       { id: 'sulfur', name: 'Siarka (Sulfur)', group: 'Mineralne', pct: { S: 0.80 } },
       { id: 'borax', name: 'Boraks (Borax)', group: 'Mikroelementy', pct: { B: 0.09 } },
-      { id: 'mn', name: 'Siarczan manganu (Mn)', group: 'Mikroelementy', pct: { Mn: 0.32 } },
-      { id: 'cu', name: 'Siarczan miedzi (Cu)', group: 'Mikroelementy', pct: { Cu: 0.25 } },
+      { id: 'mn', name: 'Siarczan manganu (Mn)', group: 'Mikroelementy', pct: { Mn: 0.32, S: 0.19 } },
+      { id: 'cu', name: 'Siarczan miedzi (Cu)', group: 'Mikroelementy', pct: { Cu: 0.25, S: 0.13 } },
       { id: 'fe_chel', name: 'Żelazo chelatowane 6%', group: 'Mikroelementy', pct: { Fe: 0.06 } },
-      { id: 'zn', name: 'Siarczan cynku (Zn)', group: 'Mikroelementy', pct: { Zn: 0.22 } },
-      { id: 'fe2', name: 'Żelazo Fe²⁺', group: 'Mikroelementy', pct: { Fe: 0.20 } },
+      { id: 'zn', name: 'Siarczan cynku (Zn)', group: 'Mikroelementy', pct: { Zn: 0.22, S: 0.11 } },
+      { id: 'fe2', name: 'Żelazo Fe²⁺ (siarczan żelaza)', group: 'Mikroelementy', pct: { Fe: 0.20, S: 0.11 } },
       { id: 'fe3', name: 'Żelazo Fe³⁺', group: 'Mikroelementy', pct: { Fe: 0.30 } },
       { id: 'mo', name: 'Molibden (Mo)', group: 'Mikroelementy', pct: { Mo: 0.39 } },
       { id: 'co', name: 'Kobalt (Co)', group: 'Mikroelementy', pct: { Co: 0.25 } },
@@ -1078,14 +1078,36 @@
         + (product.cupG ? ` (≈ ${((result.grams / product.cupG) * 0.5).toFixed(2)} × 1/2 szklanki)` : '')
         + '</p>';
       html += '<table><thead><tr><th>Pierwiastek</th><th>Dostarczone ppm</th></tr></thead><tbody>';
-      Object.keys(result.delivered).forEach(el => {
-        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>+${result.delivered[el].toFixed(2)} ppm</td></tr>`;
+      sortElements(Object.keys(result.delivered)).forEach(el => {
+        html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>+${result.delivered[el].toFixed(2)} ppm</td></tr>`;
       });
       html += '</tbody></table>';
       if (product.note) html += `<p class="explain">${product.note}</p>`;
       box.innerHTML = html;
     }
     window.renderAmendmentPreview = renderAmendmentPreview;
+
+    // Przy zmianie produktu / pierwiastka docelowego / trybu: od razu przelicz ppm potrzebne
+    // do osiągnięcia celu wybranego etapu (jeśli tryb = "cel ppm"), bez konieczności klikania przycisku.
+    function onProductOrTargetElementChange() {
+      populateTargetElementSelect();
+      autoFillTargetPpm();
+      renderAmendmentPreview();
+    }
+    window.onProductOrTargetElementChange = onProductOrTargetElementChange;
+
+    function autoFillTargetPpm() {
+      const mode = document.getElementById('am_mode').value;
+      if (mode !== 'ppm') return;
+      const el = document.getElementById('am_target_element').value;
+      if (!el) return;
+      const target = getEffectiveTarget(window._targetStage, el);
+      if (target == null) return;
+      const { total } = getCurrentTotals();
+      const current = total[el] || 0;
+      const deficit = Math.max(0, target - current);
+      document.getElementById('am_target_ppm').value = deficit.toFixed(1);
+    }
 
     function addAmendmentToCart() {
       const productId = document.getElementById('am_product_select').value;
@@ -1097,6 +1119,9 @@
       if (!result) return;
       window._amendmentCart.push({ productId, grams: result.grams });
       renderCartAndSummary();
+      // Po dodaniu produktu przelicz od nowa brakujące ppm (koszyk się zmienił, deficyt też).
+      autoFillTargetPpm();
+      renderAmendmentPreview();
     }
     window.addAmendmentToCart = addAmendmentToCart;
 
@@ -1139,7 +1164,8 @@
       return totals;
     }
 
-    const ELEMENT_ORDER = ['N', 'P', 'K', 'S', 'Ca', 'Mg', 'Na', 'B', 'Fe', 'Mn', 'Cu', 'Zn', 'Al', 'Co', 'Mo', 'Se', 'Si'];
+    // Kolejność jak w "Punkt startowy gleby": najpierw kationy, potem aniony, potem mikroelementy.
+    const ELEMENT_ORDER = ['Ca', 'Mg', 'K', 'Na', 'N', 'P', 'S', 'B', 'Fe', 'Mn', 'Cu', 'Zn', 'Al', 'Co', 'Mo', 'Se', 'Si'];
 
     function getBaselineTotals() {
       return {
@@ -1213,6 +1239,8 @@
       if (stageLabelEl) stageLabelEl.textContent = MEHLICH3_STAGES[stage].label;
       renderTargetTable();
       renderTargetCompareTable();
+      autoFillTargetPpm();
+      renderAmendmentPreview();
     }
     window.setTargetStage = setTargetStage;
 
@@ -1282,15 +1310,8 @@
 
     // Wypełnia "Podnieś o (ppm)" różnicą do celu wybranego etapu dla aktualnie wybranego pierwiastka.
     function fillTargetDeficit() {
-      const el = document.getElementById('am_target_element').value;
-      if (!el) return;
-      const target = getEffectiveTarget(window._targetStage, el);
-      if (target == null) return;
-      const { total } = getCurrentTotals();
-      const current = total[el] || 0;
-      const deficit = Math.max(0, target - current);
       document.getElementById('am_mode').value = 'ppm';
-      document.getElementById('am_target_ppm').value = deficit.toFixed(1);
+      autoFillTargetPpm();
       renderAmendmentPreview();
     }
     window.fillTargetDeficit = fillTargetDeficit;
@@ -1344,8 +1365,9 @@
         document.getElementById('am_base_k').innerText = window._postLime.k.toFixed(0);
         document.getElementById('am_base_na').innerText = window._postLime.na.toFixed(0);
       }
-      renderAmendmentPreview();
       renderCartAndSummary();
+      autoFillTargetPpm();
+      renderAmendmentPreview();
     }
     window.renderAmendmentsAll = renderAmendmentsAll;
 
