@@ -1281,10 +1281,27 @@
       box.innerHTML = html;
     }
 
+    // Pozycje w koszyku pamiętają CEL (ppm do podniesienia dla danego pierwiastka), a nie zamrożone
+    // gramy — dzięki temu, gdy zmieni się objętość gleby lub gęstość nasypowa w zakładce CAC, dawka
+    // w gramach dla już dodanych produktów przelicza się sama, bez usuwania i dodawania ich od nowa.
+    // Tryb 'grams' (ręcznie podana dawka) zostaje jako stała liczba gramów — to świadomy wybór wagi.
+    function getCartItemGrams(item) {
+      if (item.mode === 'grams') return item.grams;
+      const product = getAmendment(item.productId);
+      const soilKg = getSoilMassKg();
+      if (!product || soilKg <= 0) return 0;
+      const pct = product.pct[item.targetElement];
+      if (!pct) return 0;
+      return (item.targetPpm * soilKg) / 1000 / pct;
+    }
+
     function autoAddToCart(idx) {
       const row = window._autoDoseRows && window._autoDoseRows[idx];
       if (!row) return;
-      window._amendmentCart.push({ productId: row.product.id, grams: row.gramsNeeded });
+      const { total } = getCurrentTotals();
+      const current = total[row.el] || 0;
+      const deltaPpm = Math.max(0, row.effectiveTarget - current);
+      window._amendmentCart.push({ productId: row.product.id, mode: 'ppm', targetElement: row.el, targetPpm: deltaPpm });
       renderCartAndSummary();
     }
     window.autoAddToCart = autoAddToCart;
@@ -1297,7 +1314,11 @@
       const manualGrams = parseFloat(document.getElementById('am_manual_grams').value) || 0;
       const result = computeAmendmentDose(productId, mode, targetElement, targetPpm, manualGrams);
       if (!result) return;
-      window._amendmentCart.push({ productId, grams: result.grams });
+      if (mode === 'ppm') {
+        window._amendmentCart.push({ productId, mode: 'ppm', targetElement, targetPpm });
+      } else {
+        window._amendmentCart.push({ productId, mode: 'grams', grams: manualGrams });
+      }
       renderCartAndSummary();
       // Po dodaniu produktu przelicz od nowa brakujące ppm (koszyk się zmienił, deficyt też).
       autoFillTargetPpm();
@@ -1316,10 +1337,14 @@
       if (!window._amendmentCart.length) {
         cartDiv.innerHTML = '<p class="note">Lista jest pusta — dodaj produkty powyżej.</p>';
       } else {
-        let html = '<table><thead><tr><th>Produkt</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Produkt</th><th>Podstawa dawki</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
         window._amendmentCart.forEach((item, idx) => {
           const product = getAmendment(item.productId);
-          html += `<tr><td>${product ? product.name : item.productId}</td><td>${item.grams.toFixed(2)} g</td>`
+          const grams = getCartItemGrams(item);
+          const basis = item.mode === 'grams'
+            ? 'stała dawka'
+            : `cel: +${item.targetPpm.toFixed(1)} ppm ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z masą gleby)`;
+          html += `<tr><td>${product ? product.name : item.productId}</td><td class="explain">${basis}</td><td>${grams.toFixed(2)} g</td>`
             + `<td><button class="col-btn" style="padding:5px 12px;" onclick="removeAmendmentFromCart(${idx})">Usuń</button></td></tr>`;
         });
         html += '</tbody></table>';
@@ -1336,8 +1361,9 @@
       window._amendmentCart.forEach(item => {
         const product = getAmendment(item.productId);
         if (!product) return;
+        const itemGrams = getCartItemGrams(item);
         Object.keys(product.pct).forEach(el => {
-          const grams = item.grams * product.pct[el];
+          const grams = itemGrams * product.pct[el];
           const ppm = (grams * 1000) / soilKg;
           totals[el] = (totals[el] || 0) + ppm;
         });
