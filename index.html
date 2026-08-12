@@ -1267,20 +1267,30 @@
       const stageKey = window._targetStage;
       const stage = MEHLICH3_STAGES[stageKey];
       const soilKg = getSoilMassKg();
-      let html = '<table><thead><tr><th>Pierwiastek</th><th>Aktualnie</th><th>Cel</th><th>Brakuje / Nadmiar</th><th>Brakuje (g)</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Aktualnie (ppm)</th><th>Cel (ppm)</th>'
+        + '<th>Cel (g w glebie)</th><th>Brakuje / Nadmiar (ppm)</th><th>Brakuje (g)</th></tr></thead><tbody>';
+      let sumTargetG = 0;
+      let sumMissingG = 0;
       ELEMENT_ORDER.forEach(el => {
         if (stage.targets[el] == null) return;
         const target = getEffectiveTarget(stageKey, el);
         const current = total[el] || 0;
         const diffPpm = target - current;
+        const targetG = soilKg > 0 ? (target * soilKg) / 1000 : null;
         const diffG = soilKg > 0 ? (diffPpm * soilKg) / 1000 : null;
+        if (targetG != null) sumTargetG += targetG;
+        if (diffG != null && diffG > 0) sumMissingG += diffG;
         const label = diffPpm > 0 ? `brakuje ${diffPpm.toFixed(1)}` : `nadmiar ${Math.abs(diffPpm).toFixed(1)}`;
         const color = diffPpm > 0 ? '#c53030' : '#276749';
         html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>${current.toFixed(1)}</td><td>${target}</td>`
+          + `<td>${targetG != null ? targetG.toFixed(2) + ' g' : '—'}</td>`
           + `<td style="color:${color}; font-weight:600;">${label} ppm</td>`
           + `<td>${diffG != null ? (diffPpm > 0 ? '+' : '') + diffG.toFixed(2) + ' g' : '—'}</td></tr>`;
       });
+      html += `<tr style="font-weight:700; background:#edf2f7;"><td colspan="3">SUMA (masa gleby: ${soilKg > 0 ? soilKg.toFixed(2) + ' kg' : '—'})</td>`
+        + `<td>${sumTargetG.toFixed(2)} g</td><td></td><td>${sumMissingG.toFixed(2)} g</td></tr>`;
       html += '</tbody></table>';
+      html += '<p class="note">„Cel (g w glebie)” = ile gramów pierwiastka odpowiada targetowi ppm w całej masie gleby (ppm ÷ 1000 × kg) — tak jak w Twoim arkuszu „Bulk – kg”. „Brakuje (g)” dodatkowo odejmuje to, co już jest w glebie.</p>';
       document.getElementById('am_target_compare_table').innerHTML = html;
     }
 
