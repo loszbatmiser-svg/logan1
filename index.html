@@ -18,8 +18,9 @@
     .section h3 { margin: 0 0 12px 0; font-size: 1.05rem; color: #2b6cb0; }
     .input-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin-bottom: 12px; }
     label { font-weight: 600; font-size: 0.84rem; display: block; margin-bottom: 5px; color: #4a5568; }
-    input { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; }
-    input:focus { outline: none; border-color: #3182ce; box-shadow: 0 0 0 3px rgba(49,130,206,0.15); }
+    input, select { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; background: #fff; }
+    input:focus, select:focus { outline: none; border-color: #3182ce; box-shadow: 0 0 0 3px rgba(49,130,206,0.15); }
+    input:disabled { background: #edf2f7; color: #718096; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
     th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
     th { background: #2d3748; color: #fff; font-weight: 600; }
@@ -58,8 +59,9 @@
     <p class="subtitle">Roztwór wodny + analiza gleby (Logan Labs / Albrecht)</p>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('ppm')">PPM (roztwór)</button>
-      <button class="tab-btn" onclick="switchTab('cac')">CAC / Gleba</button>
+      <button class="tab-btn active" data-tab="ppm" onclick="switchTab('ppm')">PPM (roztwór)</button>
+      <button class="tab-btn" data-tab="cac" onclick="switchTab('cac')">CAC / Gleba</button>
+      <button class="tab-btn" data-tab="nawoz" onclick="switchTab('nawoz')">Nawożenie gleby</button>
     </div>
 
     <!-- TAB PPM -->
@@ -324,6 +326,110 @@
               <tr><td>Wolastenit</td><td><span id="lime_woll_l">—</span> g/l</td></tr>
             </table>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB NAWOŻENIE GLEBY -->
+    <div id="tab-nawoz" class="tab-content">
+      <div class="section">
+        <h2>1. Punkt startowy gleby (po wapnowaniu)</h2>
+        <p class="note">
+          Wapń, magnez, potas i sód są pobierane automatycznie z zakładki „CAC / Gleba” (wynik „Po wapnowaniu”).
+          Objętość gleby i gęstość nasypowa też stamtąd pochodzą — zmień je w zakładce CAC/Gleba, jeśli trzeba.
+        </p>
+        <table>
+          <thead><tr><th>Pierwiastek</th><th>Wartość startowa</th></tr></thead>
+          <tbody>
+            <tr><td>Wapń (Ca) — po wapnowaniu</td><td><span id="am_base_ca" class="badge highlight">—</span> ppm</td></tr>
+            <tr><td>Magnez (Mg)</td><td><span id="am_base_mg" class="badge highlight">—</span> ppm</td></tr>
+            <tr><td>Potas (K)</td><td><span id="am_base_k" class="badge highlight">—</span> ppm</td></tr>
+            <tr><td>Sód (Na)</td><td><span id="am_base_na" class="badge highlight">—</span> ppm</td></tr>
+            <tr>
+              <td>Azot (N) — opcjonalnie, jeśli znasz wynik</td>
+              <td><input type="number" id="am_base_n" value="0" step="1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Fosfor (P) — opcjonalnie</td>
+              <td><input type="number" id="am_base_p" value="0" step="1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Siarka (S) — opcjonalnie</td>
+              <td><input type="number" id="am_base_s" value="0" step="1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="input-group" style="margin-top:12px;">
+          <div>
+            <label>Objętość gleby (l) — z zakładki CAC</label>
+            <input type="text" id="am_volume_display" value="—" disabled>
+          </div>
+          <div>
+            <label>Gęstość nasypowa (g/cm³) — z zakładki CAC</label>
+            <input type="text" id="am_bd_display" value="—" disabled>
+          </div>
+          <div>
+            <label>Masa gleby (kg)</label>
+            <input type="text" id="am_mass_display" value="—" disabled>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>2. Baza półproduktów</h2>
+        <p class="note">Zawartość pierwiastków w procentach (na podstawie Twojej tabeli). Wybierz produkt w sekcji 3, żeby dobrać dawkę.</p>
+        <div id="am_products_table"></div>
+      </div>
+
+      <div class="section">
+        <h2>3. Dodaj produkt do dawki</h2>
+        <div class="input-group">
+          <div>
+            <label>Produkt</label>
+            <select id="am_product_select" onchange="renderAmendmentPreview()"></select>
+          </div>
+          <div>
+            <label>Tryb dawkowania</label>
+            <select id="am_mode" onchange="renderAmendmentPreview()">
+              <option value="ppm">Cel: podnieś pierwiastek o ppm</option>
+              <option value="grams">Podana dawka (g)</option>
+            </select>
+          </div>
+        </div>
+        <div class="input-group" id="am_mode_ppm_inputs">
+          <div>
+            <label>Pierwiastek docelowy</label>
+            <select id="am_target_element" onchange="renderAmendmentPreview()"></select>
+          </div>
+          <div>
+            <label>Podnieś o (ppm)</label>
+            <input type="number" id="am_target_ppm" value="50" step="1" min="0" oninput="renderAmendmentPreview()">
+          </div>
+        </div>
+        <div class="input-group" id="am_mode_grams_inputs" style="display:none;">
+          <div>
+            <label>Dawka produktu (g)</label>
+            <input type="number" id="am_manual_grams" value="10" step="0.1" min="0" oninput="renderAmendmentPreview()">
+          </div>
+        </div>
+
+        <div id="am_preview" class="lime-box" style="margin-top:14px;"></div>
+        <button class="col-btn selected" style="margin-top:10px;" onclick="addAmendmentToCart()">+ Dodaj do listy</button>
+      </div>
+
+      <div class="section">
+        <h2>4. Lista dodanych produktów</h2>
+        <div id="am_cart_table"><p class="note">Lista jest pusta — dodaj produkty powyżej.</p></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="section">
+          <h3>Podsumowanie – finalny profil gleby</h3>
+          <div id="am_summary_table"></div>
+        </div>
+        <div class="section">
+          <h3>Nasycenie kationów – stan końcowy</h3>
+          <div id="am_saturation_table"></div>
         </div>
       </div>
     </div>
@@ -613,16 +719,316 @@
     }
     window.loadParsedColumn = loadParsedColumn;
 
+    // ===== TAB 3: NAWOŻENIE GLEBY (półprodukty → ppm) =====
+    const ELEMENT_LABELS = {
+      N: 'Azot (N)', P: 'Fosfor (P)', K: 'Potas (K)', S: 'Siarka (S)',
+      Ca: 'Wapń (Ca)', Mg: 'Magnez (Mg)', Na: 'Sód (Na)',
+      B: 'Bor (B)', Mn: 'Mangan (Mn)', Cu: 'Miedź (Cu)', Fe: 'Żelazo (Fe)',
+      Zn: 'Cynk (Zn)', Mo: 'Molibden (Mo)', Co: 'Kobalt (Co)', Se: 'Selen (Se)'
+    };
+    const MACRO_ELEMENTS = ['N', 'P', 'K', 'S', 'Ca', 'Mg'];
+
+    const AMENDMENTS = [
+      { id: 'fishbone', name: 'Kość rybia (Fish bone)', group: 'Organiczne', pct: { N: 0.04, P: 0.09, Ca: 0.19, Mg: 0.003 } },
+      { id: 'fishmeal', name: 'Mączka rybna (Fish meal)', group: 'Organiczne', pct: { N: 0.10, P: 0.02, S: 0.006, Ca: 0.23, Mg: 0.003 } },
+      { id: 'crabshell', name: 'Skorupy kraba (Crab shell)', group: 'Organiczne', pct: { S: 0.006 } },
+      { id: 'bonemeal', name: 'Mączka kostna (Bone meal)', group: 'Organiczne', pct: { N: 0.03, P: 0.066, Ca: 0.20, Mg: 0.004 } },
+      { id: 'aminos', name: 'Aminokwasy (Aminos)', group: 'Organiczne', pct: { N: 0.13 } },
+      { id: 'batguano_plagron', name: 'Guano nietoperzy Plagron', group: 'Organiczne', pct: { N: 0.03, P: 0.066, K: 0.033 }, cupG: 110 },
+      { id: 'batguano_guanokan', name: 'Guano nietoperzy Guanokan', group: 'Organiczne', pct: { N: 0.01, P: 0.026, Ca: 0.10 } },
+      { id: 'frass', name: 'Fras owadzi (Frass)', group: 'Organiczne', pct: { N: 0.04, P: 0.01, K: 0.02 } },
+      { id: 'alfalfa', name: 'Lucerna (Alfalfa)', group: 'Organiczne', pct: { N: 0.02, P: 0.01, K: 0.02 }, cupG: 60 },
+      { id: 'soybean', name: 'Mączka sojowa (Soybean meal)', group: 'Organiczne', pct: { N: 0.07, P: 0.02, K: 0.01 }, cupG: 58 },
+      { id: 'cap1', name: 'Fosforan wapnia I', group: 'Mineralne', pct: { P: 0.22, Ca: 0.16 } },
+      { id: 'cap2', name: 'Fosforan wapnia II', group: 'Mineralne', pct: { P: 0.18, Ca: 0.23 } },
+      { id: 'cap3', name: 'Fosforan wapnia III', group: 'Mineralne', pct: { P: 0.20, Ca: 0.38 } },
+      { id: 'wollastonite', name: 'Wollastonit', group: 'Mineralne', pct: { Ca: 0.34 }, note: 'Zawiera też ok. 24% Si (nieuwzględnione w bilansie ppm).' },
+      { id: 'aglime', name: 'Wapno rolnicze CaCO₃ (Ag Lime)', group: 'Mineralne', pct: { Ca: 0.40, Mg: 0.03 }, note: 'Wg tabeli Mg 1–5%, do obliczeń przyjęto 3%.' },
+      { id: 'dolomite', name: 'Dolomit (Dolomite Lime)', group: 'Mineralne', pct: { Ca: 0.22, Mg: 0.13 } },
+      { id: 'gypsum', name: 'Gips (Gypsum)', group: 'Mineralne', pct: { S: 0.16, Ca: 0.22 }, cupG: 100 },
+      { id: 'epsom', name: 'Sól gorzka (Epsom Salt)', group: 'Mineralne', pct: { S: 0.14, Mg: 0.10 } },
+      { id: 'ksulfate', name: 'Siarczan potasu (K Sulfate)', group: 'Mineralne', pct: { K: 0.42, S: 0.175 }, cupG: 140 },
+      { id: 'sulfur', name: 'Siarka (Sulfur)', group: 'Mineralne', pct: { S: 0.80 } },
+      { id: 'borax', name: 'Boraks (Borax)', group: 'Mikroelementy', pct: { B: 0.09 } },
+      { id: 'mn', name: 'Siarczan manganu (Mn)', group: 'Mikroelementy', pct: { Mn: 0.32 } },
+      { id: 'cu', name: 'Siarczan miedzi (Cu)', group: 'Mikroelementy', pct: { Cu: 0.25 } },
+      { id: 'fe_chel', name: 'Żelazo chelatowane 6%', group: 'Mikroelementy', pct: { Fe: 0.06 } },
+      { id: 'zn', name: 'Siarczan cynku (Zn)', group: 'Mikroelementy', pct: { Zn: 0.22 } },
+      { id: 'fe2', name: 'Żelazo Fe²⁺', group: 'Mikroelementy', pct: { Fe: 0.20 } },
+      { id: 'fe3', name: 'Żelazo Fe³⁺', group: 'Mikroelementy', pct: { Fe: 0.30 } },
+      { id: 'mo', name: 'Molibden (Mo)', group: 'Mikroelementy', pct: { Mo: 0.39 } },
+      { id: 'co', name: 'Kobalt (Co)', group: 'Mikroelementy', pct: { Co: 0.25 } },
+      { id: 'se', name: 'Selen (Se)', group: 'Mikroelementy', pct: { Se: 0.41 } },
+    ];
+
+    window._amendmentCart = [];
+
+    function getAmendment(id) {
+      return AMENDMENTS.find(a => a.id === id);
+    }
+
+    // Masa gleby (kg) = objętość (l) × gęstość nasypowa (g/cm³) — te same pola co w zakładce CAC.
+    function getSoilMassKg() {
+      const volumeL = parseFloat(document.getElementById('lime_volume_l').value) || 0;
+      const bd = parseFloat(document.getElementById('lime_bd').value) || 0;
+      return volumeL * bd;
+    }
+
+    function computeAmendmentDose(productId, mode, targetElement, targetPpm, manualGrams) {
+      const product = getAmendment(productId);
+      if (!product) return null;
+      const soilKg = getSoilMassKg();
+      if (soilKg <= 0) return null;
+
+      let grams;
+      if (mode === 'ppm') {
+        const pct = product.pct[targetElement];
+        if (!pct) return null;
+        const elementGrams = (targetPpm * soilKg) / 1000;
+        grams = elementGrams / pct;
+      } else {
+        grams = manualGrams;
+      }
+      if (!isFinite(grams) || grams < 0) return null;
+
+      const delivered = {};
+      Object.keys(product.pct).forEach(el => {
+        const elGrams = grams * product.pct[el];
+        delivered[el] = (elGrams * 1000) / soilKg;
+      });
+
+      return { grams, delivered, soilKg };
+    }
+
+    function renderProductsTable() {
+      const groups = {};
+      AMENDMENTS.forEach(a => {
+        if (!groups[a.group]) groups[a.group] = [];
+        groups[a.group].push(a);
+      });
+      let html = '';
+      Object.keys(groups).forEach(g => {
+        html += `<h3 style="margin-top:14px;">${g}</h3>`;
+        html += '<table><thead><tr><th>Produkt</th>' + MACRO_ELEMENTS.map(e => `<th>${e}</th>`).join('') + '<th>Inne</th><th>1/2 szklanki</th></tr></thead><tbody>';
+        groups[g].forEach(a => {
+          html += '<tr><td>' + a.name + '</td>';
+          MACRO_ELEMENTS.forEach(e => {
+            html += '<td>' + (a.pct[e] != null ? (a.pct[e] * 100).toFixed(1) + '%' : '—') + '</td>';
+          });
+          const others = Object.keys(a.pct).filter(e => !MACRO_ELEMENTS.includes(e)).map(e => `${e} ${(a.pct[e] * 100).toFixed(1)}%`).join(', ');
+          html += '<td>' + (others || '—') + '</td>';
+          html += '<td>' + (a.cupG ? a.cupG + ' g' : '—') + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+      });
+      document.getElementById('am_products_table').innerHTML = html;
+    }
+
+    function populateProductSelect() {
+      const sel = document.getElementById('am_product_select');
+      const groups = {};
+      AMENDMENTS.forEach(a => { if (!groups[a.group]) groups[a.group] = []; groups[a.group].push(a); });
+      let html = '';
+      Object.keys(groups).forEach(g => {
+        html += `<optgroup label="${g}">`;
+        groups[g].forEach(a => html += `<option value="${a.id}">${a.name}</option>`);
+        html += '</optgroup>';
+      });
+      sel.innerHTML = html;
+      populateTargetElementSelect();
+    }
+
+    function populateTargetElementSelect() {
+      const productId = document.getElementById('am_product_select').value;
+      const product = getAmendment(productId);
+      const sel = document.getElementById('am_target_element');
+      if (!product) { sel.innerHTML = ''; return; }
+      const prevVal = sel.value;
+      sel.innerHTML = Object.keys(product.pct).map(e => `<option value="${e}">${ELEMENT_LABELS[e] || e}</option>`).join('');
+      if (Object.keys(product.pct).includes(prevVal)) sel.value = prevVal;
+    }
+
+    function renderAmendmentPreview() {
+      populateTargetElementSelect();
+      const mode = document.getElementById('am_mode').value;
+      document.getElementById('am_mode_ppm_inputs').style.display = mode === 'ppm' ? '' : 'none';
+      document.getElementById('am_mode_grams_inputs').style.display = mode === 'grams' ? '' : 'none';
+
+      const productId = document.getElementById('am_product_select').value;
+      const product = getAmendment(productId);
+      const targetElement = document.getElementById('am_target_element').value;
+      const targetPpm = parseFloat(document.getElementById('am_target_ppm').value) || 0;
+      const manualGrams = parseFloat(document.getElementById('am_manual_grams').value) || 0;
+
+      const result = computeAmendmentDose(productId, mode, targetElement, targetPpm, manualGrams);
+      const box = document.getElementById('am_preview');
+      if (!result || !product) {
+        box.innerHTML = '<p class="note">Ustaw objętość gleby i gęstość nasypową w zakładce CAC/Gleba, wybierz produkt.</p>';
+        return;
+      }
+      let html = `<p class="big">Dawka: ${result.grams.toFixed(2)} g`
+        + (product.cupG ? ` (≈ ${((result.grams / product.cupG) * 0.5).toFixed(2)} × 1/2 szklanki)` : '')
+        + '</p>';
+      html += '<table><thead><tr><th>Pierwiastek</th><th>Dostarczone ppm</th></tr></thead><tbody>';
+      Object.keys(result.delivered).forEach(el => {
+        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>+${result.delivered[el].toFixed(2)} ppm</td></tr>`;
+      });
+      html += '</tbody></table>';
+      if (product.note) html += `<p class="explain">${product.note}</p>`;
+      box.innerHTML = html;
+    }
+    window.renderAmendmentPreview = renderAmendmentPreview;
+
+    function addAmendmentToCart() {
+      const productId = document.getElementById('am_product_select').value;
+      const mode = document.getElementById('am_mode').value;
+      const targetElement = document.getElementById('am_target_element').value;
+      const targetPpm = parseFloat(document.getElementById('am_target_ppm').value) || 0;
+      const manualGrams = parseFloat(document.getElementById('am_manual_grams').value) || 0;
+      const result = computeAmendmentDose(productId, mode, targetElement, targetPpm, manualGrams);
+      if (!result) return;
+      window._amendmentCart.push({ productId, grams: result.grams });
+      renderCartAndSummary();
+    }
+    window.addAmendmentToCart = addAmendmentToCart;
+
+    function removeAmendmentFromCart(idx) {
+      window._amendmentCart.splice(idx, 1);
+      renderCartAndSummary();
+    }
+    window.removeAmendmentFromCart = removeAmendmentFromCart;
+
+    function renderCartAndSummary() {
+      const cartDiv = document.getElementById('am_cart_table');
+      if (!window._amendmentCart.length) {
+        cartDiv.innerHTML = '<p class="note">Lista jest pusta — dodaj produkty powyżej.</p>';
+      } else {
+        let html = '<table><thead><tr><th>Produkt</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
+        window._amendmentCart.forEach((item, idx) => {
+          const product = getAmendment(item.productId);
+          html += `<tr><td>${product ? product.name : item.productId}</td><td>${item.grams.toFixed(2)} g</td>`
+            + `<td><button class="col-btn" style="padding:5px 12px;" onclick="removeAmendmentFromCart(${idx})">Usuń</button></td></tr>`;
+        });
+        html += '</tbody></table>';
+        cartDiv.innerHTML = html;
+      }
+      renderSummary();
+    }
+
+    function getCartTotals() {
+      const soilKg = getSoilMassKg();
+      const totals = {};
+      if (soilKg <= 0) return totals;
+      window._amendmentCart.forEach(item => {
+        const product = getAmendment(item.productId);
+        if (!product) return;
+        Object.keys(product.pct).forEach(el => {
+          const grams = item.grams * product.pct[el];
+          const ppm = (grams * 1000) / soilKg;
+          totals[el] = (totals[el] || 0) + ppm;
+        });
+      });
+      return totals;
+    }
+
+    function renderSummary() {
+      const base = {
+        N: parseFloat(document.getElementById('am_base_n').value) || 0,
+        P: parseFloat(document.getElementById('am_base_p').value) || 0,
+        S: parseFloat(document.getElementById('am_base_s').value) || 0,
+        Ca: window._postLime ? window._postLime.ca : 0,
+        Mg: window._postLime ? window._postLime.mg : 0,
+        K: window._postLime ? window._postLime.k : 0,
+        Na: window._postLime ? window._postLime.na : 0,
+      };
+      const added = getCartTotals();
+      const order = ['N', 'P', 'K', 'S', 'Ca', 'Mg', 'Na'];
+      const allElements = Array.from(new Set([...Object.keys(base), ...Object.keys(added)]));
+      allElements.sort((a, b) => {
+        const ia = order.indexOf(a), ib = order.indexOf(b);
+        if (ia === -1 && ib === -1) return a.localeCompare(b);
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Start</th><th>Z odżywek</th><th>Razem</th></tr></thead><tbody>';
+      allElements.forEach(el => {
+        const b = base[el] || 0;
+        const a = added[el] || 0;
+        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>${b.toFixed(1)}</td><td>+${a.toFixed(1)}</td>`
+          + `<td><strong>${(b + a).toFixed(1)}</strong> ppm</td></tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('am_summary_table').innerHTML = html;
+
+      renderFinalSaturation(base, added);
+      updateSoilMassDisplay();
+    }
+
+    function renderFinalSaturation(base, added) {
+      const box = document.getElementById('am_saturation_table');
+      if (!window._postLime) {
+        box.innerHTML = '<p class="note">Najpierw policz wapnowanie w zakładce CAC/Gleba.</p>';
+        return;
+      }
+      const finalCa = (base.Ca || 0) + (added.Ca || 0);
+      const finalMg = (base.Mg || 0) + (added.Mg || 0);
+      const finalK = (base.K || 0) + (added.K || 0);
+      const finalNa = (base.Na || 0) + (added.Na || 0);
+
+      const meqCa = finalCa / 200;
+      const meqMg = finalMg / 120;
+      const meqK = finalK / 390;
+      const meqNa = finalNa / 230;
+      const sumMeq = meqCa + meqMg + meqK + meqNa;
+      const denom = 100 - (window._postLime.other + window._postLime.exh);
+      const tcec = denom > 0 ? (sumMeq * 100) / denom : sumMeq;
+      const satCa = tcec > 0 ? (meqCa / tcec) * 100 : 0;
+      const satMg = tcec > 0 ? (meqMg / tcec) * 100 : 0;
+      const satK = tcec > 0 ? (meqK / tcec) * 100 : 0;
+      const satNa = tcec > 0 ? (meqNa / tcec) * 100 : 0;
+
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Nasycenie %</th><th>Cel</th></tr></thead><tbody>';
+      html += `<tr><td>Ca</td><td><span class="badge highlight">${satCa.toFixed(1)}</span></td><td>68–75%</td></tr>`;
+      html += `<tr><td>Mg</td><td><span class="badge">${satMg.toFixed(1)}</span></td><td>10–15%</td></tr>`;
+      html += `<tr><td>K</td><td><span class="badge">${satK.toFixed(1)}</span></td><td>3–5%</td></tr>`;
+      html += `<tr><td>Na</td><td><span class="badge">${satNa.toFixed(1)}</span></td><td>&lt; 2%</td></tr>`;
+      html += `<tr><td><strong>TCEC</strong></td><td colspan="2"><span class="badge">${tcec.toFixed(2)}</span></td></tr>`;
+      html += '</tbody></table><p class="note">Przybliżenie: zakłada, że dodatkowe odżywki nie zmieniają już pH ani wymiennego wodoru ustalonego przy wapnowaniu.</p>';
+      box.innerHTML = html;
+    }
+
+    function updateSoilMassDisplay() {
+      const volumeL = parseFloat(document.getElementById('lime_volume_l').value) || 0;
+      const bd = parseFloat(document.getElementById('lime_bd').value) || 0;
+      document.getElementById('am_volume_display').value = volumeL;
+      document.getElementById('am_bd_display').value = bd;
+      document.getElementById('am_mass_display').value = (volumeL * bd).toFixed(2);
+    }
+
+    function renderAmendmentsAll() {
+      updateSoilMassDisplay();
+      if (window._postLime) {
+        document.getElementById('am_base_ca').innerText = window._postLime.ca.toFixed(0);
+        document.getElementById('am_base_mg').innerText = window._postLime.mg.toFixed(0);
+        document.getElementById('am_base_k').innerText = window._postLime.k.toFixed(0);
+        document.getElementById('am_base_na').innerText = window._postLime.na.toFixed(0);
+      }
+      renderAmendmentPreview();
+      renderCartAndSummary();
+    }
+    window.renderAmendmentsAll = renderAmendmentsAll;
+
     // ===== REST OF THE CALCULATOR (unchanged logic) =====
     function switchTab(tab) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       document.getElementById('tab-' + tab).classList.add('active');
-      // find the button that was clicked
-      const btns = document.querySelectorAll('.tab-btn');
-      btns.forEach(b => {
-        if (b.textContent.toLowerCase().includes(tab === 'ppm' ? 'ppm' : 'cac')) b.classList.add('active');
-      });
+      const btn = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
+      if (btn) btn.classList.add('active');
+      if (tab === 'nawoz') renderAmendmentsAll();
     }
     window.switchTab = switchTab;
 
@@ -813,6 +1219,9 @@
         document.getElementById('lime_pure_l').innerText = '0';
         document.getElementById('lime_caco3_l').innerText = '0';
         document.getElementById('lime_woll_l').innerText = '0';
+
+        window._postLime = { ca: d.ca, mg: d.mg, k: d.k, na: d.na, other: d.other, exh: d.exh, ph: d.ph };
+        if (typeof renderAmendmentsAll === 'function') renderAmendmentsAll();
         return;
       }
 
@@ -872,10 +1281,15 @@
       document.getElementById('lime_pure_l').innerText = pure_g_l.toFixed(2);
       document.getElementById('lime_caco3_l').innerText = caco3_g_l.toFixed(2);
       document.getElementById('lime_woll_l').innerText = woll_g_l.toFixed(2);
+
+      window._postLime = { ca: newCa, mg: d.mg, k: d.k, na: d.na, other: newOther, exh: newExH, ph: targetPh };
+      if (typeof renderAmendmentsAll === 'function') renderAmendmentsAll();
     }
     window.calculateLime = calculateLime;
 
     window.onload = function() {
+      populateProductSelect();
+      renderProductsTable();
       calculatePPM();
       calculateCAC();
     };
