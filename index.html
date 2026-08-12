@@ -37,6 +37,11 @@
     .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 0.82rem; color: #4a5568; }
     .legend span { display: inline-flex; align-items: center; gap: 6px; }
     .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+    /* Zwijane sekcje / pod-sekcje / grupy */
+    .collapsible-heading { cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+    .collapsible-heading .caret { display: inline-block; transition: transform 0.15s ease; font-size: 0.8em; flex-shrink: 0; }
+    .collapsible-heading.is-collapsed .caret { transform: rotate(-90deg); }
+    .collapsible-body.collapsed { display: none; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
     @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
     .note { font-size: 0.78rem; color: #718096; margin-top: 6px; line-height: 1.4; }
@@ -349,7 +354,8 @@
         <span><i style="background:#38a169;"></i> Mikroelementy (B, Fe, Mn, Cu, Zn, Al, Co, Mo, Se, Si)</span>
       </div>
       <div class="section">
-        <h2>1. Punkt startowy gleby (po wapnowaniu)</h2>
+        <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_1', this)"><span class="caret">▾</span> 1. Punkt startowy gleby (po wapnowaniu)</h2>
+        <div class="collapsible-body" id="am_cbody_1">
         <p class="note">
           Wapń, magnez, potas i sód są pobierane automatycznie z zakładki „CAC / Gleba” (wynik „Po wapnowaniu”).
           Objętość gleby i gęstość nasypowa też stamtąd pochodzą — zmień je w zakładce CAC/Gleba, jeśli trzeba.
@@ -431,10 +437,12 @@
             <input type="text" id="am_mass_display" value="—" disabled>
           </div>
         </div>
+        </div>
       </div>
 
       <div class="section">
-        <h2>2. Targety PPM (Mehlich 3)</h2>
+        <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_2', this)"><span class="caret">▾</span> 2. Targety PPM (Mehlich 3)</h2>
+        <div class="collapsible-body" id="am_cbody_2">
         <p class="note">Docelowe wartości wg Twojej tabeli, wg etapu wzrostu. Wybór etapu ustawia cele używane niżej (kolumna „Brakuje/Nadmiar”) oraz podpowiedź dawki w sekcji 4.</p>
         <div class="quick-btns">
           <button class="quick-btn" data-stage="soil" onclick="setTargetStage('soil')">Soil (baza)</button>
@@ -442,21 +450,29 @@
           <button class="quick-btn active" data-stage="flo" onclick="setTargetStage('flo')">Kwitnienie</button>
         </div>
         <div id="am_target_table"></div>
-        <h3 style="margin-top:18px;">Aktualnie vs cel</h3>
+        <h3 class="collapsible-heading" style="margin-top:18px;" onclick="toggleCollapse('am_cbody_2_compare', this)"><span class="caret">▾</span> Aktualnie vs cel</h3>
+        <div class="collapsible-body" id="am_cbody_2_compare">
         <div id="am_target_compare_table"></div>
-        <h3 style="margin-top:18px;">Kontrola proporcji</h3>
+        </div>
+        <h3 class="collapsible-heading" style="margin-top:18px;" onclick="toggleCollapse('am_cbody_2_ratio', this)"><span class="caret">▾</span> Kontrola proporcji</h3>
+        <div class="collapsible-body" id="am_cbody_2_ratio">
         <p class="note">Proporcje docelowe między pierwiastkami (z trzeciej kolumny Twojej tabeli) zestawione z proporcjami wynikającymi z aktualnego profilu gleby.</p>
         <div id="am_ratio_table"></div>
+        </div>
+        </div>
       </div>
 
       <div class="section">
-        <h2>3. Baza półproduktów</h2>
+        <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_3', this)"><span class="caret">▾</span> 3. Baza półproduktów</h2>
+        <div class="collapsible-body" id="am_cbody_3">
         <p class="note">Zawartość pierwiastków w procentach (na podstawie Twojej tabeli). Wybierz produkt w sekcji 4, żeby dobrać dawkę.</p>
         <div id="am_products_table"></div>
+        </div>
       </div>
 
       <div class="section">
-        <h2>4. Dodaj produkt do dawki</h2>
+        <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_4', this)"><span class="caret">▾</span> 4. Dodaj produkt do dawki</h2>
+        <div class="collapsible-body" id="am_cbody_4">
         <div class="input-group">
           <div>
             <label>Produkt</label>
@@ -490,21 +506,28 @@
 
         <div id="am_preview" class="lime-box" style="margin-top:14px;"></div>
         <button class="col-btn selected" style="margin-top:10px;" onclick="addAmendmentToCart()">+ Dodaj do listy</button>
+        </div>
       </div>
 
       <div class="section">
-        <h2>5. Lista dodanych produktów</h2>
+        <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_5', this)"><span class="caret">▾</span> 5. Lista dodanych produktów</h2>
+        <div class="collapsible-body" id="am_cbody_5">
         <div id="am_cart_table"><p class="note">Lista jest pusta — dodaj produkty powyżej.</p></div>
+        </div>
       </div>
 
       <div class="grid-2">
         <div class="section">
-          <h3>Podsumowanie – finalny profil gleby</h3>
+          <h3 class="collapsible-heading" onclick="toggleCollapse('am_cbody_summary', this)"><span class="caret">▾</span> Podsumowanie – finalny profil gleby</h3>
+          <div class="collapsible-body" id="am_cbody_summary">
           <div id="am_summary_table"></div>
+          </div>
         </div>
         <div class="section">
-          <h3>Nasycenie kationów – stan końcowy</h3>
+          <h3 class="collapsible-heading" onclick="toggleCollapse('am_cbody_saturation', this)"><span class="caret">▾</span> Nasycenie kationów – stan końcowy</h3>
+          <div class="collapsible-body" id="am_cbody_saturation">
           <div id="am_saturation_table"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -998,6 +1021,15 @@
       return { status: 'in', diff: 0 };
     }
 
+    // Zwijanie/rozwijanie sekcji, pod-sekcji i grup jednym kliknięciem w nagłówek.
+    function toggleCollapse(id, headerEl) {
+      const body = document.getElementById(id);
+      if (!body) return;
+      body.classList.toggle('collapsed');
+      if (headerEl) headerEl.classList.toggle('is-collapsed');
+    }
+    window.toggleCollapse = toggleCollapse;
+
     // Grupy pierwiastków do rozróżnienia kolorystycznego w tabelach.
     const CATION_ELEMENTS = ['Ca', 'Mg', 'K', 'Na'];
     const ANION_ELEMENTS = ['N', 'P', 'S'];
@@ -1051,8 +1083,10 @@
         groups[a.group].push(a);
       });
       let html = '';
-      Object.keys(groups).forEach(g => {
-        html += `<h3 style="margin-top:14px;">${g}</h3>`;
+      Object.keys(groups).forEach((g, idx) => {
+        const bodyId = 'am_prodgroup_' + idx;
+        html += `<h3 class="collapsible-heading" style="margin-top:14px;" onclick="toggleCollapse('${bodyId}', this)"><span class="caret">▾</span> ${g}</h3>`;
+        html += `<div class="collapsible-body" id="${bodyId}">`;
         html += '<table><thead><tr><th>Produkt</th>'
           + MACRO_ELEMENTS.map(e => `<th class="${elementRowClass(e)}-h">${e}</th>`).join('')
           + '<th>Inne</th><th>1/2 szklanki</th></tr></thead><tbody>';
@@ -1066,7 +1100,7 @@
           html += '<td>' + (a.cupG ? a.cupG + ' g' : '—') + '</td>';
           html += '</tr>';
         });
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
       });
       document.getElementById('am_products_table').innerHTML = html;
     }
@@ -1342,7 +1376,8 @@
 
     function renderRatioTable() {
       const { total } = getCurrentTotals();
-      let html = '<table><thead><tr><th>Proporcja</th><th>Cel</th><th>Aktualnie</th><th>Trzeba dodać, żeby trafić w cel</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Proporcja</th><th>Cel</th><th>Aktualnie</th>'
+        + '<th>Zmiana pierwszego pierwiastka</th><th>Dodaj drugiego pierwiastka</th></tr></thead><tbody>';
       TARGET_RATIOS.forEach(r => {
         const va = total[r.a] || 0;
         const vb = total[r.b] || 0;
@@ -1353,21 +1388,34 @@
           else if (current > r.max) { status = 'above'; refRatio = r.max; }
           else status = 'in';
         }
+        // Kolumna A: ile brakuje/nadmiaruje pierwszego pierwiastka (przy stałym drugim).
         const neededA = (status === 'below' || status === 'above') && vb > 0 ? refRatio * vb : null;
         const diffA = neededA != null ? neededA - va : null;
-        let diffLabel = '—';
-        let color = '#4a5568';
-        if (status === 'in') { diffLabel = 'w normie'; color = '#276749'; }
+        let labelA = '—', colorA = '#4a5568';
+        if (status === 'in') { labelA = 'w normie'; colorA = '#276749'; }
         else if (diffA != null) {
-          if (status === 'below') { diffLabel = `+${diffA.toFixed(3)} ppm ${r.a}`; color = '#c53030'; }
-          else { diffLabel = `nadmiar ${Math.abs(diffA).toFixed(3)} ppm ${r.a}`; color = '#dd6b20'; }
+          if (status === 'below') { labelA = `+${diffA.toFixed(1)} ppm ${r.a}`; colorA = '#c53030'; }
+          else { labelA = `nadmiar ${Math.abs(diffA).toFixed(1)} ppm ${r.a}`; colorA = '#dd6b20'; }
+        }
+        // Kolumna B: ile DODAĆ drugiego pierwiastka, żeby proporcja wróciła do normy — sensowne
+        // tylko przy nadmiarze pierwszego (dodanie B rozcieńcza za wysoki stosunek A:B).
+        // Przy niedomiarze A dodanie B tylko pogłębia problem, więc wtedy fix jest w kolumnie A.
+        let labelB = '—', colorB = '#4a5568';
+        if (status === 'above' && va > 0) {
+          const neededB = va / refRatio;
+          const addB = neededB - vb;
+          labelB = `+${addB.toFixed(1)} ppm ${r.b}`;
+          colorB = '#c53030';
+        } else if (status === 'in') {
+          labelB = 'w normie'; colorB = '#276749';
         }
         const targetLabel = r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`;
         html += `<tr class="${elementRowClass(r.a)}"><td>${r.label}</td><td>${targetLabel}</td><td>${current != null ? current.toFixed(3) : '—'}</td>`
-          + `<td style="color:${color}; font-weight:600;">${diffLabel}</td></tr>`;
+          + `<td style="color:${colorA}; font-weight:600;">${labelA}</td>`
+          + `<td style="color:${colorB}; font-weight:600;">${labelB}</td></tr>`;
       });
       html += '</tbody></table>';
-      html += '<p class="note">Kolumna „Trzeba dodać” liczy brakującą (lub nadmiarową) ilość pierwszego pierwiastka z pary, względem najbliższej granicy przedziału celu, przy obecnej wartości drugiego. K:Fe = 2–3, bo żelazo ma być 1/2 do 1/3 potasu.</p>';
+      html += '<p class="note">Pierwsza kolumna zmian liczy brakującą/nadmiarową ilość pierwszego pierwiastka. Druga pokazuje, ile trzeba <strong>dodać</strong> drugiego pierwiastka, żeby proporcja wróciła do normy — praktyczniejsze przy nadmiarze, bo nawozem można tylko dodawać, nie odejmować. K:Fe = 2–3, bo żelazo ma być 1/2 do 1/3 potasu.</p>';
       document.getElementById('am_ratio_table').innerHTML = html;
     }
 
