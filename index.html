@@ -473,12 +473,14 @@
       <div class="section">
         <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_4', this)"><span class="caret">▾</span> 4. Dodaj produkt do dawki</h2>
         <div class="collapsible-body" id="am_cbody_4">
-        <h3 class="collapsible-heading" onclick="toggleCollapse('am_cbody_autodose', this)"><span class="caret">▾</span> Automatyczna dawka do celu (etap: <span id="am_stage_label_auto">Kwitnienie</span>)</h3>
+        <h3 class="collapsible-heading" onclick="toggleCollapse('am_cbody_autodose', this)"><span class="caret">▾</span> Automatyczna dawka mikroelementów do celu (etap: <span id="am_stage_label_auto">Kwitnienie</span>)</h3>
         <div class="collapsible-body" id="am_cbody_autodose">
         <p class="note">
-          Dla każdego pierwiastka poniżej minimum wybranego etapu: gramy potrzebne, żeby osiągnąć dolną i górną granicę celu,
-          przeliczone na masę gleby (objętość × gęstość nasypowa z zakładki CAC). „Dostarczy też” pokazuje inne pierwiastki,
-          które ten sam produkt doda przy dawce do minimum. Kliknij „+ Dodaj”, żeby od razu dodać tę dawkę do listy w sekcji 5.
+          Dotyczy wyłącznie mikroelementów: boru, żelaza, manganu, miedzi, cynku, kobaltu, molibdenu, selenu i krzemu.
+          Dla każdego z nich, który jest poniżej celu: gramy potrzebne, żeby osiągnąć górną granicę przedziału Mehlich 3 —
+          albo wartość wynikającą z kontroli proporcji (Fe, Mn, Cu, Zn, B), jeśli ta jest wyższa. Przeliczone na masę gleby
+          (objętość × gęstość nasypowa z zakładki CAC). „Dostarczy też” pokazuje inne pierwiastki, które ten sam produkt
+          doda przy tej dawce. Kliknij „+ Dodaj”, żeby od razu dodać dawkę do listy w sekcji 5.
         </p>
         <div id="am_auto_dose_table"></div>
         </div>
@@ -1195,27 +1197,50 @@
 
     // Automatyczna dawka: dla każdego pierwiastka poniżej minimum wybranego etapu, dla każdego
     // produktu który go dostarcza, gramy potrzebne do osiągnięcia dolnej i górnej granicy celu.
+    // Automatyczna dawka dotyczy WYŁĄCZNIE mikroelementów (nie makroelementów N/P/K/S/Ca/Mg/Na).
+    const MICRO_TARGET_ELEMENTS = ['B', 'Fe', 'Mn', 'Cu', 'Zn', 'Co', 'Mo', 'Se', 'Si'];
+
+    // Dla pierwiastków obecnych w kontroli proporcji (Fe, Mn, Cu, Zn, B) liczy, jaką wartość
+    // narzucałaby sama proporcja (przy obecnej wartości powiązanego pierwiastka), biorąc granicę
+    // proporcji dającą NAJWYŻSZY wynik dla danego pierwiastka (spójnie z "bazuj na maksimum").
+    function getRatioDerivedTargets(el, total) {
+      const candidates = [];
+      TARGET_RATIOS.forEach(r => {
+        if (r.a === el) {
+          candidates.push(r.max * (total[r.b] || 0));
+        } else if (r.b === el && r.min > 0) {
+          candidates.push((total[r.a] || 0) / r.min);
+        }
+      });
+      return candidates;
+    }
+
     function computeAutoDoseRows() {
       const { total } = getCurrentTotals();
       const soilKg = getSoilMassKg();
       const rows = [];
       if (soilKg <= 0) return rows;
-      ELEMENT_ORDER.forEach(el => {
+      MICRO_TARGET_ELEMENTS.forEach(el => {
         const t = getEffectiveTarget(window._targetStage, el);
         if (!t) return;
         const current = total[el] || 0;
-        if (current >= t.min) return; // brak deficytu — nic do dodania
+        // Bazowy cel = górna granica przedziału Mehlich 3 (albo dolna, jeśli brak górnej, np. Co/Mo/Se).
+        const baseTarget = t.max != null ? t.max : t.min;
+        const ratioTargets = getRatioDerivedTargets(el, total);
+        // Efektywny cel = najwyższa z wartości: target Mehlich 3 lub to, czego wymaga kontrola proporcji.
+        const effectiveTarget = Math.max(baseTarget, ...ratioTargets);
+        if (current >= effectiveTarget) return;
+        const fromRatio = ratioTargets.length > 0 && effectiveTarget > baseTarget;
         AMENDMENTS.forEach(p => {
           const pct = p.pct[el];
           if (!pct) return;
-          const gToMin = ((t.min - current) * soilKg / 1000) / pct;
-          const gToMax = t.max != null ? ((t.max - current) * soilKg / 1000) / pct : null;
+          const gramsNeeded = ((effectiveTarget - current) * soilKg / 1000) / pct;
           const others = {};
           Object.keys(p.pct).forEach(oe => {
             if (oe === el) return;
-            others[oe] = (gToMin * p.pct[oe] * 1000) / soilKg;
+            others[oe] = (gramsNeeded * p.pct[oe] * 1000) / soilKg;
           });
-          rows.push({ el, product: p, gToMin, gToMax, others });
+          rows.push({ el, product: p, effectiveTarget, fromRatio, gramsNeeded, others });
         });
       });
       return rows;
@@ -1233,31 +1258,33 @@
       const rows = computeAutoDoseRows();
       window._autoDoseRows = rows;
       if (!rows.length) {
-        box.innerHTML = '<p class="note">Wszystkie śledzone pierwiastki są już w normie dla wybranego etapu — nic nie trzeba dodawać.</p>';
+        box.innerHTML = '<p class="note">Wszystkie mikroelementy są już w normie (lub powyżej wymogu proporcji) dla wybranego etapu — nic nie trzeba dodawać.</p>';
         return;
       }
-      let html = '<table><thead><tr><th>Pierwiastek</th><th>Produkt</th><th>Dawka do min (g)</th>'
-        + '<th>Dawka do max (g)</th><th>Dostarczy też</th><th></th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Produkt</th><th>Cel użyty (ppm)</th>'
+        + '<th>Dawka (g)</th><th>Dostarczy też</th><th></th></tr></thead><tbody>';
       let lastEl = null;
       rows.forEach((r, idx) => {
         const othersText = Object.keys(r.others).map(oe => `${ELEMENT_LABELS[oe] || oe} +${r.others[oe].toFixed(1)} ppm`).join(', ') || '—';
+        const targetLabel = r.effectiveTarget.toFixed(1) + (r.fromRatio ? ' (z proporcji)' : ' (Mehlich 3)');
         html += `<tr class="${elementRowClass(r.el)}">`
           + `<td>${lastEl === r.el ? '' : ELEMENT_LABELS[r.el] || r.el}</td>`
           + `<td>${r.product.name}</td>`
-          + `<td>${r.gToMin.toFixed(2)} g</td>`
-          + `<td>${r.gToMax != null ? r.gToMax.toFixed(2) + ' g' : '—'}</td>`
+          + `<td>${targetLabel}</td>`
+          + `<td>${r.gramsNeeded.toFixed(2)} g</td>`
           + `<td>${othersText}</td>`
           + `<td><button class="col-btn" style="padding:5px 10px;" onclick="autoAddToCart(${idx})">+ Dodaj</button></td></tr>`;
         lastEl = r.el;
       });
       html += '</tbody></table>';
+      html += '<p class="note">„Cel użyty” to wyższa z dwóch wartości: górna granica z tabeli Mehlich 3, albo — gdy pierwiastek występuje w kontroli proporcji (Fe, Mn, Cu, Zn, B) — wartość wynikająca z proporcji przy obecnym poziomie powiązanego pierwiastka. Oznaczenie „(z proporcji)” pokazuje, kiedy to proporcja była bardziej wymagająca.</p>';
       box.innerHTML = html;
     }
 
     function autoAddToCart(idx) {
       const row = window._autoDoseRows && window._autoDoseRows[idx];
       if (!row) return;
-      window._amendmentCart.push({ productId: row.product.id, grams: row.gToMin });
+      window._amendmentCart.push({ productId: row.product.id, grams: row.gramsNeeded });
       renderCartAndSummary();
     }
     window.autoAddToCart = autoAddToCart;
