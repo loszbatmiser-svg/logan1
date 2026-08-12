@@ -1229,8 +1229,12 @@
         const ratioTargets = getRatioDerivedTargets(el, total);
         // Efektywny cel = najwyższa z wartości: target Mehlich 3 lub to, czego wymaga kontrola proporcji.
         const effectiveTarget = Math.max(baseTarget, ...ratioTargets);
-        if (current >= effectiveTarget) return;
         const fromRatio = ratioTargets.length > 0 && effectiveTarget > baseTarget;
+        if (current >= effectiveTarget) {
+          // Pierwiastek w normie (albo w nadmiarze) dla wybranego etapu — pokaż to jawnie, nic do dodania.
+          rows.push({ el, status: 'ok', current, effectiveTarget, fromRatio });
+          return;
+        }
         AMENDMENTS.forEach(p => {
           const pct = p.pct[el];
           if (!pct) return;
@@ -1240,7 +1244,7 @@
             if (oe === el) return;
             others[oe] = (gramsNeeded * p.pct[oe] * 1000) / soilKg;
           });
-          rows.push({ el, product: p, effectiveTarget, fromRatio, gramsNeeded, others });
+          rows.push({ el, status: 'need', product: p, effectiveTarget, fromRatio, gramsNeeded, others });
         });
       });
       return rows;
@@ -1257,16 +1261,22 @@
       }
       const rows = computeAutoDoseRows();
       window._autoDoseRows = rows;
-      if (!rows.length) {
-        box.innerHTML = '<p class="note">Wszystkie mikroelementy są już w normie (lub powyżej wymogu proporcji) dla wybranego etapu — nic nie trzeba dodawać.</p>';
-        return;
-      }
       let html = '<table><thead><tr><th>Pierwiastek</th><th>Produkt</th><th>Cel użyty (ppm)</th>'
         + '<th>Dawka (g)</th><th>Dostarczy też</th><th></th></tr></thead><tbody>';
       let lastEl = null;
       rows.forEach((r, idx) => {
-        const othersText = Object.keys(r.others).map(oe => `${ELEMENT_LABELS[oe] || oe} +${r.others[oe].toFixed(1)} ppm`).join(', ') || '—';
         const targetLabel = r.effectiveTarget.toFixed(1) + (r.fromRatio ? ' (z proporcji)' : ' (Mehlich 3)');
+        if (r.status === 'ok') {
+          const excess = r.current - r.effectiveTarget;
+          const statusText = excess > 0.05
+            ? `nadmiar +${excess.toFixed(1)} ppm ponad cel ${targetLabel} — nic nie trzeba dodawać`
+            : `w normie (cel ${targetLabel}) — nic nie trzeba dodawać`;
+          html += `<tr class="${elementRowClass(r.el)}"><td>${ELEMENT_LABELS[r.el] || r.el}</td>`
+            + `<td colspan="4" style="color:#276749; font-weight:600;">${statusText}</td><td></td></tr>`;
+          lastEl = r.el;
+          return;
+        }
+        const othersText = Object.keys(r.others).map(oe => `${ELEMENT_LABELS[oe] || oe} +${r.others[oe].toFixed(1)} ppm`).join(', ') || '—';
         html += `<tr class="${elementRowClass(r.el)}">`
           + `<td>${lastEl === r.el ? '' : ELEMENT_LABELS[r.el] || r.el}</td>`
           + `<td>${r.product.name}</td>`
@@ -1277,31 +1287,58 @@
         lastEl = r.el;
       });
       html += '</tbody></table>';
-      html += '<p class="note">„Cel użyty” to wyższa z dwóch wartości: górna granica z tabeli Mehlich 3, albo — gdy pierwiastek występuje w kontroli proporcji (Fe, Mn, Cu, Zn, B) — wartość wynikająca z proporcji przy obecnym poziomie powiązanego pierwiastka. Oznaczenie „(z proporcji)” pokazuje, kiedy to proporcja była bardziej wymagająca.</p>';
+      html += '<p class="note">„Cel użyty” to wyższa z dwóch wartości: górna granica z tabeli Mehlich 3, albo — gdy pierwiastek występuje w kontroli proporcji (Fe, Mn, Cu, Zn, B) — wartość wynikająca z proporcji przy obecnym poziomie powiązanego pierwiastka. Oznaczenie „(z proporcji)” pokazuje, kiedy to proporcja była bardziej wymagająca. Cała tabela przelicza się na żywo przy zmianie etapu, masy gleby i zawartości listy.</p>';
       box.innerHTML = html;
     }
 
-    // Pozycje w koszyku pamiętają CEL (ppm do podniesienia dla danego pierwiastka), a nie zamrożone
-    // gramy — dzięki temu, gdy zmieni się objętość gleby lub gęstość nasypowa w zakładce CAC, dawka
-    // w gramach dla już dodanych produktów przelicza się sama, bez usuwania i dodawania ich od nowa.
-    // Tryb 'grams' (ręcznie podana dawka) zostaje jako stała liczba gramów — to świadomy wybór wagi.
-    function getCartItemGrams(item) {
+    // Pozycje w koszyku typu 'auto' (dodane z automatycznej tabeli) NIE zamrażają celu w ppm —
+    // przy każdym renderze liczą go od nowa dla AKTUALNIE wybranego etapu, względem tego, co dostarczają
+    // WCZEŚNIEJSZE pozycje na liście (żeby uniknąć nieskończonej pętli przy wielu pozycjach na ten sam
+    // pierwiastek). Dzięki temu zmiana etapu od razu aktualizuje już dodane produkty — bez usuwania.
+    // Tryb 'ppm' (ręczny cel) i 'grams' (stała dawka) zostają bez zmian — to świadomy wybór użytkownika.
+    function getTotalsUpToIndex(idx) {
+      const totals = Object.assign({}, getBaselineTotals());
+      const soilKg = getSoilMassKg();
+      if (soilKg <= 0) return totals;
+      window._amendmentCart.forEach((it, i) => {
+        if (i >= idx) return;
+        const product = getAmendment(it.productId);
+        if (!product) return;
+        const g = getCartItemGrams(it, i);
+        Object.keys(product.pct).forEach(el => {
+          const grams = g * product.pct[el];
+          const ppm = (grams * 1000) / soilKg;
+          totals[el] = (totals[el] || 0) + ppm;
+        });
+      });
+      return totals;
+    }
+
+    function getCartItemGrams(item, idx) {
       if (item.mode === 'grams') return item.grams;
       const product = getAmendment(item.productId);
       const soilKg = getSoilMassKg();
       if (!product || soilKg <= 0) return 0;
       const pct = product.pct[item.targetElement];
       if (!pct) return 0;
+      if (item.mode === 'auto') {
+        const totalBefore = getTotalsUpToIndex(idx);
+        const t = getEffectiveTarget(window._targetStage, item.targetElement);
+        if (!t) return 0;
+        const baseTarget = t.max != null ? t.max : t.min;
+        const ratioTargets = getRatioDerivedTargets(item.targetElement, totalBefore);
+        const effectiveTarget = Math.max(baseTarget, ...ratioTargets);
+        const current = totalBefore[item.targetElement] || 0;
+        const delta = Math.max(0, effectiveTarget - current);
+        return (delta * soilKg) / 1000 / pct;
+      }
       return (item.targetPpm * soilKg) / 1000 / pct;
     }
 
     function autoAddToCart(idx) {
       const row = window._autoDoseRows && window._autoDoseRows[idx];
-      if (!row) return;
-      const { total } = getCurrentTotals();
-      const current = total[row.el] || 0;
-      const deltaPpm = Math.max(0, row.effectiveTarget - current);
-      window._amendmentCart.push({ productId: row.product.id, mode: 'ppm', targetElement: row.el, targetPpm: deltaPpm });
+      if (!row || row.status !== 'need') return;
+      window._amendmentCart.push({ productId: row.product.id, mode: 'auto', targetElement: row.el });
       renderCartAndSummary();
     }
     window.autoAddToCart = autoAddToCart;
@@ -1340,10 +1377,11 @@
         let html = '<table><thead><tr><th>Produkt</th><th>Podstawa dawki</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
         window._amendmentCart.forEach((item, idx) => {
           const product = getAmendment(item.productId);
-          const grams = getCartItemGrams(item);
-          const basis = item.mode === 'grams'
-            ? 'stała dawka'
-            : `cel: +${item.targetPpm.toFixed(1)} ppm ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z masą gleby)`;
+          const grams = getCartItemGrams(item, idx);
+          let basis;
+          if (item.mode === 'grams') basis = 'stała dawka';
+          else if (item.mode === 'auto') basis = `auto: cel mikroelementu ${ELEMENT_LABELS[item.targetElement] || item.targetElement} wg wybranego etapu (przelicza się z etapem i masą gleby)`;
+          else basis = `cel: +${item.targetPpm.toFixed(1)} ppm ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z masą gleby)`;
           html += `<tr><td>${product ? product.name : item.productId}</td><td class="explain">${basis}</td><td>${grams.toFixed(2)} g</td>`
             + `<td><button class="col-btn" style="padding:5px 12px;" onclick="removeAmendmentFromCart(${idx})">Usuń</button></td></tr>`;
         });
@@ -1358,10 +1396,10 @@
       const soilKg = getSoilMassKg();
       const totals = {};
       if (soilKg <= 0) return totals;
-      window._amendmentCart.forEach(item => {
+      window._amendmentCart.forEach((item, idx) => {
         const product = getAmendment(item.productId);
         if (!product) return;
-        const itemGrams = getCartItemGrams(item);
+        const itemGrams = getCartItemGrams(item, idx);
         Object.keys(product.pct).forEach(el => {
           const grams = itemGrams * product.pct[el];
           const ppm = (grams * 1000) / soilKg;
@@ -1446,7 +1484,7 @@
       if (stageLabelEl) stageLabelEl.textContent = MEHLICH3_STAGES[stage].label;
       renderTargetTable();
       renderTargetCompareTable();
-      renderAutoDoseTable();
+      renderCartAndSummary();
       autoFillTargetPpm();
       renderAmendmentPreview();
     }
