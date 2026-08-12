@@ -337,9 +337,11 @@
         <p class="note">
           Wapń, magnez, potas i sód są pobierane automatycznie z zakładki „CAC / Gleba” (wynik „Po wapnowaniu”).
           Objętość gleby i gęstość nasypowa też stamtąd pochodzą — zmień je w zakładce CAC/Gleba, jeśli trzeba.
+          Po zaimportowaniu raportu PDF (zakładka CAC/Gleba) wszystkie znalezione tam pierwiastki
+          (P, S, B, Fe, Mn, Cu, Zn, Al) pojawiają się poniżej automatycznie — pola można też uzupełnić ręcznie.
         </p>
         <table>
-          <thead><tr><th>Pierwiastek</th><th>Wartość startowa</th></tr></thead>
+          <thead><tr><th>Pierwiastek</th><th>Wartość startowa (ppm)</th></tr></thead>
           <tbody>
             <tr><td>Wapń (Ca) — po wapnowaniu</td><td><span id="am_base_ca" class="badge highlight">—</span> ppm</td></tr>
             <tr><td>Magnez (Mg)</td><td><span id="am_base_mg" class="badge highlight">—</span> ppm</td></tr>
@@ -350,12 +352,36 @@
               <td><input type="number" id="am_base_n" value="0" step="1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
             <tr>
-              <td>Fosfor (P) — opcjonalnie</td>
-              <td><input type="number" id="am_base_p" value="0" step="1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+              <td>Fosfor (P) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_p" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
             <tr>
-              <td>Siarka (S) — opcjonalnie</td>
-              <td><input type="number" id="am_base_s" value="0" step="1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+              <td>Siarka (S) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_s" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Bor (B) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_b" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Żelazo (Fe) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_fe" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Mangan (Mn) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_mn" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Miedź (Cu) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_cu" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Cynk (Zn) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_zn" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
+            </tr>
+            <tr>
+              <td>Glin (Al) — z raportu PDF lub ręcznie</td>
+              <td><input type="number" id="am_base_al" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
           </tbody>
         </table>
@@ -672,6 +698,27 @@
         if (idx >= 0 && idx + 1 < rows.length) naNums = extractNumbers(rows[idx + 1]);
       }
 
+      // Pozostałe pierwiastki z raportu (Value Found przy etykiecie) – bez pozycyjnego fallbacku,
+      // każdy szukany niezależnie po nazwie, żeby zaimportować wszystko, co Logan Labs poda.
+      function findValueFoundRowNear(labelRegex) {
+        for (let i = 0; i < rows.length; i++) {
+          if (rows[i].some(it => labelRegex.test(it.str))) {
+            for (let j = i; j < Math.min(i + 4, rows.length); j++) {
+              if (rows[j].some(it => /Value Found/i.test(it.str))) return rows[j];
+            }
+          }
+        }
+        return null;
+      }
+      const pNums  = extractNumbers(findValueFoundRowNear(/PHOSPHORUS/i));
+      const sNums  = extractNumbers(findValueFoundRowNear(/SULFUR|SULPHUR/i));
+      const bNums  = extractNumbers(findValueFoundRowNear(/BORON/i));
+      const feNums = extractNumbers(findValueFoundRowNear(/IRON/i));
+      const mnNums = extractNumbers(findValueFoundRowNear(/MANGANESE/i));
+      const cuNums = extractNumbers(findValueFoundRowNear(/COPPER/i));
+      const znNums = extractNumbers(findValueFoundRowNear(/ZINC/i));
+      const alNums = extractNumbers(findValueFoundRowNear(/ALUMINUM|ALUMINIUM/i));
+
       // Determine number of columns – take the most consistent count of numeric values
       const counts = [phNums.length, caNums.length, mgNums.length, kNums.length, naNums.length].filter(c => c > 0);
       if (!counts.length) return [];
@@ -691,13 +738,24 @@
           ca: caNums[c] ? caNums[c].val : null,
           mg: mgNums[c] ? mgNums[c].val : null,
           k:  kNums[c]  ? kNums[c].val  : null,
-          na: naNums[c] ? naNums[c].val : null
+          na: naNums[c] ? naNums[c].val : null,
+          p:  pNums[c]  ? pNums[c].val  : null,
+          s:  sNums[c]  ? sNums[c].val  : null,
+          b:  bNums[c]  ? bNums[c].val  : null,
+          fe: feNums[c] ? feNums[c].val : null,
+          mn: mnNums[c] ? mnNums[c].val : null,
+          cu: cuNums[c] ? cuNums[c].val : null,
+          zn: znNums[c] ? znNums[c].val : null,
+          al: alNums[c] ? alNums[c].val : null
         });
       }
 
       // Filter out completely empty columns
       return result.filter(col => col.ph != null || col.ca != null || col.mg != null);
     }
+
+    // Mapowanie pól kolumny sparsowanej z PDF -> pól "Punkt startowy" w zakładce Nawożenie gleby
+    const EXTRA_IMPORT_FIELDS = { p: 'am_base_p', s: 'am_base_s', b: 'am_base_b', fe: 'am_base_fe', mn: 'am_base_mn', cu: 'am_base_cu', zn: 'am_base_zn', al: 'am_base_al' };
 
     function loadParsedColumn(idx, btnEl) {
       const col = window.parsedColumns[idx];
@@ -709,11 +767,23 @@
       if (col.k  != null) document.getElementById('cac_k').value  = Math.round(col.k);
       if (col.na != null) document.getElementById('cac_na').value = Math.round(col.na);
 
+      // Wszystkie pozostałe zaimportowane pierwiastki trafiają do punktu startowego
+      // w zakładce "Nawożenie gleby" (P, S, B, Fe, Mn, Cu, Zn, Al) – cokolwiek raport zawiera.
+      const importedExtras = [];
+      Object.keys(EXTRA_IMPORT_FIELDS).forEach(key => {
+        const el = document.getElementById(EXTRA_IMPORT_FIELDS[key]);
+        if (col[key] != null && el) {
+          el.value = Math.round(col[key] * 100) / 100;
+          importedExtras.push(key.toUpperCase() + ' ' + col[key]);
+        }
+      });
+
       document.querySelectorAll('.col-btn').forEach(b => b.classList.remove('selected'));
       if (btnEl) btnEl.classList.add('selected');
 
       document.getElementById('pdf-info').innerText =
-        `Wczytano: ${col.label} → pH ${col.ph ?? '—'} | Ca ${col.ca ?? '—'} | Mg ${col.mg ?? '—'} | K ${col.k ?? '—'} | Na ${col.na ?? '—'}`;
+        `Wczytano: ${col.label} → pH ${col.ph ?? '—'} | Ca ${col.ca ?? '—'} | Mg ${col.mg ?? '—'} | K ${col.k ?? '—'} | Na ${col.na ?? '—'}`
+        + (importedExtras.length ? ` | ${importedExtras.join(' | ')} (patrz zakładka „Nawożenie gleby”)` : '');
 
       calculateCAC();
     }
@@ -724,7 +794,7 @@
       N: 'Azot (N)', P: 'Fosfor (P)', K: 'Potas (K)', S: 'Siarka (S)',
       Ca: 'Wapń (Ca)', Mg: 'Magnez (Mg)', Na: 'Sód (Na)',
       B: 'Bor (B)', Mn: 'Mangan (Mn)', Cu: 'Miedź (Cu)', Fe: 'Żelazo (Fe)',
-      Zn: 'Cynk (Zn)', Mo: 'Molibden (Mo)', Co: 'Kobalt (Co)', Se: 'Selen (Se)'
+      Zn: 'Cynk (Zn)', Mo: 'Molibden (Mo)', Co: 'Kobalt (Co)', Se: 'Selen (Se)', Al: 'Glin (Al)'
     };
     const MACRO_ELEMENTS = ['N', 'P', 'K', 'S', 'Ca', 'Mg'];
 
@@ -937,13 +1007,19 @@
         N: parseFloat(document.getElementById('am_base_n').value) || 0,
         P: parseFloat(document.getElementById('am_base_p').value) || 0,
         S: parseFloat(document.getElementById('am_base_s').value) || 0,
+        B: parseFloat(document.getElementById('am_base_b').value) || 0,
+        Fe: parseFloat(document.getElementById('am_base_fe').value) || 0,
+        Mn: parseFloat(document.getElementById('am_base_mn').value) || 0,
+        Cu: parseFloat(document.getElementById('am_base_cu').value) || 0,
+        Zn: parseFloat(document.getElementById('am_base_zn').value) || 0,
+        Al: parseFloat(document.getElementById('am_base_al').value) || 0,
         Ca: window._postLime ? window._postLime.ca : 0,
         Mg: window._postLime ? window._postLime.mg : 0,
         K: window._postLime ? window._postLime.k : 0,
         Na: window._postLime ? window._postLime.na : 0,
       };
       const added = getCartTotals();
-      const order = ['N', 'P', 'K', 'S', 'Ca', 'Mg', 'Na'];
+      const order = ['N', 'P', 'K', 'S', 'Ca', 'Mg', 'Na', 'B', 'Fe', 'Mn', 'Cu', 'Zn', 'Al'];
       const allElements = Array.from(new Set([...Object.keys(base), ...Object.keys(added)]));
       allElements.sort((a, b) => {
         const ia = order.indexOf(a), ib = order.indexOf(b);
