@@ -26,6 +26,17 @@
     th { background: #2d3748; color: #fff; font-weight: 600; }
     .badge { background: #edf2f7; padding: 3px 9px; border-radius: 5px; font-weight: 600; display: inline-block; min-width: 58px; text-align: center; }
     .highlight { background: #fefcbf; }
+    /* Rozróżnienie kolorystyczne: kationy (Ca/Mg/K/Na) / aniony (N/P/S) / mikroelementy */
+    tr.el-cation { border-left: 4px solid #3182ce; background: #ebf8ff; }
+    tr.el-anion { border-left: 4px solid #dd6b20; background: #fffaf0; }
+    tr.el-micro { border-left: 4px solid #38a169; background: #f0fff4; }
+    tr.el-cation td:first-child, tr.el-anion td:first-child, tr.el-micro td:first-child { padding-left: 10px; }
+    th.el-cation-h { background: #2c5282 !important; }
+    th.el-anion-h { background: #9c4221 !important; }
+    th.el-micro-h { background: #276749 !important; }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 0.82rem; color: #4a5568; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
     @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
     .note { font-size: 0.78rem; color: #718096; margin-top: 6px; line-height: 1.4; }
@@ -332,6 +343,11 @@
 
     <!-- TAB NAWOŻENIE GLEBY -->
     <div id="tab-nawoz" class="tab-content">
+      <div class="legend">
+        <span><i style="background:#3182ce;"></i> Kationy (Ca, Mg, K, Na)</span>
+        <span><i style="background:#dd6b20;"></i> Aniony (N, P, S)</span>
+        <span><i style="background:#38a169;"></i> Mikroelementy (B, Fe, Mn, Cu, Zn, Al, Co, Mo, Se, Si)</span>
+      </div>
       <div class="section">
         <h2>1. Punkt startowy gleby (po wapnowaniu)</h2>
         <p class="note">
@@ -343,59 +359,59 @@
         <table>
           <thead><tr><th>Pierwiastek</th><th>Wartość startowa (ppm)</th></tr></thead>
           <tbody>
-            <tr><td>Wapń (Ca) — po wapnowaniu</td><td><span id="am_base_ca" class="badge highlight">—</span> ppm</td></tr>
-            <tr><td>Magnez (Mg)</td><td><span id="am_base_mg" class="badge highlight">—</span> ppm</td></tr>
-            <tr><td>Potas (K)</td><td><span id="am_base_k" class="badge highlight">—</span> ppm</td></tr>
-            <tr><td>Sód (Na)</td><td><span id="am_base_na" class="badge highlight">—</span> ppm</td></tr>
-            <tr>
+            <tr class="el-cation"><td>Wapń (Ca) — po wapnowaniu</td><td><span id="am_base_ca" class="badge highlight">—</span> ppm</td></tr>
+            <tr class="el-cation"><td>Magnez (Mg)</td><td><span id="am_base_mg" class="badge highlight">—</span> ppm</td></tr>
+            <tr class="el-cation"><td>Potas (K)</td><td><span id="am_base_k" class="badge highlight">—</span> ppm</td></tr>
+            <tr class="el-cation"><td>Sód (Na)</td><td><span id="am_base_na" class="badge highlight">—</span> ppm</td></tr>
+            <tr class="el-anion">
               <td>Azot (N) — z PDF: suma amonu (NH4) + azotanów (NO3), lub wpisz ręcznie</td>
               <td><input type="number" id="am_base_n" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-anion">
               <td>Fosfor (P) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_p" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-anion">
               <td>Siarka (S) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_s" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Bor (B) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_b" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Żelazo (Fe) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_fe" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Mangan (Mn) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_mn" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Miedź (Cu) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_cu" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Cynk (Zn) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_zn" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Glin (Al) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_al" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Kobalt (Co) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_co" value="0" step="0.01" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Molibden (Mo) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_mo" value="0" step="0.01" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Selen (Se) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_se" value="0" step="0.01" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
-            <tr>
+            <tr class="el-micro">
               <td>Krzem (Si) — z raportu PDF lub ręcznie</td>
               <td><input type="number" id="am_base_si" value="0" step="0.1" min="0" oninput="renderAmendmentsAll()" style="max-width:120px"></td>
             </tr>
@@ -889,21 +905,19 @@
 
     // Targety PPM wg Mehlich 3, dla trzech etapów wzrostu (na podstawie Twojej tabeli).
     // Dla przedziałów przyjęto środek zakresu jako pojedynczy cel liczbowy.
+    // Domyślne targety Mehlich 3 (punkt wyjścia — wszystkie wartości można nadpisać w interfejsie).
     const MEHLICH3_STAGES = {
       soil: {
         label: 'Soil (baza)', tec: '10–15', ph: '6,0–7,0',
-        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 100, P: 100, B: 1, Fe: 50, Mn: 25, Cu: 5, Zn: 10, N: 50, Si: null, Al: 200, Co: 0.5, Mo: 0.5, Se: 0.5 },
-        sat: { Ca: 68, Mg: 12, K: 4, Na: 1.5 }
+        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 100, P: 100, B: 1, Fe: 50, Mn: 25, Cu: 5, Zn: 10, N: 50, Si: null, Al: 200, Co: 0.5, Mo: 0.5, Se: 0.5 }
       },
       veg: {
         label: 'Wegetacja', tec: '15–20', ph: '6,0–7,0',
-        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 250, P: 250, B: 2.5, Fe: 150, Mn: 75, Cu: 7.5, Zn: 15, N: 75, Si: 5, Al: 200, Co: 0.5, Mo: 0.5, Se: 1.0 },
-        sat: { Ca: 71.5, Mg: 12, K: 5.5, Na: 1.5 }
+        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 250, P: 250, B: 2.5, Fe: 150, Mn: 75, Cu: 7.5, Zn: 15, N: 75, Si: 5, Al: 200, Co: 0.5, Mo: 0.5, Se: 1.0 }
       },
       flo: {
         label: 'Kwitnienie', tec: '20–30', ph: '6,0–7,0',
-        targets: { Ca: 3000, Mg: 300, K: 500, Na: 50, S: 650, P: 650, B: 3, Fe: 200, Mn: 100, Cu: 12.5, Zn: 25, N: 125, Si: 11.5, Al: 200, Co: 1.0, Mo: 1.0, Se: 1.5 },
-        sat: { Ca: 71.5, Mg: 12, K: 5.5, Na: 1.5 }
+        targets: { Ca: 3000, Mg: 300, K: 500, Na: 50, S: 650, P: 650, B: 3, Fe: 200, Mn: 100, Cu: 12.5, Zn: 25, N: 125, Si: 11.5, Al: 200, Co: 1.0, Mo: 1.0, Se: 1.5 }
       }
     };
     // Docelowe proporcje między pierwiastkami (trzecia kolumna Twojej tabeli).
@@ -919,6 +933,40 @@
       { label: 'Ca:N', a: 'Ca', b: 'N', target: 60 },
     ];
     window._targetStage = 'flo';
+    // Własne wartości targetów wpisane przez użytkownika, nadpisujące domyślne z MEHLICH3_STAGES.
+    // Kształt: { soil: { Ca: 1800, ... }, veg: {...}, flo: {...} }
+    window._targetOverrides = { soil: {}, veg: {}, flo: {} };
+
+    function getEffectiveTarget(stage, el) {
+      const ov = window._targetOverrides[stage];
+      if (ov && ov[el] != null && !isNaN(ov[el])) return ov[el];
+      return MEHLICH3_STAGES[stage].targets[el];
+    }
+    function setTargetOverride(stage, el, rawVal) {
+      const val = parseFloat(rawVal);
+      if (!window._targetOverrides[stage]) window._targetOverrides[stage] = {};
+      if (rawVal === '' || isNaN(val)) delete window._targetOverrides[stage][el];
+      else window._targetOverrides[stage][el] = val;
+      renderTargetCompareTable();
+      renderRatioTable();
+    }
+    window.setTargetOverride = setTargetOverride;
+    function resetTargetStage(stage) {
+      window._targetOverrides[stage] = {};
+      renderTargetTable();
+      renderTargetCompareTable();
+      renderRatioTable();
+    }
+    window.resetTargetStage = resetTargetStage;
+
+    // Grupy pierwiastków do rozróżnienia kolorystycznego w tabelach.
+    const CATION_ELEMENTS = ['Ca', 'Mg', 'K', 'Na'];
+    const ANION_ELEMENTS = ['N', 'P', 'S'];
+    function elementRowClass(el) {
+      if (CATION_ELEMENTS.includes(el)) return 'el-cation';
+      if (ANION_ELEMENTS.includes(el)) return 'el-anion';
+      return 'el-micro';
+    }
 
     function getAmendment(id) {
       return AMENDMENTS.find(a => a.id === id);
@@ -966,7 +1014,9 @@
       let html = '';
       Object.keys(groups).forEach(g => {
         html += `<h3 style="margin-top:14px;">${g}</h3>`;
-        html += '<table><thead><tr><th>Produkt</th>' + MACRO_ELEMENTS.map(e => `<th>${e}</th>`).join('') + '<th>Inne</th><th>1/2 szklanki</th></tr></thead><tbody>';
+        html += '<table><thead><tr><th>Produkt</th>'
+          + MACRO_ELEMENTS.map(e => `<th class="${elementRowClass(e)}-h">${e}</th>`).join('')
+          + '<th>Inne</th><th>1/2 szklanki</th></tr></thead><tbody>';
         groups[g].forEach(a => {
           html += '<tr><td>' + a.name + '</td>';
           MACRO_ELEMENTS.forEach(e => {
@@ -1143,7 +1193,7 @@
       allElements.forEach(el => {
         const b = base[el] || 0;
         const a = added[el] || 0;
-        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>${b.toFixed(1)}</td><td>+${a.toFixed(1)}</td>`
+        html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>${b.toFixed(1)}</td><td>+${a.toFixed(1)}</td>`
           + `<td><strong>${(b + a).toFixed(1)}</strong> ppm</td></tr>`;
       });
       html += '</tbody></table>';
@@ -1167,36 +1217,38 @@
     window.setTargetStage = setTargetStage;
 
     function renderTargetTable() {
-      const stage = MEHLICH3_STAGES[window._targetStage];
-      let html = `<table><thead><tr><th>Parametr</th><th>Cel (${stage.label})</th></tr></thead><tbody>`;
+      const stageKey = window._targetStage;
+      const stage = MEHLICH3_STAGES[stageKey];
+      let html = `<table><thead><tr><th>Parametr</th><th>Cel (${stage.label}) — edytowalne</th></tr></thead><tbody>`;
       html += `<tr><td>TCEC</td><td>${stage.tec}</td></tr>`;
       html += `<tr><td>pH</td><td>${stage.ph}</td></tr>`;
       ELEMENT_ORDER.forEach(el => {
-        const v = stage.targets[el];
-        if (v == null) return;
-        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>${v} ppm</td></tr>`;
-      });
-      Object.keys(stage.sat).forEach(el => {
-        html += `<tr><td>Nasycenie ${el} (%)</td><td>${stage.sat[el]}%</td></tr>`;
+        if (stage.targets[el] == null) return;
+        const val = getEffectiveTarget(stageKey, el);
+        html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td>`
+          + `<td><input type="number" step="0.1" value="${val}" style="max-width:110px" `
+          + `oninput="setTargetOverride('${stageKey}','${el}', this.value)"> ppm</td></tr>`;
       });
       html += '</tbody></table>';
+      html += `<button class="col-btn" style="margin-top:8px;" onclick="resetTargetStage('${stageKey}')">Przywróć domyślne targety (${stage.label})</button>`;
       document.getElementById('am_target_table').innerHTML = html;
     }
 
     function renderTargetCompareTable() {
       const { total } = getCurrentTotals();
-      const stage = MEHLICH3_STAGES[window._targetStage];
+      const stageKey = window._targetStage;
+      const stage = MEHLICH3_STAGES[stageKey];
       const soilKg = getSoilMassKg();
       let html = '<table><thead><tr><th>Pierwiastek</th><th>Aktualnie</th><th>Cel</th><th>Brakuje / Nadmiar</th><th>Brakuje (g)</th></tr></thead><tbody>';
       ELEMENT_ORDER.forEach(el => {
-        const target = stage.targets[el];
-        if (target == null) return;
+        if (stage.targets[el] == null) return;
+        const target = getEffectiveTarget(stageKey, el);
         const current = total[el] || 0;
         const diffPpm = target - current;
         const diffG = soilKg > 0 ? (diffPpm * soilKg) / 1000 : null;
         const label = diffPpm > 0 ? `brakuje ${diffPpm.toFixed(1)}` : `nadmiar ${Math.abs(diffPpm).toFixed(1)}`;
         const color = diffPpm > 0 ? '#c53030' : '#276749';
-        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>${current.toFixed(1)}</td><td>${target}</td>`
+        html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>${current.toFixed(1)}</td><td>${target}</td>`
           + `<td style="color:${color}; font-weight:600;">${label} ppm</td>`
           + `<td>${diffG != null ? (diffPpm > 0 ? '+' : '') + diffG.toFixed(2) + ' g' : '—'}</td></tr>`;
       });
@@ -1206,14 +1258,25 @@
 
     function renderRatioTable() {
       const { total } = getCurrentTotals();
-      let html = '<table><thead><tr><th>Proporcja</th><th>Cel</th><th>Aktualnie</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Proporcja</th><th>Cel</th><th>Aktualnie</th><th>Trzeba dodać, żeby trafić w cel</th></tr></thead><tbody>';
       TARGET_RATIOS.forEach(r => {
         const va = total[r.a] || 0;
         const vb = total[r.b] || 0;
         const current = vb > 0 ? va / vb : null;
-        html += `<tr><td>${r.label}</td><td>${r.target}</td><td>${current != null ? current.toFixed(3) : '—'}</td></tr>`;
+        const neededA = vb > 0 ? r.target * vb : null;
+        const diffA = neededA != null ? neededA - va : null;
+        let diffLabel = '—';
+        let color = '#4a5568';
+        if (diffA != null) {
+          if (diffA > 0.0005) { diffLabel = `+${diffA.toFixed(3)} ppm ${r.a}`; color = '#c53030'; }
+          else if (diffA < -0.0005) { diffLabel = `nadmiar ${Math.abs(diffA).toFixed(3)} ppm ${r.a}`; color = '#276749'; }
+          else { diffLabel = 'w normie'; color = '#276749'; }
+        }
+        html += `<tr class="${elementRowClass(r.a)}"><td>${r.label}</td><td>${r.target}</td><td>${current != null ? current.toFixed(3) : '—'}</td>`
+          + `<td style="color:${color}; font-weight:600;">${diffLabel}</td></tr>`;
       });
       html += '</tbody></table>';
+      html += '<p class="note">Kolumna „Trzeba dodać” liczy brakującą (lub nadmiarową) ilość pierwszego pierwiastka z pary, przy obecnej wartości drugiego.</p>';
       document.getElementById('am_ratio_table').innerHTML = html;
     }
 
@@ -1221,8 +1284,7 @@
     function fillTargetDeficit() {
       const el = document.getElementById('am_target_element').value;
       if (!el) return;
-      const stage = MEHLICH3_STAGES[window._targetStage];
-      const target = stage.targets[el];
+      const target = getEffectiveTarget(window._targetStage, el);
       if (target == null) return;
       const { total } = getCurrentTotals();
       const current = total[el] || 0;
