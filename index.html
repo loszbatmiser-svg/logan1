@@ -418,13 +418,29 @@
       </div>
 
       <div class="section">
-        <h2>2. Baza półproduktów</h2>
-        <p class="note">Zawartość pierwiastków w procentach (na podstawie Twojej tabeli). Wybierz produkt w sekcji 3, żeby dobrać dawkę.</p>
+        <h2>2. Targety PPM (Mehlich 3)</h2>
+        <p class="note">Docelowe wartości wg Twojej tabeli, wg etapu wzrostu. Wybór etapu ustawia cele używane niżej (kolumna „Brakuje/Nadmiar”) oraz podpowiedź dawki w sekcji 4.</p>
+        <div class="quick-btns">
+          <button class="quick-btn" data-stage="soil" onclick="setTargetStage('soil')">Soil (baza)</button>
+          <button class="quick-btn" data-stage="veg" onclick="setTargetStage('veg')">Wegetacja</button>
+          <button class="quick-btn active" data-stage="flo" onclick="setTargetStage('flo')">Kwitnienie</button>
+        </div>
+        <div id="am_target_table"></div>
+        <h3 style="margin-top:18px;">Aktualnie vs cel</h3>
+        <div id="am_target_compare_table"></div>
+        <h3 style="margin-top:18px;">Kontrola proporcji</h3>
+        <p class="note">Proporcje docelowe między pierwiastkami (z trzeciej kolumny Twojej tabeli) zestawione z proporcjami wynikającymi z aktualnego profilu gleby.</p>
+        <div id="am_ratio_table"></div>
+      </div>
+
+      <div class="section">
+        <h2>3. Baza półproduktów</h2>
+        <p class="note">Zawartość pierwiastków w procentach (na podstawie Twojej tabeli). Wybierz produkt w sekcji 4, żeby dobrać dawkę.</p>
         <div id="am_products_table"></div>
       </div>
 
       <div class="section">
-        <h2>3. Dodaj produkt do dawki</h2>
+        <h2>4. Dodaj produkt do dawki</h2>
         <div class="input-group">
           <div>
             <label>Produkt</label>
@@ -454,13 +470,14 @@
             <input type="number" id="am_manual_grams" value="10" step="0.1" min="0" oninput="renderAmendmentPreview()">
           </div>
         </div>
+        <button class="col-btn" style="margin-bottom:10px;" onclick="fillTargetDeficit()">Uzupełnij do celu (etap: <span id="am_stage_label_btn">Kwitnienie</span>)</button>
 
         <div id="am_preview" class="lime-box" style="margin-top:14px;"></div>
         <button class="col-btn selected" style="margin-top:10px;" onclick="addAmendmentToCart()">+ Dodaj do listy</button>
       </div>
 
       <div class="section">
-        <h2>4. Lista dodanych produktów</h2>
+        <h2>5. Lista dodanych produktów</h2>
         <div id="am_cart_table"><p class="note">Lista jest pusta — dodaj produkty powyżej.</p></div>
       </div>
 
@@ -870,6 +887,39 @@
 
     window._amendmentCart = [];
 
+    // Targety PPM wg Mehlich 3, dla trzech etapów wzrostu (na podstawie Twojej tabeli).
+    // Dla przedziałów przyjęto środek zakresu jako pojedynczy cel liczbowy.
+    const MEHLICH3_STAGES = {
+      soil: {
+        label: 'Soil (baza)', tec: '10–15', ph: '6,0–7,0',
+        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 100, P: 100, B: 1, Fe: 50, Mn: 25, Cu: 5, Zn: 10, N: 50, Si: null, Al: 200, Co: 0.5, Mo: 0.5, Se: 0.5 },
+        sat: { Ca: 68, Mg: 12, K: 4, Na: 1.5 }
+      },
+      veg: {
+        label: 'Wegetacja', tec: '15–20', ph: '6,0–7,0',
+        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 250, P: 250, B: 2.5, Fe: 150, Mn: 75, Cu: 7.5, Zn: 15, N: 75, Si: 5, Al: 200, Co: 0.5, Mo: 0.5, Se: 1.0 },
+        sat: { Ca: 71.5, Mg: 12, K: 5.5, Na: 1.5 }
+      },
+      flo: {
+        label: 'Kwitnienie', tec: '20–30', ph: '6,0–7,0',
+        targets: { Ca: 3000, Mg: 300, K: 500, Na: 50, S: 650, P: 650, B: 3, Fe: 200, Mn: 100, Cu: 12.5, Zn: 25, N: 125, Si: 11.5, Al: 200, Co: 1.0, Mo: 1.0, Se: 1.5 },
+        sat: { Ca: 71.5, Mg: 12, K: 5.5, Na: 1.5 }
+      }
+    };
+    // Docelowe proporcje między pierwiastkami (trzecia kolumna Twojej tabeli).
+    const TARGET_RATIOS = [
+      { label: 'Ca:Mg', a: 'Ca', b: 'Mg', target: 10 },
+      { label: 'Ca:K', a: 'Ca', b: 'K', target: 6 },
+      { label: 'K:P', a: 'K', b: 'P', target: 1.7 },
+      { label: 'B:Ca', a: 'B', b: 'Ca', target: 0.001 },
+      { label: 'K:Fe', a: 'K', b: 'Fe', target: 2 },
+      { label: 'Fe:Mn', a: 'Fe', b: 'Mn', target: 2 },
+      { label: 'P:Zn', a: 'P', b: 'Zn', target: 10 },
+      { label: 'Zn:Cu', a: 'Zn', b: 'Cu', target: 2 },
+      { label: 'Ca:N', a: 'Ca', b: 'N', target: 60 },
+    ];
+    window._targetStage = 'flo';
+
     function getAmendment(id) {
       return AMENDMENTS.find(a => a.id === id);
     }
@@ -1039,8 +1089,10 @@
       return totals;
     }
 
-    function renderSummary() {
-      const base = {
+    const ELEMENT_ORDER = ['N', 'P', 'K', 'S', 'Ca', 'Mg', 'Na', 'B', 'Fe', 'Mn', 'Cu', 'Zn', 'Al', 'Co', 'Mo', 'Se', 'Si'];
+
+    function getBaselineTotals() {
+      return {
         N: parseFloat(document.getElementById('am_base_n').value) || 0,
         P: parseFloat(document.getElementById('am_base_p').value) || 0,
         S: parseFloat(document.getElementById('am_base_s').value) || 0,
@@ -1059,16 +1111,33 @@
         K: window._postLime ? window._postLime.k : 0,
         Na: window._postLime ? window._postLime.na : 0,
       };
+    }
+
+    // Start (po wapnowaniu + import PDF) + wszystko z listy produktów = aktualny profil gleby.
+    // Używane zarówno przez podsumowanie, jak i przez porównanie z targetami PPM.
+    function getCurrentTotals() {
+      const base = getBaselineTotals();
       const added = getCartTotals();
-      const order = ['N', 'P', 'K', 'S', 'Ca', 'Mg', 'Na', 'B', 'Fe', 'Mn', 'Cu', 'Zn', 'Al', 'Co', 'Mo', 'Se', 'Si'];
-      const allElements = Array.from(new Set([...Object.keys(base), ...Object.keys(added)]));
-      allElements.sort((a, b) => {
-        const ia = order.indexOf(a), ib = order.indexOf(b);
+      const total = {};
+      Array.from(new Set([...Object.keys(base), ...Object.keys(added)])).forEach(el => {
+        total[el] = (base[el] || 0) + (added[el] || 0);
+      });
+      return { base, added, total };
+    }
+
+    function sortElements(list) {
+      return list.slice().sort((a, b) => {
+        const ia = ELEMENT_ORDER.indexOf(a), ib = ELEMENT_ORDER.indexOf(b);
         if (ia === -1 && ib === -1) return a.localeCompare(b);
         if (ia === -1) return 1;
         if (ib === -1) return -1;
         return ia - ib;
       });
+    }
+
+    function renderSummary() {
+      const { base, added } = getCurrentTotals();
+      const allElements = sortElements(Array.from(new Set([...Object.keys(base), ...Object.keys(added)])));
 
       let html = '<table><thead><tr><th>Pierwiastek</th><th>Start</th><th>Z odżywek</th><th>Razem</th></tr></thead><tbody>';
       allElements.forEach(el => {
@@ -1081,8 +1150,88 @@
       document.getElementById('am_summary_table').innerHTML = html;
 
       renderFinalSaturation(base, added);
+      renderTargetTable();
+      renderTargetCompareTable();
+      renderRatioTable();
       updateSoilMassDisplay();
     }
+
+    function setTargetStage(stage) {
+      window._targetStage = stage;
+      document.querySelectorAll('#tab-nawoz .quick-btn[data-stage]').forEach(b => b.classList.toggle('active', b.dataset.stage === stage));
+      const stageLabelEl = document.getElementById('am_stage_label_btn');
+      if (stageLabelEl) stageLabelEl.textContent = MEHLICH3_STAGES[stage].label;
+      renderTargetTable();
+      renderTargetCompareTable();
+    }
+    window.setTargetStage = setTargetStage;
+
+    function renderTargetTable() {
+      const stage = MEHLICH3_STAGES[window._targetStage];
+      let html = `<table><thead><tr><th>Parametr</th><th>Cel (${stage.label})</th></tr></thead><tbody>`;
+      html += `<tr><td>TCEC</td><td>${stage.tec}</td></tr>`;
+      html += `<tr><td>pH</td><td>${stage.ph}</td></tr>`;
+      ELEMENT_ORDER.forEach(el => {
+        const v = stage.targets[el];
+        if (v == null) return;
+        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>${v} ppm</td></tr>`;
+      });
+      Object.keys(stage.sat).forEach(el => {
+        html += `<tr><td>Nasycenie ${el} (%)</td><td>${stage.sat[el]}%</td></tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('am_target_table').innerHTML = html;
+    }
+
+    function renderTargetCompareTable() {
+      const { total } = getCurrentTotals();
+      const stage = MEHLICH3_STAGES[window._targetStage];
+      const soilKg = getSoilMassKg();
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Aktualnie</th><th>Cel</th><th>Brakuje / Nadmiar</th><th>Brakuje (g)</th></tr></thead><tbody>';
+      ELEMENT_ORDER.forEach(el => {
+        const target = stage.targets[el];
+        if (target == null) return;
+        const current = total[el] || 0;
+        const diffPpm = target - current;
+        const diffG = soilKg > 0 ? (diffPpm * soilKg) / 1000 : null;
+        const label = diffPpm > 0 ? `brakuje ${diffPpm.toFixed(1)}` : `nadmiar ${Math.abs(diffPpm).toFixed(1)}`;
+        const color = diffPpm > 0 ? '#c53030' : '#276749';
+        html += `<tr><td>${ELEMENT_LABELS[el] || el}</td><td>${current.toFixed(1)}</td><td>${target}</td>`
+          + `<td style="color:${color}; font-weight:600;">${label} ppm</td>`
+          + `<td>${diffG != null ? (diffPpm > 0 ? '+' : '') + diffG.toFixed(2) + ' g' : '—'}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('am_target_compare_table').innerHTML = html;
+    }
+
+    function renderRatioTable() {
+      const { total } = getCurrentTotals();
+      let html = '<table><thead><tr><th>Proporcja</th><th>Cel</th><th>Aktualnie</th></tr></thead><tbody>';
+      TARGET_RATIOS.forEach(r => {
+        const va = total[r.a] || 0;
+        const vb = total[r.b] || 0;
+        const current = vb > 0 ? va / vb : null;
+        html += `<tr><td>${r.label}</td><td>${r.target}</td><td>${current != null ? current.toFixed(3) : '—'}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('am_ratio_table').innerHTML = html;
+    }
+
+    // Wypełnia "Podnieś o (ppm)" różnicą do celu wybranego etapu dla aktualnie wybranego pierwiastka.
+    function fillTargetDeficit() {
+      const el = document.getElementById('am_target_element').value;
+      if (!el) return;
+      const stage = MEHLICH3_STAGES[window._targetStage];
+      const target = stage.targets[el];
+      if (target == null) return;
+      const { total } = getCurrentTotals();
+      const current = total[el] || 0;
+      const deficit = Math.max(0, target - current);
+      document.getElementById('am_mode').value = 'ppm';
+      document.getElementById('am_target_ppm').value = deficit.toFixed(1);
+      renderAmendmentPreview();
+    }
+    window.fillTargetDeficit = fillTargetDeficit;
 
     function renderFinalSaturation(base, added) {
       const box = document.getElementById('am_saturation_table');
