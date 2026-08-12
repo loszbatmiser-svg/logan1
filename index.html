@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Kalkulator PPM + CAC – Gleba</title>
+  <script src="vendor/pdfjs/pdf.min.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; background: #f0f4f8; padding: 20px; color: #1a202c; margin: 0; line-height: 1.45; }
     .container { max-width: 980px; margin: 0 auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
@@ -330,20 +331,11 @@
   </div>
 
   <script>
-    // ===== PDF.js (leniwe ładowanie) =====
-    // Biblioteka pdf.js jest potrzebna TYLKO do importu raportu PDF.
-    // Ładujemy ją dopiero gdy użytkownik wybierze plik, i w try/catch,
-    // żeby ewentualny problem z siecią/CDN nie blokował reszty kalkulatora.
-    let pdfjsLibPromise = null;
-    function loadPdfjs() {
-      if (!pdfjsLibPromise) {
-        pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs')
-          .then(lib => {
-            lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
-            return lib;
-          });
-      }
-      return pdfjsLibPromise;
+    // ===== PDF.js =====
+    // Biblioteka pdf.js jest dołączona lokalnie w vendor/pdfjs (bez CDN),
+    // więc import PDF działa też offline i po otwarciu pliku bezpośrednio (file://).
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
     }
 
     // ===== PDF PARSER =====
@@ -363,14 +355,11 @@
       document.getElementById('pdf-info').innerText = '';
       window.parsedColumns = [];
 
-      let pdfjsLib;
-      try {
-        pdfjsLib = await loadPdfjs();
-      } catch (e) {
-        console.error(e);
-        setStatus('Nie udało się wczytać biblioteki pdf.js (brak internetu, plik otwarty lokalnie zamiast przez serwer, lub blokada CDN). Reszta kalkulatora działa normalnie.', true);
+      if (!window.pdfjsLib) {
+        setStatus('Biblioteka pdf.js nie została wczytana. Sprawdź, czy folder vendor/pdfjs znajduje się obok pliku index.html.', true);
         return;
       }
+      const pdfjsLib = window.pdfjsLib;
 
       try {
         const arrayBuffer = await file.arrayBuffer();
