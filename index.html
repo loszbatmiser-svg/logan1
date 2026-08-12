@@ -42,6 +42,14 @@
     .collapsible-heading .caret { display: inline-block; transition: transform 0.15s ease; font-size: 0.8em; flex-shrink: 0; }
     .collapsible-heading.is-collapsed .caret { transform: rotate(-90deg); }
     .collapsible-body.collapsed { display: none; }
+    /* Nagłówki kroków i kompaktowa lista statusów w automatycznej dawce */
+    .step-head { margin: 20px 0 6px; color: #2b6cb0; font-size: 1rem; border-bottom: 2px solid #bee3f8; padding-bottom: 4px; }
+    .status-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 4px; }
+    .status-item { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; border-radius: 6px; font-size: 0.86rem; line-height: 1.35; }
+    .status-item.el-cation { background: #ebf8ff; border-left: 4px solid #3182ce; }
+    .status-item.el-anion { background: #fffaf0; border-left: 4px solid #dd6b20; }
+    .status-item.el-micro { background: #f0fff4; border-left: 4px solid #38a169; }
+    .status-ico { font-weight: 700; flex-shrink: 0; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
     @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
     .note { font-size: 0.78rem; color: #718096; margin-top: 6px; line-height: 1.4; }
@@ -1208,19 +1216,35 @@
       return r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`;
     }
 
-    // Dla pierwiastków obecnych w kontroli proporcji (Fe, Mn, Cu, Zn, B) liczy, jaką wartość
-    // narzucałaby sama proporcja (przy obecnej wartości powiązanego pierwiastka), biorąc granicę
-    // proporcji dającą NAJWYŻSZY wynik dla danego pierwiastka (spójnie z "bazuj na maksimum").
+    // Dla pierwiastków obecnych w kontroli proporcji liczy, jaką wartość narzucałaby sama proporcja
+    // (przy obecnej wartości powiązanego pierwiastka), biorąc granicę dającą NAJWYŻSZY wynik.
     // Zwraca obiekty z uzasadnieniem, żeby krok 2 mógł pokazać, DLACZEGO dana ilość jest potrzebna.
+    //
+    // WAŻNE: jeżeli pierwiastek jest LICZNIKIEM proporcji, a mianownik przekracza swój własny target,
+    // to rozjazd bierze się z nadmiaru mianownika — dokładanie licznika tego nie naprawia (naprawą jest
+    // obniżenie mianownika). Taka proporcja jest oznaczana jako `blocked` i NIE napędza dawki.
+    // Przykład: Ca:N = 60 przy azocie 176,8 ppm (cel 150) kazałoby dosypać ~7000 ppm wapnia, choć
+    // realnym problemem jest za wysoki azot.
     function getRatioDerivedTargets(el, total) {
+      const stage = window._targetStage;
       const candidates = [];
       TARGET_RATIOS.forEach(r => {
         if (r.a === el) {
           // Pierwiastek jest licznikiem proporcji, np. Fe w Fe:Mn → Fe = krotność × Mn.
           const otherVal = total[r.b] || 0;
           const value = r.max * otherVal;
+          const otherT = getEffectiveTarget(stage, r.b);
+          const otherMax = otherT && otherT.max != null ? otherT.max : null;
+          if (otherMax != null && otherVal > otherMax + 0.05) {
+            candidates.push({
+              value, ratio: r, otherEl: r.b, otherVal, blocked: true,
+              explain: `${r.label} rozjeżdża się przez nadmiar ${r.b}: ${otherVal.toFixed(1)} ppm przy celu ${otherMax.toFixed(1)} ppm. `
+                + `Dosypanie ${el} tego nie naprawi (musiałoby go być ${value.toFixed(1)} ppm) — trzeba obniżyć ${r.b}.`
+            });
+            return;
+          }
           candidates.push({
-            value, ratio: r, otherEl: r.b, otherVal,
+            value, ratio: r, otherEl: r.b, otherVal, blocked: false,
             explain: `${r.label} ma wynosić ${formatRatioBounds(r)} → przy ${r.b} = ${otherVal.toFixed(1)} ppm, ${el} powinno sięgać ${value.toFixed(1)} ppm (${otherVal.toFixed(1)} × ${r.max})`
           });
         } else if (r.b === el && r.min > 0) {
@@ -1228,7 +1252,7 @@
           const otherVal = total[r.a] || 0;
           const value = otherVal / r.min;
           candidates.push({
-            value, ratio: r, otherEl: r.a, otherVal,
+            value, ratio: r, otherEl: r.a, otherVal, blocked: false,
             explain: `${r.label} ma wynosić ${formatRatioBounds(r)} → przy ${r.a} = ${otherVal.toFixed(1)} ppm, ${el} powinno sięgać ${value.toFixed(1)} ppm (${otherVal.toFixed(1)} ÷ ${r.min})`
           });
         }
@@ -1237,12 +1261,16 @@
     }
 
     // Wiążące (najwyższe) wymaganie proporcji dla danego pierwiastka + pozostałe, dla kontekstu.
+    // value === null oznacza, że wszystkie proporcje tego pierwiastka są zablokowane nadmiarem partnera.
     function getBindingRatioTarget(el, total) {
       const cands = getRatioDerivedTargets(el, total);
       if (!cands.length) return null;
-      const binding = cands.reduce((best, c) => (c.value > best.value ? c : best), cands[0]);
-      const others = cands.filter(c => c !== binding);
-      return { value: binding.value, explain: binding.explain, others };
+      const blockedList = cands.filter(c => c.blocked);
+      const usable = cands.filter(c => !c.blocked);
+      if (!usable.length) return { value: null, explain: null, others: [], blockedList };
+      const binding = usable.reduce((best, c) => (c.value > best.value ? c : best), usable[0]);
+      const others = usable.filter(c => c !== binding);
+      return { value: binding.value, explain: binding.explain, others, blockedList };
     }
 
     // Które produkty z listy już dostarczają dany pierwiastek (do pokazania „pokryte przez…”).
@@ -1274,7 +1302,8 @@
       const soilKg = getSoilMassKg();
       const targetRows = [];
       const ratioRows = [];
-      if (soilKg <= 0) return { targetRows, ratioRows };
+      const blockedRows = [];
+      if (soilKg <= 0) return { targetRows, ratioRows, blockedRows };
 
       // Zwraca false, jeśli żaden produkt w bazie nie dostarcza tego pierwiastka (np. sód) —
       // wtedy zamiast propozycji dawki pokazujemy jawną informację o braku produktu.
@@ -1316,6 +1345,11 @@
         // PO osiągnięciu targetu z kroku 1 — czyli tylko brakujący balans, nie cała dawka od nowa.
         const binding = getBindingRatioTarget(el, total);
         if (!binding) return;
+        // Proporcje, których nie da się naprawić dodawaniem (nadmiar partnera) — osobny blok.
+        if (binding.blockedList.length) {
+          blockedRows.push({ el, items: binding.blockedList });
+        }
+        if (binding.value == null) return; // wszystkie proporcje tego pierwiastka zablokowane
         const afterTarget = Math.max(current, baseTarget);
         const extra = { explain: binding.explain, otherExplains: binding.others.map(o => o.explain) };
         if (binding.value <= afterTarget + 0.05) {
@@ -1324,7 +1358,7 @@
           buildProductRows(el, afterTarget, binding.value, 'ratio', ratioRows, extra);
         }
       });
-      return { targetRows, ratioRows };
+      return { targetRows, ratioRows, blockedRows };
     }
 
     function renderAutoDoseTable() {
@@ -1336,10 +1370,11 @@
         box.innerHTML = '<p class="note">Ustaw objętość gleby i gęstość nasypową w zakładce CAC/Gleba.</p>';
         return;
       }
-      const { targetRows, ratioRows } = computeAutoDoseGroups();
+      const { targetRows, ratioRows, blockedRows } = computeAutoDoseGroups();
       // Wspólna, płaska lista — indeksy w niej są używane przez przyciski „+ Dodaj”.
       const flat = targetRows.concat(ratioRows);
       window._autoDoseRows = flat;
+      flat.forEach((r, i) => { r._idx = i; });
 
       function coverageText(r) {
         if (!r.coverage || !r.coverage.length) return '';
@@ -1347,64 +1382,96 @@
         return ` <span class="explain">— pokryte przez: ${parts.join(', ')}</span>`;
       }
 
-      // withWhy = true → dodatkowa kolumna z uzasadnieniem z tabeli „Kontrola proporcji”.
-      function renderBlock(rows, offset, emptyMsg, withWhy) {
-        if (!rows.length) return `<p class="note">${emptyMsg}</p>`;
+      // Tabela tylko z wierszami wymagającymi działania (mają przycisk „+ Dodaj”).
+      function renderNeedTable(rows, withWhy) {
         let html = '<table><thead><tr><th>Pierwiastek</th>'
           + (withWhy ? '<th>Dlaczego — z kontroli proporcji</th>' : '')
           + '<th>Produkt</th><th>Z ppm → do ppm</th>'
           + '<th>Dawka (g)</th><th>Dostarczy też</th><th></th></tr></thead><tbody>';
         let lastEl = null;
-        rows.forEach((r, i) => {
-          const idx = offset + i;
+        rows.forEach(r => {
+          const firstOfEl = lastEl !== r.el;
           const whyCell = withWhy
-            ? `<td>${lastEl === r.el ? '' : `<span class="explain">${r.explain || '—'}</span>`
-                + ((lastEl !== r.el && r.otherExplains && r.otherExplains.length)
-                    ? `<br><span class="explain" style="opacity:0.75;">pozostałe: ${r.otherExplains.join('; ')}</span>` : '')}</td>`
+            ? `<td>${firstOfEl ? `${r.explain || '—'}`
+                + ((r.otherExplains && r.otherExplains.length)
+                    ? `<br><span class="explain">pozostałe: ${r.otherExplains.join('; ')}</span>` : '') : ''}</td>`
             : '';
-          if (r.status === 'ok') {
-            const excess = r.current - r.toLevel;
-            // Przekroczenie realnej górnej granicy (np. Al > 200) to ostrzeżenie, nie sukces —
-            // inaczej niż wyjście ponad próg otwarty w górę (Ca ≥3000, Co/Mo/Se) czy ponad wymóg proporcji.
-            const isOverLimit = excess > 0.05 && r.hasUpperBound;
-            const statusText = excess > 0.05
-              ? `${isOverLimit ? 'przekroczona górna granica' : 'nadmiar'} +${excess.toFixed(1)} ppm ponad ${r.toLevel.toFixed(1)} ppm — nic nie trzeba dodawać`
-              : `balans zachowany (${r.toLevel.toFixed(1)} ppm) — nic nie trzeba dodawać`;
-            html += `<tr class="${elementRowClass(r.el)}"><td>${ELEMENT_LABELS[r.el] || r.el}</td>`
-              + (withWhy ? `<td><span class="explain">${r.explain || '—'}</span></td>` : '')
-              + `<td colspan="4" style="color:${isOverLimit ? '#dd6b20' : '#276749'}; font-weight:600;">${statusText}${coverageText(r)}</td><td></td></tr>`;
-            lastEl = r.el;
-            return;
-          }
-          if (r.status === 'noproduct') {
-            html += `<tr class="${elementRowClass(r.el)}"><td>${ELEMENT_LABELS[r.el] || r.el}</td>`
-              + (withWhy ? `<td><span class="explain">${r.explain || '—'}</span></td>` : '')
-              + `<td colspan="4" style="color:#c53030; font-weight:600;">brakuje +${(r.toLevel - r.fromLevel).toFixed(1)} ppm `
-              + `(${r.fromLevel.toFixed(1)} → ${r.toLevel.toFixed(1)}), ale żaden produkt w bazie nie dostarcza tego pierwiastka`
-              + `</td><td></td></tr>`;
-            lastEl = r.el;
-            return;
-          }
           const othersText = Object.keys(r.others).map(oe => `${ELEMENT_LABELS[oe] || oe} +${r.others[oe].toFixed(1)} ppm`).join(', ') || '—';
           html += `<tr class="${elementRowClass(r.el)}">`
-            + `<td>${lastEl === r.el ? '' : ELEMENT_LABELS[r.el] || r.el}</td>`
+            + `<td>${firstOfEl ? `<strong>${ELEMENT_LABELS[r.el] || r.el}</strong>` : ''}</td>`
             + whyCell
             + `<td>${r.product.name}</td>`
-            + `<td>${r.fromLevel.toFixed(1)} → ${r.toLevel.toFixed(1)} <span class="explain">(+${(r.toLevel - r.fromLevel).toFixed(1)} ppm)</span></td>`
-            + `<td>${r.gramsNeeded.toFixed(2)} g</td>`
+            + `<td><strong>${r.fromLevel.toFixed(1)} → ${r.toLevel.toFixed(1)}</strong> <span class="explain">(+${(r.toLevel - r.fromLevel).toFixed(1)} ppm)</span></td>`
+            + `<td><strong>${r.gramsNeeded.toFixed(2)} g</strong></td>`
             + `<td>${othersText}</td>`
-            + `<td><button class="col-btn" style="padding:5px 10px;" onclick="autoAddToCart(${idx})">+ Dodaj</button></td></tr>`;
+            + `<td><button class="col-btn" style="padding:5px 10px;" onclick="autoAddToCart(${r._idx})">+ Dodaj</button></td></tr>`;
           lastEl = r.el;
         });
         return html + '</tbody></table>';
       }
 
-      let html = '<h4 style="margin:6px 0 4px; color:#2b6cb0;">Krok 1 — do targetu Mehlich 3</h4>';
-      html += renderBlock(targetRows, 0, 'Brak pierwiastków do uzupełnienia w tym kroku.', false);
-      html += '<h4 style="margin:18px 0 4px; color:#2b6cb0;">Krok 2 — dopłata wg kontroli proporcji</h4>';
-      html += '<p class="note" style="margin-top:0;">Po zbalansowaniu wg targetu: ile ppm danego pierwiastka trzeba <strong>jeszcze</strong> dodać, żeby proporcje z tabeli „Kontrola proporcji” się zgadzały. Kolumna „Dlaczego” pokazuje, która proporcja tego wymaga i skąd wynika liczba. Liczone od poziomu <strong>po</strong> kroku 1 — to sama brakująca nadwyżka, a nie cała dawka od nowa.</p>';
-      html += renderBlock(ratioRows, targetRows.length, 'Żadna proporcja nie wymaga dopłaty ponad target.', true);
-      html += '<p class="note">Kolejność jest celowa: najpierw dochodzisz do targetu Mehlich 3 dla wybranego etapu, dopiero potem dokładasz to, czego dodatkowo wymagają proporcje. Wiersze są ułożone i pokolorowane wg grup: <span style="color:#2c5282; font-weight:600;">kationy</span> → <span style="color:#9c4221; font-weight:600;">aniony</span> → <span style="color:#276749; font-weight:600;">mikroelementy</span>. Po dodaniu produktu do listy jego pierwiastek znika z propozycji (zostaje wiersz statusu z informacją, co go pokryło). Wszystko przelicza się na żywo przy zmianie etapu, masy gleby i zawartości listy.</p>';
+      // Kompaktowa lista statusów — zamiast pustych wierszy tabeli.
+      function renderStatusList(okRows, noProductRows, withWhy) {
+        if (!okRows.length && !noProductRows.length) return '';
+        let html = '<div class="status-list">';
+        noProductRows.forEach(r => {
+          html += `<div class="status-item ${elementRowClass(r.el)}"><span class="status-ico" style="color:#c53030;">✕</span>`
+            + `<span><strong>${ELEMENT_LABELS[r.el] || r.el}</strong> — brakuje +${(r.toLevel - r.fromLevel).toFixed(1)} ppm `
+            + `(${r.fromLevel.toFixed(1)} → ${r.toLevel.toFixed(1)}), ale żaden produkt w bazie nie dostarcza tego pierwiastka`
+            + (withWhy && r.explain ? `<br><span class="explain">${r.explain}</span>` : '')
+            + '</span></div>';
+        });
+        okRows.forEach(r => {
+          const excess = r.current - r.toLevel;
+          const isOverLimit = excess > 0.05 && r.hasUpperBound;
+          const ico = isOverLimit ? '⚠' : '✓';
+          const color = isOverLimit ? '#dd6b20' : '#276749';
+          const txt = excess > 0.05
+            ? `${r.current.toFixed(1)} ppm — ${isOverLimit ? 'przekroczona górna granica' : 'ponad wymóg'} ${r.toLevel.toFixed(1)} ppm (+${excess.toFixed(1)})`
+            : `${r.current.toFixed(1)} ppm — dokładnie na poziomie ${r.toLevel.toFixed(1)} ppm`;
+          html += `<div class="status-item ${elementRowClass(r.el)}"><span class="status-ico" style="color:${color};">${ico}</span>`
+            + `<span><strong>${ELEMENT_LABELS[r.el] || r.el}</strong> — ${txt}${coverageText(r)}`
+            + (withWhy && r.explain ? `<br><span class="explain">${r.explain}</span>` : '')
+            + '</span></div>';
+        });
+        return html + '</div>';
+      }
+
+      function renderStep(rows, withWhy, emptyMsg) {
+        const need = rows.filter(r => r.status === 'need');
+        const ok = rows.filter(r => r.status === 'ok');
+        const noProd = rows.filter(r => r.status === 'noproduct');
+        let html = '';
+        if (need.length) html += renderNeedTable(need, withWhy);
+        else html += `<p class="note" style="color:#276749; font-weight:600;">${emptyMsg}</p>`;
+        const status = renderStatusList(ok, noProd, withWhy);
+        if (status) {
+          html += `<p class="note" style="margin-bottom:2px;">Nic do dodania (${ok.length + noProd.length}):</p>` + status;
+        }
+        return html;
+      }
+
+      let html = '<h4 class="step-head">Krok 1 — do targetu Mehlich 3</h4>';
+      html += renderStep(targetRows, false, 'Wszystkie pierwiastki są już na poziomie targetu — nic do dodania w tym kroku.');
+
+      html += '<h4 class="step-head">Krok 2 — dopłata wg kontroli proporcji</h4>';
+      html += '<p class="note" style="margin-top:0;">Po zbalansowaniu wg targetu: ile ppm danego pierwiastka trzeba <strong>jeszcze</strong> dodać, żeby proporcje z tabeli „Kontrola proporcji” się zgadzały. Liczone od poziomu <strong>po</strong> kroku 1 — to sama brakująca nadwyżka, a nie cała dawka od nowa.</p>';
+      html += renderStep(ratioRows, true, 'Żadna proporcja nie wymaga dopłaty ponad target.');
+
+      if (blockedRows.length) {
+        html += '<h4 class="step-head" style="color:#9c4221;">Proporcje, których nie naprawi dodawanie</h4>';
+        html += '<p class="note" style="margin-top:0;">Tu rozjazd bierze się z <strong>nadmiaru drugiego pierwiastka</strong>, a nie z niedoboru tego. Dosypywanie pogłębiłoby tylko przenawożenie — realnym rozwiązaniem jest obniżenie tamtego pierwiastka (wypłukanie, rozcieńczenie gleby, dobór nawozów bez niego).</p>';
+        html += '<div class="status-list">';
+        blockedRows.forEach(b => {
+          b.items.forEach(it => {
+            html += `<div class="status-item ${elementRowClass(b.el)}"><span class="status-ico" style="color:#dd6b20;">⚠</span>`
+              + `<span><strong>${ELEMENT_LABELS[b.el] || b.el}</strong> — ${it.explain}</span></div>`;
+          });
+        });
+        html += '</div>';
+      }
+
+      html += '<p class="note">Kolejność jest celowa: najpierw dochodzisz do targetu Mehlich 3 dla wybranego etapu, dopiero potem dokładasz to, czego dodatkowo wymagają proporcje. Wiersze są ułożone i pokolorowane wg grup: <span style="color:#2c5282; font-weight:600;">kationy</span> → <span style="color:#9c4221; font-weight:600;">aniony</span> → <span style="color:#276749; font-weight:600;">mikroelementy</span>. Po dodaniu produktu do listy jego pierwiastek znika z propozycji i pojawia się niżej ze statusem. Wszystko przelicza się na żywo przy zmianie etapu, masy gleby i zawartości listy.</p>';
       box.innerHTML = html;
     }
 
