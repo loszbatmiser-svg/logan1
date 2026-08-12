@@ -473,6 +473,18 @@
       <div class="section">
         <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_4', this)"><span class="caret">▾</span> 4. Dodaj produkt do dawki</h2>
         <div class="collapsible-body" id="am_cbody_4">
+        <h3 class="collapsible-heading" onclick="toggleCollapse('am_cbody_autodose', this)"><span class="caret">▾</span> Automatyczna dawka do celu (etap: <span id="am_stage_label_auto">Kwitnienie</span>)</h3>
+        <div class="collapsible-body" id="am_cbody_autodose">
+        <p class="note">
+          Dla każdego pierwiastka poniżej minimum wybranego etapu: gramy potrzebne, żeby osiągnąć dolną i górną granicę celu,
+          przeliczone na masę gleby (objętość × gęstość nasypowa z zakładki CAC). „Dostarczy też” pokazuje inne pierwiastki,
+          które ten sam produkt doda przy dawce do minimum. Kliknij „+ Dodaj”, żeby od razu dodać tę dawkę do listy w sekcji 5.
+        </p>
+        <div id="am_auto_dose_table"></div>
+        </div>
+
+        <h3 class="collapsible-heading" style="margin-top:18px;" onclick="toggleCollapse('am_cbody_manual', this)"><span class="caret">▾</span> Dawkowanie ręczne</h3>
+        <div class="collapsible-body" id="am_cbody_manual">
         <div class="input-group">
           <div>
             <label>Produkt</label>
@@ -506,6 +518,7 @@
 
         <div id="am_preview" class="lime-box" style="margin-top:14px;"></div>
         <button class="col-btn selected" style="margin-top:10px;" onclick="addAmendmentToCart()">+ Dodaj do listy</button>
+        </div>
         </div>
       </div>
 
@@ -897,20 +910,20 @@
       { id: 'crabshell', name: 'Skorupy kraba (Crab shell)', group: 'Organiczne', pct: { S: 0.006 } },
       { id: 'bonemeal', name: 'Mączka kostna (Bone meal)', group: 'Organiczne', pct: { N: 0.03, P: 0.066, Ca: 0.20, Mg: 0.004 } },
       { id: 'aminos', name: 'Aminokwasy (Aminos)', group: 'Organiczne', pct: { N: 0.13 } },
-      { id: 'batguano_plagron', name: 'Guano nietoperzy Plagron', group: 'Organiczne', pct: { N: 0.03, P: 0.066, K: 0.033 }, cupG: 110 },
+      { id: 'batguano_plagron', name: 'Guano nietoperzy Plagron', group: 'Organiczne', pct: { N: 0.03, P: 0.066, K: 0.033 } },
       { id: 'batguano_guanokan', name: 'Guano nietoperzy Guanokan', group: 'Organiczne', pct: { N: 0.01, P: 0.026, Ca: 0.10 } },
       { id: 'frass', name: 'Fras owadzi (Frass)', group: 'Organiczne', pct: { N: 0.04, P: 0.01, K: 0.02 } },
-      { id: 'alfalfa', name: 'Lucerna (Alfalfa)', group: 'Organiczne', pct: { N: 0.02, P: 0.01, K: 0.02 }, cupG: 60 },
-      { id: 'soybean', name: 'Mączka sojowa (Soybean meal)', group: 'Organiczne', pct: { N: 0.07, P: 0.02, K: 0.01 }, cupG: 58 },
+      { id: 'alfalfa', name: 'Lucerna (Alfalfa)', group: 'Organiczne', pct: { N: 0.02, P: 0.01, K: 0.02 } },
+      { id: 'soybean', name: 'Mączka sojowa (Soybean meal)', group: 'Organiczne', pct: { N: 0.07, P: 0.02, K: 0.01 } },
       { id: 'cap1', name: 'Fosforan wapnia I', group: 'Mineralne', pct: { P: 0.22, Ca: 0.16 } },
       { id: 'cap2', name: 'Fosforan wapnia II', group: 'Mineralne', pct: { P: 0.18, Ca: 0.23 } },
       { id: 'cap3', name: 'Fosforan wapnia III', group: 'Mineralne', pct: { P: 0.20, Ca: 0.38 } },
       { id: 'wollastonite', name: 'Wollastonit', group: 'Mineralne', pct: { Ca: 0.34 }, note: 'Zawiera też ok. 24% Si (nieuwzględnione w bilansie ppm).' },
       { id: 'aglime', name: 'Wapno rolnicze CaCO₃ (Ag Lime)', group: 'Mineralne', pct: { Ca: 0.40, Mg: 0.03 }, note: 'Wg tabeli Mg 1–5%, do obliczeń przyjęto 3%.' },
       { id: 'dolomite', name: 'Dolomit (Dolomite Lime)', group: 'Mineralne', pct: { Ca: 0.22, Mg: 0.13 } },
-      { id: 'gypsum', name: 'Gips (Gypsum)', group: 'Mineralne', pct: { S: 0.16, Ca: 0.22 }, cupG: 100 },
+      { id: 'gypsum', name: 'Gips (Gypsum)', group: 'Mineralne', pct: { S: 0.16, Ca: 0.22 } },
       { id: 'epsom', name: 'Sól gorzka (Epsom Salt)', group: 'Mineralne', pct: { S: 0.14, Mg: 0.10 } },
-      { id: 'ksulfate', name: 'Siarczan potasu (K Sulfate)', group: 'Mineralne', pct: { K: 0.42, S: 0.175 }, cupG: 140 },
+      { id: 'ksulfate', name: 'Siarczan potasu (K Sulfate)', group: 'Mineralne', pct: { K: 0.42, S: 0.175 } },
       { id: 'sulfur', name: 'Siarka (Sulfur)', group: 'Mineralne', pct: { S: 0.80 } },
       { id: 'borax', name: 'Boraks (Borax)', group: 'Mikroelementy', pct: { B: 0.09 } },
       { id: 'mn', name: 'Siarczan manganu (Mn)', group: 'Mikroelementy', pct: { Mn: 0.32, S: 0.19 } },
@@ -1089,7 +1102,7 @@
         html += `<div class="collapsible-body" id="${bodyId}">`;
         html += '<table><thead><tr><th>Produkt</th>'
           + MACRO_ELEMENTS.map(e => `<th class="${elementRowClass(e)}-h">${e}</th>`).join('')
-          + '<th>Inne</th><th>1/2 szklanki</th></tr></thead><tbody>';
+          + '<th>Inne</th></tr></thead><tbody>';
         groups[g].forEach(a => {
           html += '<tr><td>' + a.name + '</td>';
           MACRO_ELEMENTS.forEach(e => {
@@ -1097,7 +1110,6 @@
           });
           const others = Object.keys(a.pct).filter(e => !MACRO_ELEMENTS.includes(e)).map(e => `${e} ${(a.pct[e] * 100).toFixed(1)}%`).join(', ');
           html += '<td>' + (others || '—') + '</td>';
-          html += '<td>' + (a.cupG ? a.cupG + ' g' : '—') + '</td>';
           html += '</tr>';
         });
         html += '</tbody></table></div>';
@@ -1147,9 +1159,7 @@
         box.innerHTML = '<p class="note">Ustaw objętość gleby i gęstość nasypową w zakładce CAC/Gleba, wybierz produkt.</p>';
         return;
       }
-      let html = `<p class="big">Dawka: ${result.grams.toFixed(2)} g`
-        + (product.cupG ? ` (≈ ${((result.grams / product.cupG) * 0.5).toFixed(2)} × 1/2 szklanki)` : '')
-        + '</p>';
+      let html = `<p class="big">Dawka: ${result.grams.toFixed(2)} g</p>`;
       html += '<table><thead><tr><th>Pierwiastek</th><th>Dostarczone ppm</th></tr></thead><tbody>';
       sortElements(Object.keys(result.delivered)).forEach(el => {
         html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>+${result.delivered[el].toFixed(2)} ppm</td></tr>`;
@@ -1182,6 +1192,75 @@
       const deficit = Math.max(0, t.min - current);
       document.getElementById('am_target_ppm').value = deficit.toFixed(1);
     }
+
+    // Automatyczna dawka: dla każdego pierwiastka poniżej minimum wybranego etapu, dla każdego
+    // produktu który go dostarcza, gramy potrzebne do osiągnięcia dolnej i górnej granicy celu.
+    function computeAutoDoseRows() {
+      const { total } = getCurrentTotals();
+      const soilKg = getSoilMassKg();
+      const rows = [];
+      if (soilKg <= 0) return rows;
+      ELEMENT_ORDER.forEach(el => {
+        const t = getEffectiveTarget(window._targetStage, el);
+        if (!t) return;
+        const current = total[el] || 0;
+        if (current >= t.min) return; // brak deficytu — nic do dodania
+        AMENDMENTS.forEach(p => {
+          const pct = p.pct[el];
+          if (!pct) return;
+          const gToMin = ((t.min - current) * soilKg / 1000) / pct;
+          const gToMax = t.max != null ? ((t.max - current) * soilKg / 1000) / pct : null;
+          const others = {};
+          Object.keys(p.pct).forEach(oe => {
+            if (oe === el) return;
+            others[oe] = (gToMin * p.pct[oe] * 1000) / soilKg;
+          });
+          rows.push({ el, product: p, gToMin, gToMax, others });
+        });
+      });
+      return rows;
+    }
+
+    function renderAutoDoseTable() {
+      const stageLabel = MEHLICH3_STAGES[window._targetStage].label;
+      document.querySelectorAll('#am_stage_label_auto, #am_stage_label_btn').forEach(el => el.textContent = stageLabel);
+      const box = document.getElementById('am_auto_dose_table');
+      if (!box) return;
+      if (getSoilMassKg() <= 0) {
+        box.innerHTML = '<p class="note">Ustaw objętość gleby i gęstość nasypową w zakładce CAC/Gleba.</p>';
+        return;
+      }
+      const rows = computeAutoDoseRows();
+      window._autoDoseRows = rows;
+      if (!rows.length) {
+        box.innerHTML = '<p class="note">Wszystkie śledzone pierwiastki są już w normie dla wybranego etapu — nic nie trzeba dodawać.</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Produkt</th><th>Dawka do min (g)</th>'
+        + '<th>Dawka do max (g)</th><th>Dostarczy też</th><th></th></tr></thead><tbody>';
+      let lastEl = null;
+      rows.forEach((r, idx) => {
+        const othersText = Object.keys(r.others).map(oe => `${ELEMENT_LABELS[oe] || oe} +${r.others[oe].toFixed(1)} ppm`).join(', ') || '—';
+        html += `<tr class="${elementRowClass(r.el)}">`
+          + `<td>${lastEl === r.el ? '' : ELEMENT_LABELS[r.el] || r.el}</td>`
+          + `<td>${r.product.name}</td>`
+          + `<td>${r.gToMin.toFixed(2)} g</td>`
+          + `<td>${r.gToMax != null ? r.gToMax.toFixed(2) + ' g' : '—'}</td>`
+          + `<td>${othersText}</td>`
+          + `<td><button class="col-btn" style="padding:5px 10px;" onclick="autoAddToCart(${idx})">+ Dodaj</button></td></tr>`;
+        lastEl = r.el;
+      });
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }
+
+    function autoAddToCart(idx) {
+      const row = window._autoDoseRows && window._autoDoseRows[idx];
+      if (!row) return;
+      window._amendmentCart.push({ productId: row.product.id, grams: row.gToMin });
+      renderCartAndSummary();
+    }
+    window.autoAddToCart = autoAddToCart;
 
     function addAmendmentToCart() {
       const productId = document.getElementById('am_product_select').value;
@@ -1220,6 +1299,7 @@
         cartDiv.innerHTML = html;
       }
       renderSummary();
+      renderAutoDoseTable();
     }
 
     function getCartTotals() {
@@ -1313,6 +1393,7 @@
       if (stageLabelEl) stageLabelEl.textContent = MEHLICH3_STAGES[stage].label;
       renderTargetTable();
       renderTargetCompareTable();
+      renderAutoDoseTable();
       autoFillTargetPpm();
       renderAmendmentPreview();
     }
