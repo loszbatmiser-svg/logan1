@@ -906,47 +906,72 @@
     // Targety PPM wg Mehlich 3, dla trzech etapów wzrostu (na podstawie Twojej tabeli).
     // Dla przedziałów przyjęto środek zakresu jako pojedynczy cel liczbowy.
     // Domyślne targety Mehlich 3 (punkt wyjścia — wszystkie wartości można nadpisać w interfejsie).
+    // Targety jako przedziały {min, max}. max: null = brak górnej granicy (np. Ca ">3000", Co/Mo/Se ">X").
+    // Fe/Mn/Cu/Zn/B odpowiadają regule: Fe = 1/3–1/2 K, Mn = 1/2 Fe, Cu = 1/2 Zn, Zn = 1/10 P, B = 1/1000 Ca
+    // (patrz TARGET_RATIOS) — tu wpisane wprost jako liczby z Twojej tabeli Mehlich 3 dla każdego etapu.
     const MEHLICH3_STAGES = {
       soil: {
         label: 'Soil (baza)', tec: '10–15', ph: '6,0–7,0',
-        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 100, P: 100, B: 1, Fe: 50, Mn: 25, Cu: 5, Zn: 10, N: 50, Si: null, Al: 200, Co: 0.5, Mo: 0.5, Se: 0.5 }
+        targets: {
+          Ca: { min: 2000, max: 2000 }, Mg: { min: 200, max: 200 }, K: { min: 250, max: 250 }, Na: { min: 50, max: 50 },
+          S: { min: 100, max: 100 }, P: { min: 100, max: 100 }, B: { min: 1, max: 1 }, Fe: { min: 50, max: 50 },
+          Mn: { min: 25, max: 25 }, Cu: { min: 5, max: 5 }, Zn: { min: 10, max: 10 }, N: { min: 50, max: 50 },
+          Si: null, Al: { min: 0, max: 200 }, Co: { min: 0.5, max: null }, Mo: { min: 0.5, max: null }, Se: { min: 0.5, max: null }
+        }
       },
       veg: {
         label: 'Wegetacja', tec: '15–20', ph: '6,0–7,0',
-        targets: { Ca: 2000, Mg: 200, K: 250, Na: 50, S: 250, P: 250, B: 2.5, Fe: 150, Mn: 75, Cu: 7.5, Zn: 15, N: 75, Si: 5, Al: 200, Co: 0.5, Mo: 0.5, Se: 1.0 }
+        targets: {
+          Ca: { min: 2000, max: 2000 }, Mg: { min: 200, max: 200 }, K: { min: 250, max: 250 }, Na: { min: 50, max: 50 },
+          S: { min: 250, max: 250 }, P: { min: 250, max: 250 }, B: { min: 1, max: 4 }, Fe: { min: 100, max: 200 },
+          Mn: { min: 50, max: 100 }, Cu: { min: 5, max: 10 }, Zn: { min: 10, max: 20 }, N: { min: 50, max: 100 },
+          Si: { min: 5, max: null }, Al: { min: 0, max: 200 }, Co: { min: 0.5, max: null }, Mo: { min: 0.5, max: null }, Se: { min: 1.0, max: null }
+        }
       },
       flo: {
         label: 'Kwitnienie', tec: '20–30', ph: '6,0–7,0',
-        targets: { Ca: 3000, Mg: 300, K: 500, Na: 50, S: 650, P: 650, B: 3, Fe: 200, Mn: 100, Cu: 12.5, Zn: 25, N: 125, Si: 11.5, Al: 200, Co: 1.0, Mo: 1.0, Se: 1.5 }
+        targets: {
+          Ca: { min: 3000, max: null }, Mg: { min: 300, max: 300 }, K: { min: 500, max: 500 }, Na: { min: 50, max: 50 },
+          S: { min: 500, max: 800 }, P: { min: 500, max: 800 }, B: { min: 2, max: 4 }, Fe: { min: 150, max: 250 },
+          Mn: { min: 75, max: 125 }, Cu: { min: 10, max: 15 }, Zn: { min: 20, max: 30 }, N: { min: 100, max: 150 },
+          Si: { min: 8, max: 15 }, Al: { min: 0, max: 200 }, Co: { min: 1.0, max: null }, Mo: { min: 1.0, max: null }, Se: { min: 1.5, max: null }
+        }
       }
     };
-    // Docelowe proporcje między pierwiastkami (trzecia kolumna Twojej tabeli).
+    // Docelowe proporcje między pierwiastkami (trzecia kolumna Twojej tabeli), jako przedziały.
+    // K:Fe = 2–3, bo Fe ma być 1/2 do 1/3 potasu; reszta to pojedyncze, stałe proporcje.
     const TARGET_RATIOS = [
-      { label: 'Ca:Mg', a: 'Ca', b: 'Mg', target: 10 },
-      { label: 'Ca:K', a: 'Ca', b: 'K', target: 6 },
-      { label: 'K:P', a: 'K', b: 'P', target: 1.7 },
-      { label: 'B:Ca', a: 'B', b: 'Ca', target: 0.001 },
-      { label: 'K:Fe', a: 'K', b: 'Fe', target: 2 },
-      { label: 'Fe:Mn', a: 'Fe', b: 'Mn', target: 2 },
-      { label: 'P:Zn', a: 'P', b: 'Zn', target: 10 },
-      { label: 'Zn:Cu', a: 'Zn', b: 'Cu', target: 2 },
-      { label: 'Ca:N', a: 'Ca', b: 'N', target: 60 },
+      { label: 'Ca:Mg', a: 'Ca', b: 'Mg', min: 10, max: 10 },
+      { label: 'Ca:K', a: 'Ca', b: 'K', min: 6, max: 6 },
+      { label: 'K:P', a: 'K', b: 'P', min: 1.7, max: 1.7 },
+      { label: 'B:Ca', a: 'B', b: 'Ca', min: 0.001, max: 0.001 },
+      { label: 'K:Fe', a: 'K', b: 'Fe', min: 2, max: 3 },
+      { label: 'Fe:Mn', a: 'Fe', b: 'Mn', min: 2, max: 2 },
+      { label: 'P:Zn', a: 'P', b: 'Zn', min: 10, max: 10 },
+      { label: 'Zn:Cu', a: 'Zn', b: 'Cu', min: 2, max: 2 },
+      { label: 'Ca:N', a: 'Ca', b: 'N', min: 60, max: 60 },
     ];
     window._targetStage = 'flo';
     // Własne wartości targetów wpisane przez użytkownika, nadpisujące domyślne z MEHLICH3_STAGES.
-    // Kształt: { soil: { Ca: 1800, ... }, veg: {...}, flo: {...} }
+    // Kształt: { soil: { Ca: {min,max}, ... }, veg: {...}, flo: {...} }
     window._targetOverrides = { soil: {}, veg: {}, flo: {} };
 
     function getEffectiveTarget(stage, el) {
-      const ov = window._targetOverrides[stage];
-      if (ov && ov[el] != null && !isNaN(ov[el])) return ov[el];
+      const ov = window._targetOverrides[stage] && window._targetOverrides[stage][el];
+      if (ov) return ov;
       return MEHLICH3_STAGES[stage].targets[el];
     }
-    function setTargetOverride(stage, el, rawVal) {
-      const val = parseFloat(rawVal);
+    // field: 'min' albo 'max'. Zapisuje pełny obiekt {min,max}, wypełniając drugie pole aktualną wartością.
+    function setTargetOverride(stage, el, field, rawVal) {
+      const base = getEffectiveTarget(stage, el) || { min: 0, max: null };
+      const next = { min: base.min, max: base.max };
+      if (rawVal === '') next[field] = field === 'max' ? null : base[field];
+      else {
+        const val = parseFloat(rawVal);
+        if (!isNaN(val)) next[field] = val;
+      }
       if (!window._targetOverrides[stage]) window._targetOverrides[stage] = {};
-      if (rawVal === '' || isNaN(val)) delete window._targetOverrides[stage][el];
-      else window._targetOverrides[stage][el] = val;
+      window._targetOverrides[stage][el] = next;
       renderTargetCompareTable();
       renderRatioTable();
     }
@@ -958,6 +983,20 @@
       renderRatioTable();
     }
     window.resetTargetStage = resetTargetStage;
+
+    function formatTargetRange(t) {
+      if (!t) return '—';
+      if (t.max == null) return `≥ ${t.min}`;
+      if (t.min === t.max) return `${t.min}`;
+      return `${t.min}–${t.max}`;
+    }
+    // Status aktualnej wartości względem przedziału celu.
+    function targetDiff(current, t) {
+      if (!t) return null;
+      if (current < t.min) return { status: 'below', diff: t.min - current };
+      if (t.max != null && current > t.max) return { status: 'above', diff: current - t.max };
+      return { status: 'in', diff: 0 };
+    }
 
     // Grupy pierwiastków do rozróżnienia kolorystycznego w tabelach.
     const CATION_ELEMENTS = ['Ca', 'Mg', 'K', 'Na'];
@@ -1101,11 +1140,12 @@
       if (mode !== 'ppm') return;
       const el = document.getElementById('am_target_element').value;
       if (!el) return;
-      const target = getEffectiveTarget(window._targetStage, el);
-      if (target == null) return;
+      const t = getEffectiveTarget(window._targetStage, el);
+      if (t == null) return;
       const { total } = getCurrentTotals();
       const current = total[el] || 0;
-      const deficit = Math.max(0, target - current);
+      // Dawka celuje w dolną granicę przedziału (minimum wystarczające), nigdy nie proponuje nadmiaru.
+      const deficit = Math.max(0, t.min - current);
       document.getElementById('am_target_ppm').value = deficit.toFixed(1);
     }
 
@@ -1247,15 +1287,17 @@
     function renderTargetTable() {
       const stageKey = window._targetStage;
       const stage = MEHLICH3_STAGES[stageKey];
-      let html = `<table><thead><tr><th>Parametr</th><th>Cel (${stage.label}) — edytowalne</th></tr></thead><tbody>`;
+      let html = `<table><thead><tr><th>Parametr</th><th>Cel (${stage.label}) — edytowalne (min – max, puste max = bez limitu)</th></tr></thead><tbody>`;
       html += `<tr><td>TCEC</td><td>${stage.tec}</td></tr>`;
       html += `<tr><td>pH</td><td>${stage.ph}</td></tr>`;
       ELEMENT_ORDER.forEach(el => {
         if (stage.targets[el] == null) return;
-        const val = getEffectiveTarget(stageKey, el);
+        const t = getEffectiveTarget(stageKey, el);
         html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td>`
-          + `<td><input type="number" step="0.1" value="${val}" style="max-width:110px" `
-          + `oninput="setTargetOverride('${stageKey}','${el}', this.value)"> ppm</td></tr>`;
+          + `<td><input type="number" step="0.1" value="${t.min}" style="max-width:85px" `
+          + `oninput="setTargetOverride('${stageKey}','${el}','min', this.value)"> – `
+          + `<input type="number" step="0.1" value="${t.max != null ? t.max : ''}" style="max-width:85px" placeholder="brak" `
+          + `oninput="setTargetOverride('${stageKey}','${el}','max', this.value)"> ppm</td></tr>`;
       });
       html += '</tbody></table>';
       html += `<button class="col-btn" style="margin-top:8px;" onclick="resetTargetStage('${stageKey}')">Przywróć domyślne targety (${stage.label})</button>`;
@@ -1268,29 +1310,33 @@
       const stage = MEHLICH3_STAGES[stageKey];
       const soilKg = getSoilMassKg();
       let html = '<table><thead><tr><th>Pierwiastek</th><th>Aktualnie (ppm)</th><th>Cel (ppm)</th>'
-        + '<th>Cel (g w glebie)</th><th>Brakuje / Nadmiar (ppm)</th><th>Brakuje (g)</th></tr></thead><tbody>';
+        + '<th>Cel min (g w glebie)</th><th>Brakuje / Nadmiar (ppm)</th><th>Brakuje (g)</th></tr></thead><tbody>';
       let sumTargetG = 0;
       let sumMissingG = 0;
       ELEMENT_ORDER.forEach(el => {
         if (stage.targets[el] == null) return;
-        const target = getEffectiveTarget(stageKey, el);
+        const t = getEffectiveTarget(stageKey, el);
         const current = total[el] || 0;
-        const diffPpm = target - current;
-        const targetG = soilKg > 0 ? (target * soilKg) / 1000 : null;
-        const diffG = soilKg > 0 ? (diffPpm * soilKg) / 1000 : null;
+        const d = targetDiff(current, t);
+        const targetG = soilKg > 0 ? (t.min * soilKg) / 1000 : null;
+        const diffG = soilKg > 0 ? (d.diff * soilKg) / 1000 : null;
         if (targetG != null) sumTargetG += targetG;
-        if (diffG != null && diffG > 0) sumMissingG += diffG;
-        const label = diffPpm > 0 ? `brakuje ${diffPpm.toFixed(1)}` : `nadmiar ${Math.abs(diffPpm).toFixed(1)}`;
-        const color = diffPpm > 0 ? '#c53030' : '#276749';
-        html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>${current.toFixed(1)}</td><td>${target}</td>`
+        if (d.status === 'below' && diffG != null) sumMissingG += diffG;
+        let label, color;
+        if (d.status === 'below') { label = `brakuje ${d.diff.toFixed(1)}`; color = '#c53030'; }
+        else if (d.status === 'above') { label = `nadmiar ${d.diff.toFixed(1)}`; color = '#dd6b20'; }
+        else { label = 'w normie'; color = '#276749'; }
+        const diffGLabel = d.status === 'below' ? `+${diffG.toFixed(2)} g`
+          : d.status === 'above' ? `−${diffG.toFixed(2)} g` : '0,00 g';
+        html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>${current.toFixed(1)}</td><td>${formatTargetRange(t)}</td>`
           + `<td>${targetG != null ? targetG.toFixed(2) + ' g' : '—'}</td>`
           + `<td style="color:${color}; font-weight:600;">${label} ppm</td>`
-          + `<td>${diffG != null ? (diffPpm > 0 ? '+' : '') + diffG.toFixed(2) + ' g' : '—'}</td></tr>`;
+          + `<td>${diffGLabel}</td></tr>`;
       });
       html += `<tr style="font-weight:700; background:#edf2f7;"><td colspan="3">SUMA (masa gleby: ${soilKg > 0 ? soilKg.toFixed(2) + ' kg' : '—'})</td>`
         + `<td>${sumTargetG.toFixed(2)} g</td><td></td><td>${sumMissingG.toFixed(2)} g</td></tr>`;
       html += '</tbody></table>';
-      html += '<p class="note">„Cel (g w glebie)” = ile gramów pierwiastka odpowiada targetowi ppm w całej masie gleby (ppm ÷ 1000 × kg) — tak jak w Twoim arkuszu „Bulk – kg”. „Brakuje (g)” dodatkowo odejmuje to, co już jest w glebie.</p>';
+      html += '<p class="note">Zakres „Cel” to wartości od–do z Twojej tabeli Mehlich 3 (≥ = brak górnej granicy). „W normie” = wartość mieści się w przedziale. „Cel min (g w glebie)” to gramy odpowiadające dolnej granicy przedziału (ppm ÷ 1000 × kg).</p>';
       document.getElementById('am_target_compare_table').innerHTML = html;
     }
 
@@ -1301,20 +1347,27 @@
         const va = total[r.a] || 0;
         const vb = total[r.b] || 0;
         const current = vb > 0 ? va / vb : null;
-        const neededA = vb > 0 ? r.target * vb : null;
+        let status = null, refRatio = null;
+        if (current != null) {
+          if (current < r.min) { status = 'below'; refRatio = r.min; }
+          else if (current > r.max) { status = 'above'; refRatio = r.max; }
+          else status = 'in';
+        }
+        const neededA = (status === 'below' || status === 'above') && vb > 0 ? refRatio * vb : null;
         const diffA = neededA != null ? neededA - va : null;
         let diffLabel = '—';
         let color = '#4a5568';
-        if (diffA != null) {
-          if (diffA > 0.0005) { diffLabel = `+${diffA.toFixed(3)} ppm ${r.a}`; color = '#c53030'; }
-          else if (diffA < -0.0005) { diffLabel = `nadmiar ${Math.abs(diffA).toFixed(3)} ppm ${r.a}`; color = '#276749'; }
-          else { diffLabel = 'w normie'; color = '#276749'; }
+        if (status === 'in') { diffLabel = 'w normie'; color = '#276749'; }
+        else if (diffA != null) {
+          if (status === 'below') { diffLabel = `+${diffA.toFixed(3)} ppm ${r.a}`; color = '#c53030'; }
+          else { diffLabel = `nadmiar ${Math.abs(diffA).toFixed(3)} ppm ${r.a}`; color = '#dd6b20'; }
         }
-        html += `<tr class="${elementRowClass(r.a)}"><td>${r.label}</td><td>${r.target}</td><td>${current != null ? current.toFixed(3) : '—'}</td>`
+        const targetLabel = r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`;
+        html += `<tr class="${elementRowClass(r.a)}"><td>${r.label}</td><td>${targetLabel}</td><td>${current != null ? current.toFixed(3) : '—'}</td>`
           + `<td style="color:${color}; font-weight:600;">${diffLabel}</td></tr>`;
       });
       html += '</tbody></table>';
-      html += '<p class="note">Kolumna „Trzeba dodać” liczy brakującą (lub nadmiarową) ilość pierwszego pierwiastka z pary, przy obecnej wartości drugiego.</p>';
+      html += '<p class="note">Kolumna „Trzeba dodać” liczy brakującą (lub nadmiarową) ilość pierwszego pierwiastka z pary, względem najbliższej granicy przedziału celu, przy obecnej wartości drugiego. K:Fe = 2–3, bo żelazo ma być 1/2 do 1/3 potasu.</p>';
       document.getElementById('am_ratio_table').innerHTML = html;
     }
 
