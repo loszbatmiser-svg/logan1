@@ -1216,61 +1216,113 @@
       return r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`;
     }
 
-    // Dla pierwiastków obecnych w kontroli proporcji liczy, jaką wartość narzucałaby sama proporcja
-    // (przy obecnej wartości powiązanego pierwiastka), biorąc granicę dającą NAJWYŻSZY wynik.
-    // Zwraca obiekty z uzasadnieniem, żeby krok 2 mógł pokazać, DLACZEGO dana ilość jest potrzebna.
+    function stageTargetLevel(el) {
+      const t = getEffectiveTarget(window._targetStage, el);
+      if (!t) return null;
+      return t.max != null ? t.max : t.min;
+    }
+
+    // Profil gleby PO wykonaniu kroku 1 — każdy pierwiastek podciągnięty co najmniej do swojego
+    // targetu, a te które są ponad target zostają na swoim (realnym) poziomie, bo nawozem nie da się
+    // niczego odjąć. To jest właściwy punkt odniesienia dla kroku 2: krok 2 dokłada TYLKO to, czego
+    // po dojściu do targetów nadal brakuje do balansu proporcji.
+    function getPostTargetTotals(total) {
+      const out = Object.assign({}, total);
+      AUTO_DOSE_ELEMENTS.forEach(el => {
+        const lvl = stageTargetLevel(el);
+        if (lvl == null) return;
+        out[el] = Math.max(out[el] || 0, lvl);
+      });
+      return out;
+    }
+
+    // Ile ppm pierwiastka `el` trzeba DODAĆ, żeby proporcje z tabeli „Kontrola proporcji” wróciły
+    // do zakresu. Liczone dokładnie tą samą metodą co tamta tabela: dociągnięcie stosunku do
+    // najbliższej naruszonej granicy (nie do środka ani do przeciwnego krańca).
     //
-    // WAŻNE: jeżeli pierwiastek jest LICZNIKIEM proporcji, a mianownik przekracza swój własny target,
-    // to rozjazd bierze się z nadmiaru mianownika — dokładanie licznika tego nie naprawia (naprawą jest
-    // obniżenie mianownika). Taka proporcja jest oznaczana jako `blocked` i NIE napędza dawki.
-    // Przykład: Ca:N = 60 przy azocie 176,8 ppm (cel 150) kazałoby dosypać ~7000 ppm wapnia, choć
-    // realnym problemem jest za wysoki azot.
-    function getRatioDerivedTargets(el, total) {
-      const stage = window._targetStage;
-      const candidates = [];
+    //   A:B poniżej minimum  → brakuje LICZNIKA  → dodaj A do (min × B)
+    //   A:B powyżej maksimum → brakuje MIANOWNIKA → dodaj B do (A ÷ max)
+    //
+    // Dwa przypadki NIE napędzają dawki (trafiają do `blocked`):
+    //  • „excess”   — jesteśmy licznikiem, a mianownik przekracza swój własny target: rozjazd bierze
+    //                 się z jego nadmiaru, dosypywanie nas tego nie naprawi (trzeba obniżyć jego).
+    //  • „conflict” — nawet gdyby OBA pierwiastki stały dokładnie na swoich targetach, proporcja
+    //                 i tak żądałaby od nas więcej niż nasz własny target. Wtedy tabela proporcji
+    //                 kłóci się z tabelą targetów i to ona wymaga korekty, a nie gleba.
+    function getRatioAddRequirements(el, ref) {
+      const usable = [];
+      const blocked = [];
+      const myTargetLvl = stageTargetLevel(el);
+
       TARGET_RATIOS.forEach(r => {
-        if (r.a === el) {
-          // Pierwiastek jest licznikiem proporcji, np. Fe w Fe:Mn → Fe = krotność × Mn.
-          const otherVal = total[r.b] || 0;
-          const value = r.max * otherVal;
-          const otherT = getEffectiveTarget(stage, r.b);
-          const otherMax = otherT && otherT.max != null ? otherT.max : null;
-          if (otherMax != null && otherVal > otherMax + 0.05) {
-            candidates.push({
-              value, ratio: r, otherEl: r.b, otherVal, blocked: true,
-              explain: `${r.label} rozjeżdża się przez nadmiar ${r.b}: ${otherVal.toFixed(1)} ppm przy celu ${otherMax.toFixed(1)} ppm. `
-                + `Dosypanie ${el} tego nie naprawi (musiałoby go być ${value.toFixed(1)} ppm) — trzeba obniżyć ${r.b}.`
+        const isNum = (r.a === el);
+        const isDen = (r.b === el);
+        if (!isNum && !isDen) return;
+        const va = ref[r.a] || 0;
+        const vb = ref[r.b] || 0;
+        if (vb <= 0) return;
+        const cur = va / vb;
+        const partner = isNum ? r.b : r.a;
+        const partnerVal = isNum ? vb : va;
+
+        // Czy ta proporcja w ogóle wymaga DODANIA tego pierwiastka?
+        let need;
+        if (isNum) {
+          if (cur >= r.min - 1e-9) return;   // stosunek nie jest za niski → licznika nie brakuje
+          need = r.min * vb;
+        } else {
+          if (r.max <= 0 || cur <= r.max + 1e-9) return; // stosunek nie jest za wysoki → mianownika nie brakuje
+          need = va / r.max;
+        }
+
+        // „conflict” — sprzeczność samych tabel (sprawdzana przy obu pierwiastkach na targetach).
+        const partnerTargetLvl = stageTargetLevel(partner);
+        if (myTargetLvl != null && partnerTargetLvl != null) {
+          const needAtTargets = isNum ? r.min * partnerTargetLvl : partnerTargetLvl / r.max;
+          if (needAtTargets > myTargetLvl + 0.05) {
+            blocked.push({
+              kind: 'conflict', ratio: r, partner,
+              explain: `${r.label} = ${formatRatioBounds(r)} nie da się pogodzić z targetami tego etapu: `
+                + `przy ${partner} na swoim celu (${partnerTargetLvl.toFixed(1)} ppm) proporcja żądałaby ${needAtTargets.toFixed(1)} ppm ${el}, `
+                + `a target ${el} to ${myTargetLvl.toFixed(1)} ppm. Do poprawy jest tabela targetów albo sama proporcja, nie gleba.`
             });
             return;
           }
-          candidates.push({
-            value, ratio: r, otherEl: r.b, otherVal, blocked: false,
-            explain: `${r.label} ma wynosić ${formatRatioBounds(r)} → przy ${r.b} = ${otherVal.toFixed(1)} ppm, ${el} powinno sięgać ${value.toFixed(1)} ppm (${otherVal.toFixed(1)} × ${r.max})`
-          });
-        } else if (r.b === el && r.min > 0) {
-          // Pierwiastek jest mianownikiem, np. Fe w K:Fe → Fe = K ÷ krotność.
-          const otherVal = total[r.a] || 0;
-          const value = otherVal / r.min;
-          candidates.push({
-            value, ratio: r, otherEl: r.a, otherVal, blocked: false,
-            explain: `${r.label} ma wynosić ${formatRatioBounds(r)} → przy ${r.a} = ${otherVal.toFixed(1)} ppm, ${el} powinno sięgać ${value.toFixed(1)} ppm (${otherVal.toFixed(1)} ÷ ${r.min})`
-          });
         }
+
+        // „excess” — jesteśmy licznikiem, a mianownik jest ponad swoim targetem.
+        if (isNum) {
+          const pMax = (function () { const t = getEffectiveTarget(window._targetStage, partner); return t && t.max != null ? t.max : null; })();
+          if (pMax != null && partnerVal > pMax + 0.05) {
+            blocked.push({
+              kind: 'excess', ratio: r, partner,
+              explain: `${r.label} rozjeżdża się przez nadmiar ${partner}: ${partnerVal.toFixed(1)} ppm przy celu ${pMax.toFixed(1)} ppm. `
+                + `Dosypanie ${el} tego nie naprawi (musiałoby go być ${need.toFixed(1)} ppm) — trzeba obniżyć ${partner}.`
+            });
+            return;
+          }
+        }
+
+        const formula = isNum
+          ? `${r.min} × ${vb.toFixed(1)}`
+          : `${va.toFixed(1)} ÷ ${r.max}`;
+        usable.push({
+          need, ratio: r, partner, partnerVal, cur,
+          explain: `${r.label} = ${cur.toFixed(2)}, a ma być ${formatRatioBounds(r)} → przy ${partner} = ${partnerVal.toFixed(1)} ppm `
+            + `${el} musi sięgnąć ${need.toFixed(1)} ppm (${formula})`
+        });
       });
-      return candidates;
+      return { usable, blocked };
     }
 
-    // Wiążące (najwyższe) wymaganie proporcji dla danego pierwiastka + pozostałe, dla kontekstu.
-    // value === null oznacza, że wszystkie proporcje tego pierwiastka są zablokowane nadmiarem partnera.
-    function getBindingRatioTarget(el, total) {
-      const cands = getRatioDerivedTargets(el, total);
-      if (!cands.length) return null;
-      const blockedList = cands.filter(c => c.blocked);
-      const usable = cands.filter(c => !c.blocked);
-      if (!usable.length) return { value: null, explain: null, others: [], blockedList };
-      const binding = usable.reduce((best, c) => (c.value > best.value ? c : best), usable[0]);
-      const others = usable.filter(c => c !== binding);
-      return { value: binding.value, explain: binding.explain, others, blockedList };
+    // Wiążące (najwyższe) wymaganie dla pierwiastka + pozostałe, dla kontekstu.
+    // need === null → żadna proporcja nie wymaga dodania tego pierwiastka.
+    function getBindingRatioNeed(el, ref) {
+      const { usable, blocked } = getRatioAddRequirements(el, ref);
+      if (!usable.length && !blocked.length) return null;
+      if (!usable.length) return { need: null, explain: null, others: [], blockedList: blocked };
+      const binding = usable.reduce((best, c) => (c.need > best.need ? c : best), usable[0]);
+      return { need: binding.need, explain: binding.explain, others: usable.filter(c => c !== binding), blockedList: blocked };
     }
 
     // Które produkty z listy już dostarczają dany pierwiastek (do pokazania „pokryte przez…”).
@@ -1304,6 +1356,8 @@
       const ratioRows = [];
       const blockedRows = [];
       if (soilKg <= 0) return { targetRows, ratioRows, blockedRows };
+      // Punkt odniesienia dla kroku 2: profil po podciągnięciu wszystkiego do targetów z kroku 1.
+      const postTarget = getPostTargetTotals(total);
 
       // Zwraca false, jeśli żaden produkt w bazie nie dostarcza tego pierwiastka (np. sód) —
       // wtedy zamiast propozycji dawki pokazujemy jawną informację o braku produktu.
@@ -1343,19 +1397,19 @@
 
         // KROK 2: dopłata wg proporcji (wg tabeli „Kontrola proporcji”), licząc od poziomu
         // PO osiągnięciu targetu z kroku 1 — czyli tylko brakujący balans, nie cała dawka od nowa.
-        const binding = getBindingRatioTarget(el, total);
+        const binding = getBindingRatioNeed(el, postTarget);
         if (!binding) return;
-        // Proporcje, których nie da się naprawić dodawaniem (nadmiar partnera) — osobny blok.
+        // Proporcje, których nie da się naprawić dodawaniem — osobny blok.
         if (binding.blockedList.length) {
           blockedRows.push({ el, items: binding.blockedList });
         }
-        if (binding.value == null) return; // wszystkie proporcje tego pierwiastka zablokowane
-        const afterTarget = Math.max(current, baseTarget);
+        if (binding.need == null) return; // żadna proporcja nie wymaga dodania tego pierwiastka
+        const afterTarget = postTarget[el] || 0;
         const extra = { explain: binding.explain, otherExplains: binding.others.map(o => o.explain) };
-        if (binding.value <= afterTarget + 0.05) {
-          ratioRows.push(Object.assign({ el, step: 'ratio', status: 'ok', current: afterTarget, toLevel: binding.value, hasUpperBound: false, coverage: getCartCoverageFor(el) }, extra));
+        if (binding.need <= afterTarget + 0.05) {
+          ratioRows.push(Object.assign({ el, step: 'ratio', status: 'ok', current: afterTarget, toLevel: binding.need, hasUpperBound: false, coverage: getCartCoverageFor(el) }, extra));
         } else {
-          buildProductRows(el, afterTarget, binding.value, 'ratio', ratioRows, extra);
+          buildProductRows(el, afterTarget, binding.need, 'ratio', ratioRows, extra);
         }
       });
       return { targetRows, ratioRows, blockedRows };
@@ -1513,11 +1567,13 @@
         const current = totalBefore[item.targetElement] || 0;
         let delta;
         if (item.step === 'ratio') {
-          // Krok 2: tylko nadwyżka ponad target Mehlich 3 wymagana przez proporcje.
-          const afterTarget = Math.max(current, baseTarget);
-          const binding = getBindingRatioTarget(item.targetElement, totalBefore);
-          const ratioTarget = binding ? binding.value : afterTarget;
-          delta = Math.max(0, ratioTarget - afterTarget);
+          // Krok 2: tylko nadwyżka ponad target Mehlich 3 wymagana przez proporcje —
+          // liczona na profilu po kroku 1, tak samo jak w tabeli propozycji.
+          const postTarget = getPostTargetTotals(totalBefore);
+          const afterTarget = postTarget[item.targetElement] || 0;
+          const binding = getBindingRatioNeed(item.targetElement, postTarget);
+          const ratioNeed = binding && binding.need != null ? binding.need : afterTarget;
+          delta = Math.max(0, ratioNeed - afterTarget);
         } else {
           // Krok 1: dojście do targetu Mehlich 3 wybranego etapu.
           delta = Math.max(0, baseTarget - current);
