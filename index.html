@@ -197,15 +197,6 @@
             <label>Na (Value Found)</label>
             <input type="number" id="cac_na" value="42" step="1" oninput="calculateCAC()">
           </div>
-          <div>
-            <label>Ładunek zależny od pH (meq/100g na 1 pH)</label>
-            <input type="number" id="cac_ph_buffer" value="3" step="0.5" min="0" max="12" oninput="calculateCAC()">
-            <div class="explain">
-              O ile rośnie TCEC na każdą jednostkę pH. Próchnica przy wyższym pH odsłania nowe miejsca sorpcyjne
-              (dysocjacja grup karboksylowych). Podłoża torfowo-kokosowe: 3–6. Gleby mineralne ubogie w próchnicę: 0,5–2.
-              Wpisz 0, żeby traktować TCEC jako całkowicie stałe.
-            </div>
-          </div>
         </div>
       </div>
 
@@ -244,9 +235,10 @@
             </tbody>
           </table>
           <p class="note">
-            Kolumna „Po wapnowaniu” powstaje odwrotnie niż mogłoby się wydawać: najpierw wapń zajmuje miejsca
-            zwolnione przez wodór (TCEC bez zmian), a z wynikowej sumy nasycenia zasadami odczytujemy nowe
-            Ex H i pH (wzór Logan Labs). Nasycenie Mg, K i Na nie zmienia się, bo wapnowanie ich nie usuwa.
+            Kolumna „Po wapnowaniu” liczona wzorem Logan Labs: z docelowego pH wynikają „Other Bases” i „Ex H”,
+            a z nich pojemność sorpcyjna TCEC = suma meq zasad ÷ (1 − Other − Ex H). Dodany wapń zwiększa sumę meq,
+            więc <strong>TCEC rośnie</strong>, a nasycenie Mg, K i Na spada — mimo że nie ubyło ich ani grama.
+            Nasycenia sumują się do (100 − Other − Ex H), a nie do 100%.
           </p>
         </div>
 
@@ -292,7 +284,7 @@
       </div>
 
       <div class="section">
-        <h3>Jak nasycenie wapniem wpływa na pH</h3>
+        <h3>Warianty nasycenia wapniem</h3>
         <table class="dyn-table">
           <thead>
             <tr>
@@ -300,7 +292,7 @@
               <th>Brakuje Ca</th>
               <th>Nowe Ca</th>
               <th>Suma zasad</th>
-              <th>Wynikowe pH</th>
+              <th>TCEC po</th>
             </tr>
           </thead>
           <tbody>
@@ -328,11 +320,11 @@
           </tbody>
         </table>
         <p class="note">
-          pH nie jest tu wpisane z góry — wynika z modelu Logan Labs. Wapnowanie wypiera wymienny wodór (Ex H)
-          z kompleksu sorpcyjnego, więc rośnie <strong>suma nasycenia zasadami</strong> (Ca+Mg+K+Na). Ponieważ
-          Ex H i „Other Bases” są funkcjami pH, z sumy zasad odczytujemy pH wstecz: pH = takie, przy którym
-          Other + Ex H = 100 − suma zasad. Dlatego to samo 72% Ca da inne pH na glebie ubogiej w magnez
-          i inne na glebie po dolomicie.
+          Warianty liczone przy docelowym pH ustawionym w punkcie 2 poniżej. W modelu Logan Labs pH jest
+          <strong>daną wejściową</strong>: z niego wynikają „Other Bases” i „Ex H”, a z nich pojemność sorpcyjna
+          (TCEC = suma meq zasad ÷ (1 − Other − Ex H)). Dlatego dosypanie wapnia podnosi TCEC, a nasycenie
+          magnezem i potasem spada — ten sam meq dzieli się przez większy mianownik. Suma zasad nie dochodzi
+          do 100%, bo resztę miejsc zajmuje kwasowość.
         </p>
       </div>
 
@@ -347,6 +339,14 @@
           <div>
             <label>Docelowe nasycenie Ca (%)</label>
             <input type="number" id="lime_target_sat" value="72" step="1" min="60" max="85" oninput="calculateLime()">
+          </div>
+          <div>
+            <label>Docelowe pH po wapnowaniu</label>
+            <input type="number" id="lime_target_ph" value="6.8" step="0.1" min="5" max="7.5" oninput="calculateLime()">
+            <div class="explain">
+              pH jest daną wejściową, tak jak w arkuszu Logan Labs — to z niego wynikają „Other Bases”,
+              „Ex H” i pojemność sorpcyjna, a nie odwrotnie.
+            </div>
           </div>
           <div>
             <label>Objętość gleby (litry)</label>
@@ -384,12 +384,12 @@
               <tr><td>Deficyt Ca (meq/100g)</td><td><span id="lime_deficit_meq" class="badge">—</span></td></tr>
               <tr><td><strong>Brakuje Ca</strong></td><td class="big">+ <span id="lime_ca_increase">—</span> ppm</td></tr>
               <tr><td>Nowe Ca</td><td><span id="lime_new_ca" class="badge highlight">—</span> ppm</td></tr>
-              <tr><td><strong>Wynikowe pH (z modelu)</strong></td><td class="big"><span id="lime_result_ph">—</span></td></tr>
+              <tr><td><strong>TCEC po wapnowaniu</strong></td><td class="big"><span id="lime_result_ph">—</span></td></tr>
             </table>
             <p class="note">
-              Wynikowe pH liczone jest wstecz z sumy nasycenia zasadami po wapnowaniu, a nie przyjmowane z góry —
-              zależy więc od tego, ile miejsca zajmują u Ciebie Mg, K i Na. TCEC pozostaje bez zmian, bo wapnowanie
-              wypiera wodór z istniejących miejsc sorpcyjnych, a nie tworzy nowych.
+              Wzór Logan Labs: TCEC = suma meq zasad ÷ (1 − Other − Ex H), gdzie Other i Ex H wynikają
+              z docelowego pH. Wapnowanie zwiększa sumę meq, więc TCEC rośnie, a nasycenie magnezem i potasem
+              spada — mimo że nie ubyło ich ani grama. Nasycenia sumują się do (100 − Other − Ex H), nie do 100%.
             </p>
             <h3 style="margin:16px 0 8px; color:#276749;">Dawka na podaną objętość</h3>
             <table>
@@ -1775,22 +1775,19 @@
 
       const state = getFinalSoilState(base, added);
       if (state) {
-        const phDelta = state.reachable ? state.ph - state.startPh : null;
-        const deltaTxt = phDelta === null
-          ? '—'
-          : (phDelta >= 0 ? '+' : '') + phDelta.toFixed(2);
-        html += `<tr><td><strong>pH gleby</strong></td><td>${state.startPh.toFixed(2)}</td><td>${deltaTxt}</td>`
-          + `<td><strong>${formatFinalPh(state)}</strong></td></tr>`;
+        const startState = getBaseSoilState(base);
+        html += `<tr><td><strong>TCEC</strong></td><td>${startState.tcec.toFixed(2)}</td>`
+          + `<td>+${(state.tcec - startState.tcec).toFixed(2)}</td>`
+          + `<td><strong>${state.tcec.toFixed(2)}</strong> meq/100g</td></tr>`;
+        html += `<tr><td><strong>pH gleby</strong></td><td colspan="3">${state.ph.toFixed(2)} `
+          + `<span class="explain">(docelowe pH z zakładki CAC)</span></td></tr>`;
       }
       html += '</tbody></table>';
       if (state) {
-        html += `<p class="note">pH liczone jest z sumy nasycenia zasadami (${state.totalBaseSat.toFixed(1)}%) — `
-          + `„Start” to pH po wapnowaniu z zakładki CAC, „Razem” uwzględnia już wszystkie odżywki z listy. `
-          + (state.overloaded
-            ? `<strong>Uwaga:</strong> kompleks sorpcyjny jest przeładowany o ${state.overloadPct.toFixed(0)}%, `
-              + `więc wapń wypiera magnez i potas. `
-            : '')
-          + `Szczegóły i zmiany poszczególnych kationów w tabeli nasycenia obok.</p>`;
+        html += `<p class="note">pH jest daną wejściową (ustawiasz je w zakładce CAC), a nie wynikiem — `
+          + `tak samo jak w arkuszu Logan Labs. Z pH wynikają „Other Bases” i „Ex H”, a z nich pojemność `
+          + `sorpcyjna: TCEC = suma meq zasad ÷ (1 − Other − Ex H). Szczegóły i zmiany poszczególnych `
+          + `kationów w tabeli nasycenia obok.</p>`;
       }
       document.getElementById('am_summary_table').innerHTML = html;
 
@@ -1937,39 +1934,28 @@
       const meqMg = finalMg / 120;
       const meqK = finalK / 390;
       const meqNa = finalNa / 230;
-      const d = window._cac;
-
-      // Nasycenia zawsze sumują się do 100% razem z kwasowością. Dopóki zostaje wymienny wodór,
-      // dosypany wapń zajmuje jego miejsca i nie rusza magnezu ani potasu — a przy okazji podnosi pH,
-      // co przez ładunek zależny od pH odsłania kolejne miejsca (TCEC rośnie). Gdy wodór się skończy,
-      // kompleks jest pełny: kationy konkurują o te same miejsca i wapń WYPIERA magnez, potas i sód
-      // do roztworu (stąd przewapnowanie wywołuje niedobory Mg i K).
+      // Wzór Logan Labs: pojemność sorpcyjna wynika z sumy zmierzonych zasad i z pH.
+      // TCEC = suma meq / (1 − Other − Ex H). Dosypanie kationów podnosi TCEC, a nasycenia
+      // pozostałych pierwiastków spadają, bo ten sam meq dzieli się przez większy mianownik.
+      // Nasycenia sumują się do (100 − Other − Ex H), nie do 100 — reszta to kwasowość.
+      const ph = window._postLime.ph;
+      const f = getBaseShare(ph);
       const sumMeq = meqCa + meqMg + meqK + meqNa;
-      const ph = solvePhForCations(d, sumMeq);
-      const overloaded = ph === null;
-      const usePh = overloaded ? PH_SOLVE_MAX : ph;
-      const tcec = getTcecAtPh(d, usePh);
+      const tcec = f > 0 ? sumMeq / f : sumMeq;
 
-      // Do wysycenia dzielimy przez TCEC (reszta miejsc to kwasowość), po wysyceniu przez sumę
-      // kationów — kwasowości już nie ma, więc udziały są względne. W punkcie wysycenia oba
-      // wyrażenia dają to samo, więc przejście jest płynne.
-      const denomMeq = overloaded ? sumMeq : tcec;
-
-      const satCa = denomMeq > 0 ? (meqCa / denomMeq) * 100 : 0;
-      const satMg = denomMeq > 0 ? (meqMg / denomMeq) * 100 : 0;
-      const satK = denomMeq > 0 ? (meqK / denomMeq) * 100 : 0;
-      const satNa = denomMeq > 0 ? (meqNa / denomMeq) * 100 : 0;
-      const totalBaseSat = satCa + satMg + satK + satNa;
+      const satCa = tcec > 0 ? (meqCa / tcec) * 100 : 0;
+      const satMg = tcec > 0 ? (meqMg / tcec) * 100 : 0;
+      const satK = tcec > 0 ? (meqK / tcec) * 100 : 0;
+      const satNa = tcec > 0 ? (meqNa / tcec) * 100 : 0;
 
       return {
-        tcec, satCa, satMg, satK, satNa, totalBaseSat,
-        ph: overloaded ? null : ph,
-        reachable: !overloaded,
+        tcec, satCa, satMg, satK, satNa,
+        totalBaseSat: satCa + satMg + satK + satNa,
+        maxBaseSat: f * 100,
+        ph,
+        other: getOtherBases(ph),
+        exh: getExH(ph),
         startPh: window._postLime.ph,
-        startTcec: window._cac.tcec,
-        overloaded,
-        overloadMeq: overloaded ? sumMeq - tcec : 0,
-        overloadPct: overloaded && tcec > 0 ? ((sumMeq / tcec) - 1) * 100 : 0,
         sumMeq
       };
     }
@@ -1978,11 +1964,6 @@
     // o ile dodatki przesunęły poszczególne kationy.
     function getBaseSoilState(base) {
       return getFinalSoilState(base, {});
-    }
-
-    function formatFinalPh(state) {
-      if (!state.reachable) return 'ponad 7,5';
-      return state.ph.toFixed(2);
     }
 
     function renderFinalSaturation(base, added) {
@@ -2016,36 +1997,21 @@
       });
       html += `<tr><td><strong>Suma zasad</strong></td><td class="explain">${start.totalBaseSat.toFixed(1)}</td>`
         + `<td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td>`
-        + `<td>${shift(state.totalBaseSat, start.totalBaseSat)}</td><td>maks. 100%</td></tr>`;
+        + `<td>${shift(state.totalBaseSat, start.totalBaseSat)}</td>`
+        + `<td class="explain">= 100 − Other − Ex H = ${state.maxBaseSat.toFixed(1)}%</td></tr>`;
       html += `<tr><td><strong>TCEC</strong></td><td class="explain">${start.tcec.toFixed(2)}</td>`
         + `<td><span class="badge">${state.tcec.toFixed(2)}</span></td><td>${shift(state.tcec, start.tcec)}</td>`
         + `<td class="explain">meq/100g</td></tr>`;
-      html += `<tr><td><strong>pH gleby (końcowe)</strong></td><td class="explain">${state.startPh.toFixed(2)}</td>`
-        + `<td><span class="badge highlight">${formatFinalPh(state)}</span></td><td></td><td>6,3–6,8</td></tr>`;
+      html += `<tr><td><strong>pH gleby</strong></td><td colspan="4"><span class="badge highlight">${state.ph.toFixed(2)}</span> `
+        + `<span class="explain">przyjęte docelowe pH z zakładki CAC — Other ${state.other.toFixed(1)}%, Ex H ${state.exh.toFixed(1)}%</span></td></tr>`;
       html += '</tbody></table>';
 
-      if (state.overloaded) {
-        html += `<p class="note"><strong>Kompleks sorpcyjny jest wysycony — kationy zaczęły się wypierać.</strong> `
-          + `Suma kationów to ${state.sumMeq.toFixed(2)} meq przy pojemności ${state.tcec.toFixed(2)} meq, `
-          + `czyli o <strong>${state.overloadPct.toFixed(0)}% za dużo</strong>. Wymiennego wodoru już nie ma, więc każdy kolejny `
-          + `wapń nie zajmuje wolnego miejsca, tylko <strong>spycha magnez, potas i sód</strong> z kompleksu do roztworu, `
-          + `skąd się wypłukują. Widać to w kolumnie „Zmiana”: `
-          + `Mg ${start.satMg.toFixed(1)}% → ${state.satMg.toFixed(1)}%, K ${start.satK.toFixed(1)}% → ${state.satK.toFixed(1)}%. `
-          + `Tak właśnie przewapnowanie wywołuje niedobory magnezu i potasu. Zmniejsz dawkę wapnia.</p>`;
-      } else {
-        const room = state.tcec - state.sumMeq;
-        const tcecGain = state.tcec - start.tcec;
-        html += `<p class="note">Kationy zajmują miejsca po wymiennym wodorze — zostało go jeszcze `
-          + `${room.toFixed(2)} meq (${(100 - state.totalBaseSat).toFixed(1)}% miejsc), więc dosypany wapń `
-          + `<strong>nie wypiera</strong> jeszcze magnezu ani potasu, tylko podnosi pH. `
-          + `Start po wapnowaniu: pH ${state.startPh.toFixed(2)} → po odżywkach: pH ${formatFinalPh(state)}. `
-          + (Math.abs(tcecGain) >= 0.005
-            ? `Wraz z pH ${tcecGain > 0 ? 'rośnie' : 'maleje'} też TCEC (${start.tcec.toFixed(2)} → ${state.tcec.toFixed(2)} meq): `
-              + `próchnica przy ${tcecGain > 0 ? 'wyższym' : 'niższym'} pH ${tcecGain > 0 ? 'odsłania nowe' : 'zamyka'} miejsca sorpcyjne. `
-              + `Nachylenie zmienisz polem „Ładunek zależny od pH” w zakładce CAC. `
-            : `TCEC się nie zmienia, bo ładunek zależny od pH ustawiłeś na 0. `)
-          + `Dopiero po wysyceniu kompleksu wapń zacznie spychać pozostałe kationy.</p>`;
-      }
+      html += `<p class="note">Liczone wzorem Logan Labs: <strong>TCEC = suma meq zasad ÷ (1 − Other − Ex H)</strong>. `
+        + `Dosypanie kationów podnosi sumę meq (${start.sumMeq.toFixed(2)} → ${state.sumMeq.toFixed(2)}), `
+        + `więc rośnie też TCEC (${start.tcec.toFixed(2)} → ${state.tcec.toFixed(2)}). `
+        + `Nasycenie pierwiastków, których nie dosypywałeś, spada — ten sam meq dzieli się przez większy mianownik. `
+        + `Suma nasyceń wynosi ${state.maxBaseSat.toFixed(1)}%, a nie 100%, bo pozostałe miejsca zajmują `
+        + `„Other Bases” (${state.other.toFixed(1)}%) i wymienny wodór (${state.exh.toFixed(1)}%) — obie wielkości wynikają z pH.</p>`;
       box.innerHTML = html;
     }
 
@@ -2286,66 +2252,37 @@
       return getOtherBases(ph) + getExH(ph);
     }
 
-    // Zakres, w którym szukamy pH wstecz z obsady kompleksu sorpcyjnego.
-    const PH_SOLVE_MIN = 3.0;
-    const PH_SOLVE_MAX = 7.5;
-
-    // Pojemność sorpcyjna przy danym pH. Część ładunku gleby jest trwała (podstawienia w minerałach
-    // ilastych), a część zależy od pH: przy wyższym pH grupy karboksylowe próchnicy dysocjują i odsłaniają
-    // nowe miejsca sorpcyjne. Dlatego wapnowanie realnie podnosi TCEC — kotwiczymy krzywą na zmierzonej
-    // próbce i przesuwamy ją nachyleniem podanym przez użytkownika.
-    function getPhBuffer() {
-      const el = document.getElementById('cac_ph_buffer');
-      const v = el ? parseFloat(el.value) : 3;
-      return isNaN(v) ? 0 : Math.max(0, v);
+    // Udział miejsc sorpcyjnych zajętych przez zmierzone zasady (Ca+Mg+K+Na) przy danym pH.
+    // W modelu Logan Labs to on jest mianownikiem: TCEC = suma meq zasad / baseShare(pH).
+    // Nasycenia sumują się więc do (100 − Other − Ex H), a nie do 100 — reszta miejsc to kwasowość.
+    function getBaseShare(ph) {
+      return (100 - getAcidityShare(ph)) / 100;
     }
 
-    function getTcecAtPh(d, ph) {
-      const tcec = d.tcec + getPhBuffer() * (ph - d.ph);
-      return Math.max(0.01, tcec);
+    function getTargetPh() {
+      const el = document.getElementById('lime_target_ph');
+      const v = el ? parseFloat(el.value) : 6.8;
+      return isNaN(v) ? 6.8 : Math.min(7.5, Math.max(3, v));
     }
 
-    // Rozwiązuje sprzężenie: TCEC zależy od pH, pH zależy od nasycenia zasadami, a nasycenie od TCEC.
-    // Szukamy pH spełniającego  sumaKationów = TCEC(pH) × f(pH),  gdzie f to udział miejsc zajętych
-    // przez zasady. Obie strony rosną z pH, więc funkcja jest monotoniczna i bisekcja jest bezpieczna.
-    function solvePhForCations(d, sumMeq) {
-      const load = (ph) => getTcecAtPh(d, ph) * (100 - getAcidityShare(ph)) / 100;
-      if (sumMeq >= load(PH_SOLVE_MAX)) return null;   // kompleks przeciążony nawet przy pH 7,5
-      if (sumMeq <= load(PH_SOLVE_MIN)) return PH_SOLVE_MIN;
-      let lo = PH_SOLVE_MIN, hi = PH_SOLVE_MAX;
-      for (let i = 0; i < 60; i++) {
-        const mid = (lo + hi) / 2;
-        if (load(mid) < sumMeq) lo = mid; else hi = mid;
-      }
-      return (lo + hi) / 2;
-    }
-
-    // Scenariusz wapnowania do zadanego nasycenia Ca.
-    // Szukamy pH, przy którym wapń osiąga zadany udział: z  satCa = s  wynika  meqCa = s × TCEC(pH),
-    // a z definicji nasycenia  TCEC(pH) × f(pH) = s × TCEC(pH) + meqOthers,  czyli
-    // TCEC(pH) × (f(pH) − s) = meqOthers. Lewa strona rośnie z pH, więc znów bisekcja.
+    // Scenariusz wapnowania do zadanego nasycenia Ca, przy zadanym docelowym pH.
+    // Z definicji nasycenia:  satCa = meqCa / TCEC = s   oraz   TCEC = (meqCa + meqOthers) / f.
+    // Podstawiając:  meqCa × f = s × (meqCa + meqOthers)  →  meqCa = s × meqOthers / (f − s).
+    // Postać zamknięta — bez iteracji, więc wynik jest dokładny.
     function getLimeScenario(d, targetSat) {
       const s = targetSat / 100;
+      const ph = getTargetPh();
+      const f = getBaseShare(ph);
       const meqOthers = d.meqMg + d.meqK + d.meqNa;
-      const room = (ph) => getTcecAtPh(d, ph) * ((100 - getAcidityShare(ph)) / 100 - s);
+      const reachable = f > s;
 
-      let ph = null;
-      if (room(PH_SOLVE_MAX) > meqOthers) {
-        let lo = PH_SOLVE_MIN, hi = PH_SOLVE_MAX;
-        for (let i = 0; i < 60; i++) {
-          const mid = (lo + hi) / 2;
-          if (room(mid) < meqOthers) lo = mid; else hi = mid;
-        }
-        ph = (lo + hi) / 2;
-      }
-      const reachable = ph !== null;
-      const usePh = reachable ? ph : PH_SOLVE_MAX;
-      const tcec = getTcecAtPh(d, usePh);
+      const newMeqCa = reachable ? (s * meqOthers) / (f - s) : d.meqCa;
+      const deficitMeq = Math.max(0, newMeqCa - d.meqCa);
+      const finalMeqCa = d.meqCa + deficitMeq;
+      const sumMeq = finalMeqCa + meqOthers;
+      const tcec = f > 0 ? sumMeq / f : sumMeq;
 
-      const targetMeqCa = s * tcec;
-      const deficitMeq = Math.max(0, targetMeqCa - d.meqCa);
-      const newMeqCa = d.meqCa + deficitMeq;
-      const newSatCa = tcec > 0 ? (newMeqCa / tcec) * 100 : 0;
+      const newSatCa = tcec > 0 ? (finalMeqCa / tcec) * 100 : 0;
       const newSatMg = tcec > 0 ? (d.meqMg / tcec) * 100 : 0;
       const newSatK = tcec > 0 ? (d.meqK / tcec) * 100 : 0;
       const newSatNa = tcec > 0 ? (d.meqNa / tcec) * 100 : 0;
@@ -2354,16 +2291,17 @@
         deficitMeq,
         caIncrease: deficitMeq * 200,
         newCa: d.ca + deficitMeq * 200,
-        newMeqCa,
+        newMeqCa: finalMeqCa,
         tcec,
         tcecStart: d.tcec,
         tcecGain: tcec - d.tcec,
         newSatCa, newSatMg, newSatK, newSatNa,
         totalBaseSat: newSatCa + newSatMg + newSatK + newSatNa,
+        maxBaseSat: f * 100,
         reachable,
-        ph: usePh,
-        other: getOtherBases(usePh),
-        exh: getExH(usePh)
+        ph,
+        other: getOtherBases(ph),
+        exh: getExH(ph)
       };
     }
 
@@ -2414,18 +2352,18 @@
           document.getElementById('dyn_inc_' + pct).innerText = '0';
           document.getElementById('dyn_new_' + pct).innerText = d.ca.toFixed(0);
           document.getElementById('dyn_tbs_' + pct).innerText = (d.satCa + d.satMg + d.satK + d.satNa).toFixed(1);
-          document.getElementById('dyn_ph_' + pct).innerText = d.ph.toFixed(2);
+          document.getElementById('dyn_ph_' + pct).innerText = d.tcec.toFixed(2);
         });
         return;
       }
 
       [68, 72, 75].forEach(function(pct) {
         const sc = getLimeScenario(d, pct);
-        document.getElementById('dyn_inc_' + pct).innerText = sc.caIncrease.toFixed(0);
-        document.getElementById('dyn_new_' + pct).innerText = sc.newCa.toFixed(0);
+        document.getElementById('dyn_inc_' + pct).innerText = sc.reachable ? sc.caIncrease.toFixed(0) : '—';
+        document.getElementById('dyn_new_' + pct).innerText = sc.reachable ? sc.newCa.toFixed(0) : '—';
         document.getElementById('dyn_tbs_' + pct).innerText = sc.totalBaseSat.toFixed(1);
         document.getElementById('dyn_ph_' + pct).innerText = sc.reachable
-          ? sc.ph.toFixed(2)
+          ? sc.tcec.toFixed(2)
           : 'nieosiągalne';
       });
     }
@@ -2449,7 +2387,7 @@
         limeBox.classList.add('no-lime');
         noLimeMsg.classList.add('visible');
         document.getElementById('lime-unreachable-msg').classList.remove('visible');
-        document.getElementById('lime_result_ph').innerText = d.ph.toFixed(2);
+        document.getElementById('lime_result_ph').innerText = d.tcec.toFixed(2);
         // „Po wapnowaniu” = bez zmian (nie wapnujemy)
         document.getElementById('cac_other_after').innerText = d.other.toFixed(1);
         document.getElementById('cac_exh_after').innerText = d.exh.toFixed(1);
@@ -2502,17 +2440,17 @@
       } else {
         limeBox.classList.add('no-lime');
         unreachableMsg.classList.add('visible');
-        unreachableMsg.innerHTML = `Cel ${targetSat}% nasycenia wapniem jest <strong>nieosiągalny na tej glebie</strong>. `
-          + `Ca ${targetSat}% + Mg ${d.satMg.toFixed(1)}% + K ${d.satK.toFixed(1)}% + Na ${d.satNa.toFixed(1)}% `
-          + `= ${sc.totalBaseSat.toFixed(1)}% miejsc sorpcyjnych, a nawet przy pH 7 wolne jest tylko ok. 95,6% `
-          + `(reszta to „Other Bases”). Samo wapnowanie tego nie naprawi — najpierw trzeba obniżyć nasycenie `
-          + `magnezem lub potasem (np. gipsem, wypłukiwaniem), bo to one zajmują miejsce wapnia.`;
+        unreachableMsg.innerHTML = `Cel ${targetSat}% nasycenia wapniem jest <strong>nieosiągalny przy pH ${sc.ph.toFixed(1)}</strong>. `
+          + `Przy tym pH zasady zajmują najwyżej ${sc.maxBaseSat.toFixed(1)}% miejsc sorpcyjnych `
+          + `(reszta to „Other Bases” ${sc.other.toFixed(1)}% i wymienny wodór ${sc.exh.toFixed(1)}%), `
+          + `a to musi wystarczyć na wapń <em>razem z</em> magnezem, potasem i sodem. `
+          + `Podnieś docelowe pH albo obniż cel nasycenia wapniem.`;
       }
 
       document.getElementById('cac_other_after').innerText = newOther.toFixed(1);
       document.getElementById('cac_exh_after').innerText = newExH.toFixed(1);
       document.getElementById('cac_tcec_after').innerText = newTcec.toFixed(2);
-      document.getElementById('lime_result_ph').innerText = sc.reachable ? sc.ph.toFixed(2) : 'nieosiągalne';
+      document.getElementById('lime_result_ph').innerText = sc.reachable ? sc.tcec.toFixed(2) : 'nieosiągalne';
       document.getElementById('cac_camg_after').innerText = newCaMg > 0 ? newCaMg.toFixed(1) : '—';
       document.getElementById('cac_sat_ca_after').innerText = newSatCa.toFixed(1);
       document.getElementById('cac_sat_mg_after').innerText = newSatMg.toFixed(1);
