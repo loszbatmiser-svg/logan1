@@ -291,6 +291,7 @@
               <th>Cel nasycenia Ca</th>
               <th>Brakuje Ca</th>
               <th>Nowe Ca</th>
+              <th>pH</th>
               <th>Suma zasad</th>
               <th>TCEC po</th>
             </tr>
@@ -300,6 +301,7 @@
               <td><strong>68%</strong></td>
               <td>+ <span id="dyn_inc_68">—</span> ppm</td>
               <td><span id="dyn_new_68">—</span> ppm</td>
+              <td><span id="dyn_ph2_68" class="badge">—</span></td>
               <td><span id="dyn_tbs_68">—</span> %</td>
               <td><span id="dyn_ph_68" class="badge">—</span></td>
             </tr>
@@ -307,6 +309,7 @@
               <td><strong>72%</strong> (zalecane)</td>
               <td>+ <span id="dyn_inc_72">—</span> ppm</td>
               <td><span id="dyn_new_72">—</span> ppm</td>
+              <td><span id="dyn_ph2_72" class="badge">—</span></td>
               <td><span id="dyn_tbs_72">—</span> %</td>
               <td><span id="dyn_ph_72" class="badge">—</span></td>
             </tr>
@@ -314,17 +317,18 @@
               <td><strong>75%</strong></td>
               <td>+ <span id="dyn_inc_75">—</span> ppm</td>
               <td><span id="dyn_new_75">—</span> ppm</td>
+              <td><span id="dyn_ph2_75" class="badge">—</span></td>
               <td><span id="dyn_tbs_75">—</span> %</td>
               <td><span id="dyn_ph_75" class="badge">—</span></td>
             </tr>
           </tbody>
         </table>
         <p class="note">
-          Warianty liczone przy docelowym pH ustawionym w punkcie 2 poniżej. W modelu Logan Labs pH jest
-          <strong>daną wejściową</strong>: z niego wynikają „Other Bases” i „Ex H”, a z nich pojemność sorpcyjna
-          (TCEC = suma meq zasad ÷ (1 − Other − Ex H)). Dlatego dosypanie wapnia podnosi TCEC, a nasycenie
-          magnezem i potasem spada — ten sam meq dzieli się przez większy mianownik. Suma zasad nie dochodzi
-          do 100%, bo resztę miejsc zajmuje kwasowość.
+          pH przypisane do celu nasycenia wapniem wg Albrechta (68% → 6,5; 72% → 6,7; 75% → 6,8, wartości
+          pośrednie interpolowane). Z tego pH wynikają „Other Bases” i „Ex H”, a z nich pojemność sorpcyjna:
+          <strong>TCEC = suma meq zasad ÷ (1 − Other − Ex H)</strong>. Dlatego dodany wapń podnosi TCEC,
+          a nasycenie magnezem i potasem spada — ten sam meq dzieli się przez większy mianownik.
+          Suma zasad nie dochodzi do 100%, bo resztę miejsc zajmuje kwasowość.
         </p>
       </div>
 
@@ -339,14 +343,6 @@
           <div>
             <label>Docelowe nasycenie Ca (%)</label>
             <input type="number" id="lime_target_sat" value="72" step="1" min="60" max="85" oninput="calculateLime()">
-          </div>
-          <div>
-            <label>Docelowe pH po wapnowaniu</label>
-            <input type="number" id="lime_target_ph" value="6.8" step="0.1" min="5" max="7.5" oninput="calculateLime()">
-            <div class="explain">
-              pH jest daną wejściową, tak jak w arkuszu Logan Labs — to z niego wynikają „Other Bases”,
-              „Ex H” i pojemność sorpcyjna, a nie odwrotnie.
-            </div>
           </div>
           <div>
             <label>Objętość gleby (litry)</label>
@@ -387,9 +383,10 @@
               <tr><td><strong>TCEC po wapnowaniu</strong></td><td class="big"><span id="lime_result_ph">—</span></td></tr>
             </table>
             <p class="note">
-              Wzór Logan Labs: TCEC = suma meq zasad ÷ (1 − Other − Ex H), gdzie Other i Ex H wynikają
-              z docelowego pH. Wapnowanie zwiększa sumę meq, więc TCEC rośnie, a nasycenie magnezem i potasem
-              spada — mimo że nie ubyło ich ani grama. Nasycenia sumują się do (100 − Other − Ex H), nie do 100%.
+              Wzór Logan Labs: TCEC = suma meq zasad ÷ (1 − Other − Ex H), gdzie Other i Ex H wynikają z pH
+              przypisanego do wybranego celu nasycenia wapniem. Wapnowanie zwiększa sumę meq, więc TCEC rośnie,
+              a nasycenie magnezem i potasem spada — mimo że nie ubyło ich ani grama. Nasycenia sumują się
+              do (100 − Other − Ex H), nie do 100%.
             </p>
             <h3 style="margin:16px 0 8px; color:#276749;">Dawka na podaną objętość</h3>
             <table>
@@ -1780,7 +1777,7 @@
           + `<td>+${(state.tcec - startState.tcec).toFixed(2)}</td>`
           + `<td><strong>${state.tcec.toFixed(2)}</strong> meq/100g</td></tr>`;
         html += `<tr><td><strong>pH gleby</strong></td><td colspan="3">${state.ph.toFixed(2)} `
-          + `<span class="explain">(docelowe pH z zakładki CAC)</span></td></tr>`;
+          + `<span class="explain">(pH po wapnowaniu, przepisane z zakładki CAC)</span></td></tr>`;
       }
       html += '</tbody></table>';
       if (state) {
@@ -2003,7 +2000,7 @@
         + `<td><span class="badge">${state.tcec.toFixed(2)}</span></td><td>${shift(state.tcec, start.tcec)}</td>`
         + `<td class="explain">meq/100g</td></tr>`;
       html += `<tr><td><strong>pH gleby</strong></td><td colspan="4"><span class="badge highlight">${state.ph.toFixed(2)}</span> `
-        + `<span class="explain">przyjęte docelowe pH z zakładki CAC — Other ${state.other.toFixed(1)}%, Ex H ${state.exh.toFixed(1)}%</span></td></tr>`;
+        + `<span class="explain">pH po wapnowaniu, przepisane z zakładki CAC — Other ${state.other.toFixed(1)}%, Ex H ${state.exh.toFixed(1)}%</span></td></tr>`;
       html += '</tbody></table>';
 
       html += `<p class="note">Liczone wzorem Logan Labs: <strong>TCEC = suma meq zasad ÷ (1 − Other − Ex H)</strong>. `
@@ -2259,10 +2256,22 @@
       return (100 - getAcidityShare(ph)) / 100;
     }
 
-    function getTargetPh() {
-      const el = document.getElementById('lime_target_ph');
-      const v = el ? parseFloat(el.value) : 6.8;
-      return isNaN(v) ? 6.8 : Math.min(7.5, Math.max(3, v));
+    // pH po wapnowaniu wynika z docelowego nasycenia wapniem — zależność empiryczna wg Albrechta,
+    // zakotwiczona na trzech punktach (68% → 6,5; 72% → 6,7; 75% → 6,8) i interpolowana liniowo,
+    // żeby pośrednie cele nie skakały skokowo.
+    const ALBRECHT_PH_ANCHORS = [
+      { sat: 68, ph: 6.5 },
+      { sat: 72, ph: 6.7 },
+      { sat: 75, ph: 6.8 }
+    ];
+
+    function getTargetPh(targetSat) {
+      const a = ALBRECHT_PH_ANCHORS;
+      let lo = a[0], hi = a[1];
+      if (targetSat >= a[1].sat) { lo = a[1]; hi = a[2]; }
+      const slope = (hi.ph - lo.ph) / (hi.sat - lo.sat);
+      const ph = lo.ph + slope * (targetSat - lo.sat);
+      return Math.min(7.5, Math.max(5, ph));
     }
 
     // Scenariusz wapnowania do zadanego nasycenia Ca, przy zadanym docelowym pH.
@@ -2271,7 +2280,7 @@
     // Postać zamknięta — bez iteracji, więc wynik jest dokładny.
     function getLimeScenario(d, targetSat) {
       const s = targetSat / 100;
-      const ph = getTargetPh();
+      const ph = getTargetPh(targetSat);
       const f = getBaseShare(ph);
       const meqOthers = d.meqMg + d.meqK + d.meqNa;
       const reachable = f > s;
@@ -2351,6 +2360,7 @@
         [68, 72, 75].forEach(function(pct) {
           document.getElementById('dyn_inc_' + pct).innerText = '0';
           document.getElementById('dyn_new_' + pct).innerText = d.ca.toFixed(0);
+          document.getElementById('dyn_ph2_' + pct).innerText = d.ph.toFixed(2);
           document.getElementById('dyn_tbs_' + pct).innerText = (d.satCa + d.satMg + d.satK + d.satNa).toFixed(1);
           document.getElementById('dyn_ph_' + pct).innerText = d.tcec.toFixed(2);
         });
@@ -2361,6 +2371,7 @@
         const sc = getLimeScenario(d, pct);
         document.getElementById('dyn_inc_' + pct).innerText = sc.reachable ? sc.caIncrease.toFixed(0) : '—';
         document.getElementById('dyn_new_' + pct).innerText = sc.reachable ? sc.newCa.toFixed(0) : '—';
+        document.getElementById('dyn_ph2_' + pct).innerText = sc.ph.toFixed(2);
         document.getElementById('dyn_tbs_' + pct).innerText = sc.totalBaseSat.toFixed(1);
         document.getElementById('dyn_ph_' + pct).innerText = sc.reachable
           ? sc.tcec.toFixed(2)
