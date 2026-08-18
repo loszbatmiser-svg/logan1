@@ -55,6 +55,33 @@ na 1 939 500 000 sprawia, że test przechodzi — ale wtedy przestaje się zgadz
 6. **Dane i ustawienia** — eksport/import JSON, kurs USD/PLN, horyzont, źródła podaży.
 7. **Testy** — kryteria akceptacji liczone na żywo z bieżących danych.
 
+## Kalkulator scenariuszy z osią czasu
+
+Kalkulator ma trzy wejścia: **datę**, **liczbę tokenów uwolnionych do tej daty** i **wycenę**.
+
+Liczba uwolnionych tokenów wylicza się sama z harmonogramu odblokowań plus emisji
+(inflacja maleje o `inflationDecayPct` rocznie z podłogą `inflationFloorPct`, ostatni
+niepełny rok liczony proporcjonalnie), ale można ją nadpisać ręcznie — przycisk
+„Przelicz z harmonogramu” wraca do wartości automatycznej.
+
+Wycenę zadaje się w jednym z dwóch trybów, i to jest sedno:
+
+* **Zadaję FDV** — cena = FDV ÷ podaż docelowa, więc **nie zależy od daty**. Udział
+  w podaży jest stały, więc wartość pozycji też się nie zmienia. Od daty zależy co innego:
+  ile realnego kapitału musi wtedy siedzieć w tokenie, żeby ta cena się utrzymała
+  (kafelek „kapitał w tokenie w tym dniu”) i ile z tego to pieniądze potrzebne wyłącznie
+  na wchłonięcie świeżo uwolnionych tokenów.
+* **Zadaję kapitał w tokenie** — cena = kapitał ÷ podaż w obiegu w tym dniu. Tu czas
+  kosztuje wprost: ta sama kwota rozłożona na większą podaż daje niższą cenę i mniejszą
+  pozycję. Dla PEAQ przy 1 mld $ kapitału: luty 2027 → ok. 200 tys. zł, luty 2032 → ok. 169 tys. zł.
+
+Dodatkowy kafelek **„cena przy dzisiejszym kapitale”** pokazuje, gdzie wyląduje cena, jeśli
+do tokena nie dojdzie ani dolar, a podaż urośnie zgodnie z założeniem.
+
+Suwak (10 mln – 10 mld $, skala logarytmiczna) i pole na dokładną kwotę są zsynchronizowane;
+kwota wpisana ręcznie może wyjść poza zakres suwaka — wtedy suwak stoi na krańcu, a liczby
+liczą się z wpisanej wartości.
+
 ## Czego to narzędzie nie robi
 
 Nie prognozuje cen, nie daje sygnałów kupna/sprzedaży, nie liczy wskaźników technicznych.

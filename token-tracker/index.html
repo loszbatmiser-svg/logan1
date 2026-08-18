@@ -175,9 +175,10 @@ details.datatable summary{cursor:pointer; color:var(--muted); font-size:.76rem}
 .legend-list span.sw{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:middle}
 .src{font-size:.72rem; color:var(--muted)}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem}
-.scale-marks{position:relative; height:62px; margin-top:4px}
+.scale-marks{position:relative; height:74px; margin-top:4px}
 .scale-marks .mk{position:absolute; top:0; transform:translateX(-50%); text-align:center; font-size:.66rem; color:var(--muted); white-space:nowrap}
 .scale-marks .mk i{display:block; width:2px; height:12px; margin:0 auto 2px; background:currentColor}
+.scale-marks .mk .lbl{background:var(--surface); padding:0 4px; border-radius:4px}
 .confirm-row{border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:var(--surface-2)}
 .confirm-row .snippet{font-size:.74rem; color:var(--muted); font-family:ui-monospace,monospace; background:var(--surface-3);
   padding:6px 8px; border-radius:6px; margin-top:6px; max-height:74px; overflow:auto; white-space:pre-wrap; word-break:break-word}
@@ -409,6 +410,7 @@ function parseISO(s){
 function daysBetween(a, b){ return Math.round((b - a) / DAY); }
 function daysAgo(iso){ const d = parseISO(iso); return d ? daysBetween(d, new Date()) : null; }
 function addDays(d, n){ const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+function addMonths(d, n){ const x = new Date(d.getTime()); x.setMonth(x.getMonth() + n); return x; }
 function fmtDate(iso){
   const d = parseISO(iso);
   if (!d) return '—';
@@ -1018,6 +1020,76 @@ function scenario(t, targetFDV){
   };
 }
 
+/* ---- PODAŻ W OBIEGU NA ZADANY DZIEŃ ----
+   Ile tokenów będzie krążyć w dniu T: dzisiejsza podaż + odblokowania
+   z harmonogramu, które zdążą wejść do tego dnia, + emisja narosła po drodze.
+   Emisja liczy się rocznymi krokami (inflacja maleje o inflationDecayPct
+   rocznie, nie schodząc poniżej podłogi); ostatni, niepełny rok jest liczony
+   proporcjonalnie. Całość przycinamy do podaży docelowej — więcej niż
+   totalSupply wejść nie może. */
+function supplyAtDate(t, dateISO){
+  const m = metrics(t);
+  const now = new Date();
+  const target = parseISO(dateISO);
+  const out = { unlocked: 0, emission: 0, years: 0, supply: m.circ, capped: false, unlocks: [] };
+  if (!target || target <= now) return out;
+  out.years = (target - now) / (365.25 * DAY);
+
+  (t.unlocks || []).forEach(u => {
+    const d = parseISO(u.date);
+    if (d && d > now && d <= target){ out.unlocked += num(u.tokens); out.unlocks.push(u); }
+  });
+
+  let circ = m.circ, rate = num(t.annualInflationPct) / 100;
+  const decay = num(t.inflationDecayPct) / 100, floor = num(t.inflationFloorPct) / 100;
+  let remaining = out.years, guard = 0;
+  while (remaining > 0.0001 && rate > 0 && guard++ < 200){
+    const slice = Math.min(1, remaining);
+    const e = circ * rate * slice;
+    out.emission += e; circ += e;
+    remaining -= slice;
+    rate = Math.max(floor, rate * (1 - decay));
+  }
+  const total = out.unlocked + out.emission;
+  out.supply = m.circ + total;
+  if (out.supply > m.total){ out.supply = m.total; out.capped = true; }
+  return out;
+}
+
+/* ---- SCENARIUSZ Z UWZGLĘDNIENIEM CZASU ----
+   Dwa tryby zadawania wyceny:
+   • 'fdv' — zadaję FDV. Cena = FDV / podaż docelowa, więc NIE zależy od daty;
+     od daty zależy kapitał, który musi wtedy siedzieć w tokenie (cena × podaż w obiegu).
+   • 'mc'  — zadaję kapitał realnie ulokowany w tokenie. Wtedy cena = kapitał / podaż
+     w obiegu w dniu T, więc im więcej tokenów zdąży wejść, tym niższa cena. */
+function scenarioTimed(t, targetValue, basis, supply){
+  const m = metrics(t);
+  let impliedPrice, targetFDV, targetMC;
+  if (basis === 'mc'){
+    targetMC = targetValue;
+    impliedPrice = supply > 0 ? targetValue / supply : 0;
+    targetFDV = impliedPrice * m.total;
+  } else {
+    targetFDV = targetValue;
+    impliedPrice = m.total > 0 ? targetValue / m.total : 0;
+    targetMC = impliedPrice * supply;
+  }
+  const impliedPosition = num(t.holdings) * impliedPrice;
+  return {
+    targetValue: targetValue, targetFDV: targetFDV, targetMC: targetMC, impliedPrice: impliedPrice,
+    impliedPosition: impliedPosition,
+    impliedPositionPln: impliedPosition * num(STATE.settings.usdPln),
+    impliedMultiple: m.invested > 0 ? impliedPosition / m.invested : NaN,
+    vsTodayFdv: m.fdv > 0 ? targetFDV / m.fdv : NaN,
+    vsTodayMc: m.marketCap > 0 ? targetMC / m.marketCap : NaN,
+    vsTodayPrice: m.price > 0 ? impliedPrice / m.price : NaN,
+    // ile kapitału musi dojść wyłącznie po to, żeby wchłonąć nowo uwolnione tokeny po tej cenie
+    absorbCost: impliedPrice * Math.max(0, supply - m.circ),
+    // cena, gdyby kapitał w tokenie nie urósł ani o dolara, a podaż urosła zgodnie z założeniem
+    priceIfCapitalFlat: supply > 0 ? m.marketCap / supply : 0
+  };
+}
+
 /* ---- AGREGAT PORTFELA ---- */
 function portfolioTotals(){
   const st = STATE.settings;
@@ -1348,6 +1420,10 @@ function recoveryBadgeCls(status){
    ============================================================ */
 let currentTokenId = null;
 let scenarioPos = 500;      // pozycja suwaka scenariuszowego (0–1000, skala log)
+let scenarioValue = null;   // zadana wycena w USD — źródło prawdy; suwak jest tylko jej sterownikiem
+let scenarioDate = null;    // moment w czasie, dla którego liczymy podaż (ISO)
+let scenarioRelease = null; // ile tokenów wejdzie do obiegu do tej daty; null = licz z harmonogramu
+let scenarioBasis = 'fdv';  // 'fdv' = zadaję wycenę pełnej podaży, 'mc' = zadaję kapitał w tokenie
 let projGrowth = null;      // założony wzrost wyceny sieci r/r (%), null = z ustawień
 
 function tokenById(id){ return STATE.tokens.filter(t => t.id === id)[0] || null; }
@@ -1356,7 +1432,10 @@ function openToken(id){
   const t = tokenById(id);
   if (t){
     const m = metrics(t);
-    scenarioPos = fdvToPos(m.fdv);        // suwak startuje na dzisiejszym FDV
+    scenarioValue = m.fdv;                // scenariusz startuje na dzisiejszej wycenie
+    scenarioPos = fdvToPos(m.fdv);        // suwak podąża za wartością (przycięty do 10 mln – 10 mld $)
+    scenarioRelease = null;               // nadpisanie podaży jest per token
+    if (!scenarioDate) scenarioDate = isoOf(addMonths(new Date(), 12));
   }
   showView('token');
 }
@@ -1445,24 +1524,8 @@ function renderTokenView(){
     '<p class="note" style="margin-top:10px">Żeby CENA wróciła do ATH przy pełnej podaży, sieć musi być warta ' + usdBig(m.mcNeededForAthPrice) +
     ' — to ' + mult(m.athPriceDifficulty) + ' więcej niż w historycznym szczycie. Różnica między wierszem 1 a 3 to główny wniosek całej aplikacji.</p></div>');
 
-  /* --- KALKULATOR SCENARIUSZY --- */
-  const sc = scenario(t, posToFdv(scenarioPos));
-  const marks = [
-    { v: m.fdv, label: 'dziś', color: 'var(--s1)' },
-    { v: m.breakEvenFDV, label: 'próg', color: 'var(--warn)' },
-    { v: num(t.athMarketCap), label: 'kapit. ATH', color: 'var(--s5)' }
-  ];
-  parts.push('<div class="card"><h2>Kalkulator scenariuszy</h2>' +
-    '<p class="sub">Ustaw wycenę całej sieci (FDV) i zobacz, co to znaczy dla Twojej pozycji. Skala logarytmiczna: 10 mln $ – 10 mld $.</p>' +
-    '<div style="margin-top:14px"><input type="range" id="scSlider" min="0" max="1000" step="1" value="' + scenarioPos + '"></div>' +
-    '<div class="scale-marks" id="scMarks">' + marks.map((mk, i) => {
-      const p = fdvToPctPos(mk.v);
-      if (p === null) return '';
-      const lvl = i % 2;   // co drugi znacznik niżej, żeby etykiety się nie zlewały
-      return '<div class="mk" style="left:' + p.toFixed(2) + '%; top:' + (lvl * 20) + 'px; color:' + mk.color + '">' +
-        '<i style="height:' + (14 - lvl * 4) + 'px"></i>' + mk.label + '<br>' + usdBig(mk.v) + '</div>';
-    }).join('') + '</div>' +
-    '<div class="grid g4" id="scOut" style="margin-top:8px">' + scenarioKpis(t, sc) + '</div></div>');
+  /* --- KALKULATOR SCENARIUSZY (z osią czasu) --- */
+  parts.push(scenarioCardHtml(t));
 
   /* --- oś czasu odblokowań --- */
   parts.push('<div class="card"><div class="card-head"><div><h2>Oś czasu odblokowań</h2>' +
@@ -1503,12 +1566,153 @@ function athRow(title, desc, price, value, usdPln, todayValue){
     '<td class="num"><b>' + pln(value * usdPln) + '</b></td>' +
     '<td class="num">' + (todayValue > 0 ? mult(value / todayValue) : '—') + '</td></tr>';
 }
-function scenarioKpis(t, sc){
+/* ---- KALKULATOR SCENARIUSZY: stan, wykresy pomocnicze i render ---- */
+function scenarioContext(t){
   const m = metrics(t);
-  return kpi('Wycena sieci (FDV)', usdBig(sc.targetFDV), mult(sc.vsToday) + ' względem dzisiejszego FDV') +
-    kpi('Cena', usd(sc.impliedPrice), mult(m.price > 0 ? sc.impliedPrice / m.price : NaN) + ' względem dzisiejszej') +
-    kpi('Wartość pozycji', pln(sc.impliedPositionPln), usdBig(sc.impliedPosition)) +
-    kpi('Zwrot z wkładu', mult(sc.impliedMultiple, 2), 'włożone ' + usdBig(m.invested) + ' · ' + (sc.impliedPosition >= m.invested ? 'powyżej progu' : 'poniżej progu'));
+  if (!scenarioDate) scenarioDate = isoOf(addMonths(new Date(), 12));
+  const auto = supplyAtDate(t, scenarioDate);
+  const autoReleased = auto.unlocked + auto.emission;
+  const released = (scenarioRelease === null) ? autoReleased : Math.max(0, scenarioRelease);
+  // podaż w obiegu w wybranym dniu — nigdy mniej niż dziś i nigdy więcej niż podaż docelowa
+  const supply = Math.max(m.circ, Math.min(m.total, m.circ + released));
+  // Suwak ma skok ~0,3% i zakres 10 mln – 10 mld $; wpisana ręcznie kwota ma pierwszeństwo,
+  // dzięki czemu da się ustawić też wycenę spoza tego zakresu.
+  const target = (scenarioValue === null) ? posToFdv(scenarioPos) : scenarioValue;
+  const sc = scenarioTimed(t, target, scenarioBasis, supply);
+  return { m: m, auto: auto, autoReleased: autoReleased, released: released, supply: supply, sc: sc };
+}
+function scenarioMarks(t, ctx){
+  return scenarioBasis === 'mc'
+    ? [{ v: ctx.m.marketCap, label: 'kapitał dziś', color: 'var(--s1)' },
+       { v: ctx.m.breakEvenPrice * ctx.supply, label: 'próg w tym dniu', color: 'var(--warn)' },
+       { v: num(t.athMarketCap), label: 'kapit. ATH', color: 'var(--s5)' }]
+    : [{ v: ctx.m.fdv, label: 'FDV dziś', color: 'var(--s1)' },
+       { v: ctx.m.breakEvenFDV, label: 'próg', color: 'var(--warn)' },
+       { v: num(t.athMarketCap), label: 'kapit. ATH', color: 'var(--s5)' }];
+}
+/* Znaczniki na skali. Te, które wypadają blisko siebie, dostają dłuższą kreskę
+   i schodzą piętro niżej, więc etykiety się nie nakładają, a każda kreska nadal
+   dotyka suwaka. Wysokość paska dopasowuje się do liczby zajętych pięter. */
+function renderScenarioMarks(container, marks){
+  if (!container) return;
+  const barW = container.clientWidth || 600;
+  const labelW = 150;                                   // typowa szerokość etykiety w px
+  const minGap = Math.min(45, (labelW / barW) * 100);   // minimalny odstęp w procentach skali
+  const placed = marks.map(mk => ({ mk: mk, p: fdvToPctPos(mk.v) }))
+    .filter(x => x.p !== null)
+    .sort((a, b) => a.p - b.p);
+  const levelAt = [];
+  let maxLvl = 0;
+  placed.forEach(x => {
+    let lvl = 0;
+    while (levelAt[lvl] !== undefined && x.p - levelAt[lvl] < minGap) lvl++;
+    levelAt[lvl] = x.p;
+    x.lvl = lvl;
+    if (lvl > maxLvl) maxLvl = lvl;
+  });
+  container.innerHTML = placed.map(x =>
+    '<div class="mk" style="left:' + x.p.toFixed(2) + '%; color:' + x.mk.color + '">' +
+    '<i style="height:' + (10 + x.lvl * 20) + 'px"></i><span class="lbl">' + x.mk.label + ' · ' + usdBig(x.mk.v) + '</span></div>').join('');
+  container.style.height = (34 + maxLvl * 20) + 'px';
+}
+function scenarioChipsHtml(t){
+  const chips = [
+    { label: '+3 mies.', date: isoOf(addMonths(new Date(), 3)) },
+    { label: '+6 mies.', date: isoOf(addMonths(new Date(), 6)) },
+    { label: '+12 mies.', date: isoOf(addMonths(new Date(), 12)) },
+    { label: '+24 mies.', date: isoOf(addMonths(new Date(), 24)) }
+  ];
+  const nextUnlock = (t.unlocks || []).filter(u => { const d = parseISO(u.date); return d && d > new Date(); })
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+  if (nextUnlock) chips.push({ label: 'najbliższe odblokowanie', date: nextUnlock.date });
+  if (t.vestingEndDate) chips.push({ label: 'koniec vestingu', date: t.vestingEndDate });
+  return chips.map(c => '<button class="btn small" data-scdate="' + esc(c.date) + '">' + esc(c.label) + '</button>').join('');
+}
+function scenarioCardHtml(t){
+  const ctx = scenarioContext(t);
+  return '<div class="card"><h2>Kalkulator scenariuszy</h2>' +
+    '<p class="sub">Ustaw moment w czasie, ilość tokenów, która do tego momentu wejdzie do obiegu, i wycenę. Skala suwaka logarytmiczna: 10 mln $ – 10 mld $.</p>' +
+    '<div class="grid g2" style="margin-top:12px">' +
+      '<div><label class="field" style="margin-bottom:6px"><span class="lab">Moment w czasie</span>' +
+      '<input type="date" id="scDate" value="' + esc(scenarioDate) + '"></label>' +
+      '<div class="row">' + scenarioChipsHtml(t) + '</div></div>' +
+      '<div><label class="field" style="margin-bottom:6px"><span class="lab">Tokeny uwolnione do tej daty <span class="sub">· możesz wpisać własną liczbę</span></span>' +
+      '<input type="text" inputmode="decimal" id="scRelease" value="' + esc(NF(0, 0).format(ctx.released)) + '"></label>' +
+      '<div class="row"><button class="btn small" id="scReleaseAuto">Przelicz z harmonogramu</button>' +
+      '<span class="note" id="scReleaseMode">' + (scenarioRelease === null ? 'liczone z harmonogramu' : 'wartość wpisana ręcznie') + '</span></div></div>' +
+    '</div>' +
+    '<p class="note" id="scSupplyInfo"></p>' +
+    '<details class="datatable"><summary>Które odblokowania wchodzą do tej daty</summary><div class="table-wrap" id="scUnlockList"></div></details>' +
+    '<div class="card-head" style="margin:16px 0 2px"><div><h3 id="scSliderLabel"></h3></div>' +
+      '<div class="seg" id="scBasis">' +
+        '<button data-b="fdv" aria-pressed="' + (scenarioBasis === 'fdv') + '">Zadaję FDV</button>' +
+        '<button data-b="mc" aria-pressed="' + (scenarioBasis === 'mc') + '">Zadaję kapitał w tokenie</button>' +
+      '</div></div>' +
+    '<div class="row" style="flex-wrap:nowrap; gap:10px"><input type="range" id="scSlider" min="0" max="1000" step="1" value="' + scenarioPos + '" style="flex:1">' +
+    '<input type="text" inputmode="decimal" id="scValue" value="' + esc(NF(0, 0).format(ctx.sc.targetValue)) + '" style="width:150px; text-align:right" aria-label="dokładna kwota w USD"></div>' +
+    '<div class="scale-marks" id="scMarks"></div>' +
+    '<p class="note" id="scRangeNote" style="margin-top:4px"></p>' +
+    '<div class="grid g4" id="scOut" style="margin-top:8px"></div>' +
+    '<p class="note" id="scExplain" style="margin-top:10px"></p></div>';
+}
+/* Przelicza i podmienia tylko wyniki — pola formularza zostają nietknięte,
+   żeby nie tracić kursora podczas pisania i przeciągania suwaka. */
+function updateScenario(t){
+  const ctx = scenarioContext(t), m = ctx.m, sc = ctx.sc;
+  const days = Math.max(0, daysBetween(new Date(), parseISO(scenarioDate) || new Date()));
+
+  const info = el('scSupplyInfo');
+  if (info){
+    info.innerHTML = 'Do <b>' + fmtDate(scenarioDate) + '</b> (za ' + days + ' dni): odblokowania z harmonogramu <b>' + tokAmount(ctx.auto.unlocked) +
+      '</b> + emisja <b>' + tokAmount(ctx.auto.emission) + '</b> = ' + tokAmount(ctx.autoReleased) + ' szt.' +
+      (scenarioRelease === null ? '' : ' · przyjęto ręcznie <b>' + tokAmount(ctx.released) + '</b> szt.') +
+      ' → podaż w obiegu <b>' + tokAmount(ctx.supply) + '</b> (float ' + pct(ctx.supply / m.total * 100) + ', dziś ' + pct(m.float * 100) + ')' +
+      (ctx.auto.capped || ctx.supply >= m.total ? ' — obcięte do podaży docelowej.' : '.');
+  }
+  const ul = el('scUnlockList');
+  if (ul){
+    if (!ctx.auto.unlocks.length){
+      ul.innerHTML = '<p class="note">Żadne wpisane odblokowanie nie mieści się w tym okresie. Jeśli wiesz, że coś wejdzie — wpisz liczbę ręcznie w polu obok.</p>';
+    } else {
+      ul.innerHTML = '<table><thead><tr><th>Data</th><th>Opis</th><th class="num">Tokeny</th><th class="num">Wartość po cenie scenariusza</th></tr></thead><tbody>' +
+        ctx.auto.unlocks.map(u => '<tr><td>' + fmtDate(u.date) + '</td><td>' + esc(u.label || '—') + '</td>' +
+          '<td class="num">' + tokAmount(num(u.tokens)) + '</td><td class="num">' + usdBig(num(u.tokens) * sc.impliedPrice) + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
+  }
+  const lab = el('scSliderLabel');
+  if (lab) lab.textContent = scenarioBasis === 'mc'
+    ? 'Kapitał realnie ulokowany w tokenie w dniu ' + fmtDate(scenarioDate)
+    : 'Wycena całej podaży (FDV)';
+  renderScenarioMarks(el('scMarks'), scenarioMarks(t, ctx));
+
+  const out = el('scOut');
+  if (out){
+    const priceDrop = m.price > 0 ? (sc.priceIfCapitalFlat / m.price - 1) * 100 : NaN;
+    out.innerHTML =
+      kpi('Wycena sieci (FDV)', usdBig(sc.targetFDV), mult(sc.vsTodayFdv) + ' względem dzisiejszego FDV') +
+      kpi('Kapitał w tokenie w tym dniu', usdBig(sc.targetMC), mult(sc.vsTodayMc) + ' względem dzisiejszej kapitalizacji') +
+      kpi('Cena', usd(sc.impliedPrice), mult(sc.vsTodayPrice) + ' względem dzisiejszej') +
+      kpi('Wartość pozycji', pln(sc.impliedPositionPln), usdBig(sc.impliedPosition) + ' · zwrot ' + mult(sc.impliedMultiple, 2)) +
+      kpi('Podaż w obiegu', tokAmount(ctx.supply), 'float ' + pct(ctx.supply / m.total * 100) + ' · przyrost ' + pctSigned((ctx.supply / m.circ - 1) * 100), true) +
+      kpi('Kapitał na same nowe tokeny', usdBig(sc.absorbCost), 'tyle musi dojść wyłącznie po to, żeby rynek wchłonął ' + tokAmount(ctx.supply - m.circ) + ' szt. po tej cenie', true) +
+      kpi('Cena przy dzisiejszym kapitale', usd(sc.priceIfCapitalFlat), 'gdyby kapitał nie urósł ani o dolara: ' + pctSigned(priceDrop), true) +
+      kpi('Do progu opłacalności', mult(scenarioBasis === 'mc' ? (m.breakEvenPrice * ctx.supply) / Math.max(1, sc.targetMC) : m.breakEvenFDV / Math.max(1, sc.targetFDV)),
+        scenarioBasis === 'mc'
+          ? 'próg w tym dniu to kapitał ' + usdBig(m.breakEvenPrice * ctx.supply)
+          : 'próg to FDV ' + usdBig(m.breakEvenFDV), true);
+  }
+  const outOfRange = sc.targetValue < SC_MIN || sc.targetValue > SC_MAX;
+  const rangeNote = el('scRangeNote');
+  if (rangeNote) rangeNote.innerHTML = outOfRange
+    ? '<span style="color:var(--warn)">Wpisana kwota (' + usdBig(sc.targetValue) + ') jest poza zakresem suwaka 10 mln – 10 mld $ — suwak stoi na krańcu, liczby są policzone z wpisanej wartości.</span>'
+    : 'Suwak albo dokładna kwota w dolarach — obie strony są zsynchronizowane.';
+  const ex = el('scExplain');
+  if (ex){
+    ex.innerHTML = scenarioBasis === 'mc'
+      ? 'Zadajesz kapitał, więc cena = kapitał ÷ podaż w obiegu w tym dniu. Im więcej tokenów zdąży wejść do obiegu, tym niższa cena przy tym samym kapitale — i tym mniejsza wartość Twojej pozycji. To jest koszt czasu przy emisji.'
+      : 'Przy zadanym FDV wartość pozycji <b>nie zależy od daty</b> — Twój udział w podaży jest stały. Od daty zależy co innego: ile realnego kapitału musi wtedy siedzieć w tokenie, żeby ta cena się utrzymała (' + usdBig(sc.targetMC) + ', czyli ' + mult(sc.vsTodayMc) + ' dzisiejszej kapitalizacji). Przełącz na „Zadaję kapitał w tokenie”, żeby zobaczyć, jak ta sama kwota rozkłada się na coraz większą podaż.';
+  }
 }
 
 function riskCardHtml(t, rs){
@@ -1542,8 +1746,53 @@ function wireTokenView(t){
   const sl = el('scSlider');
   if (sl) sl.addEventListener('input', () => {
     scenarioPos = Number(sl.value);
-    el('scOut').innerHTML = scenarioKpis(t, scenario(t, posToFdv(scenarioPos)));
+    scenarioValue = posToFdv(scenarioPos);
+    const f = el('scValue');
+    if (f) f.value = NF(0, 0).format(scenarioValue);
+    updateScenario(t);
   });
+  const sv = el('scValue');
+  if (sv) sv.addEventListener('input', () => {
+    const v = parseLocaleNumber(sv.value);
+    if (!isFinite(v) || v <= 0) return;
+    scenarioValue = v;
+    scenarioPos = fdvToPos(v);
+    if (sl) sl.value = scenarioPos;
+    updateScenario(t);
+  });
+  const sd = el('scDate');
+  if (sd) sd.addEventListener('change', () => {
+    scenarioDate = sd.value || scenarioDate;
+    if (scenarioRelease === null) refreshReleaseField(t);   // pole podąża za harmonogramem
+    updateScenario(t);
+  });
+  document.querySelectorAll('[data-scdate]').forEach(b => b.addEventListener('click', () => {
+    scenarioDate = b.getAttribute('data-scdate');
+    if (sd) sd.value = scenarioDate;
+    if (scenarioRelease === null) refreshReleaseField(t);
+    updateScenario(t);
+  }));
+  const sr = el('scRelease');
+  if (sr) sr.addEventListener('input', () => {
+    const v = parseLocaleNumber(sr.value);
+    scenarioRelease = isFinite(v) ? v : 0;
+    el('scReleaseMode').textContent = 'wartość wpisana ręcznie';
+    updateScenario(t);
+  });
+  const sra = el('scReleaseAuto');
+  if (sra) sra.addEventListener('click', () => {
+    scenarioRelease = null;
+    refreshReleaseField(t);
+    el('scReleaseMode').textContent = 'liczone z harmonogramu';
+    updateScenario(t);
+  });
+  const sb = el('scBasis');
+  if (sb) sb.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    scenarioBasis = b.getAttribute('data-b');
+    sb.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    updateScenario(t);
+  }));
+  updateScenario(t);
 
   const gs = el('growthSlider');
   if (gs) gs.addEventListener('input', () => {
@@ -1555,6 +1804,11 @@ function wireTokenView(t){
   renderUnlockChart(t);
   renderAllocChart(t);
   renderProjection(t);
+}
+
+function refreshReleaseField(t){
+  const ctx = scenarioContext(t), f = el('scRelease');
+  if (f) f.value = NF(0, 0).format(ctx.released);
 }
 
 function renderUnlockChart(t){
