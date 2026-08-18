@@ -136,6 +136,25 @@
           </tbody>
         </table>
       </div>
+
+      <div class="section">
+        <h2>4. Zapisz profil roztworu (faza)</h2>
+        <p class="note">
+          Ustal dawki i objętość zbiornika powyżej (punkty 1–2) — obliczony profil PPM z punktu 3 zostanie zapisany
+          razem z nazwą fazy, którą wpiszesz. Zapisz dowolną liczbę profili, np. „Sadzonki”, „Wegetacja”,
+          „Faza przejściowa”, „Kwitnienie”, a potem wczytaj dowolny z nich jednym kliknięciem.
+        </p>
+        <div class="input-group">
+          <div>
+            <label>Nazwa fazy</label>
+            <input type="text" id="phase_name_input" placeholder="np. Sadzonki, Wegetacja, Kwitnienie..."
+              onkeydown="if(event.key==='Enter'){event.preventDefault();savePhaseProfile();}">
+          </div>
+        </div>
+        <button class="col-btn selected" onclick="savePhaseProfile()">+ Dodaj / Stwórz profil</button>
+        <div id="phase_save_status" class="explain" style="margin-top:6px;"></div>
+        <div id="saved-phases-list" style="margin-top:16px;"></div>
+      </div>
     </div>
 
     <!-- TAB CAC -->
@@ -1978,6 +1997,131 @@
     }
     window.calculatePPM = calculatePPM;
 
+    const PPM_DOSE_FIELDS = ['water_volume', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_kompost'];
+    const PPM_PROFILE_ELEMENTS = [
+      { key: 'n', label: 'N' }, { key: 'p', label: 'P' }, { key: 'k', label: 'K' },
+      { key: 'ca', label: 'Ca' }, { key: 's', label: 'S' }, { key: 'mg', label: 'Mg' }
+    ];
+    window._savedPhaseProfiles = [];
+
+    function loadSavedPhasesFromStorage() {
+      try {
+        const raw = localStorage.getItem('ppm_saved_phases');
+        window._savedPhaseProfiles = raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        window._savedPhaseProfiles = [];
+      }
+    }
+
+    function persistSavedPhases() {
+      try {
+        localStorage.setItem('ppm_saved_phases', JSON.stringify(window._savedPhaseProfiles));
+      } catch (e) { /* localStorage niedostępny — profil zostanie tylko w pamięci sesji */ }
+    }
+
+    function readCurrentPhaseDoses() {
+      const doses = {};
+      PPM_DOSE_FIELDS.forEach(id => {
+        doses[id] = parseFloat(document.getElementById(id).value) || 0;
+      });
+      return doses;
+    }
+
+    function readCurrentPhasePpm() {
+      const ppm = {};
+      PPM_PROFILE_ELEMENTS.forEach(({ key }) => {
+        ppm[key] = {
+          min: parseFloat(document.getElementById(`ppm_${key}_min`).innerText) || 0,
+          max: parseFloat(document.getElementById(`ppm_${key}_max`).innerText) || 0
+        };
+      });
+      return ppm;
+    }
+
+    function savePhaseProfile() {
+      const nameInput = document.getElementById('phase_name_input');
+      const name = nameInput.value.trim();
+      const statusEl = document.getElementById('phase_save_status');
+      if (!name) {
+        statusEl.textContent = 'Wpisz najpierw nazwę fazy (np. „Kwitnienie”), zanim zapiszesz profil.';
+        nameInput.focus();
+        return;
+      }
+      calculatePPM();
+      const doses = readCurrentPhaseDoses();
+      const ppm = readCurrentPhasePpm();
+      const existing = window._savedPhaseProfiles.find(p => p.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        existing.doses = doses;
+        existing.ppm = ppm;
+        existing.savedAt = Date.now();
+        statusEl.textContent = `Zaktualizowano istniejący profil „${name}”.`;
+      } else {
+        window._savedPhaseProfiles.push({
+          id: 'phase_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+          name,
+          doses,
+          ppm,
+          savedAt: Date.now()
+        });
+        statusEl.textContent = `Zapisano nowy profil „${name}”.`;
+      }
+      persistSavedPhases();
+      nameInput.value = '';
+      renderSavedPhases();
+    }
+    window.savePhaseProfile = savePhaseProfile;
+
+    function loadPhaseProfile(id) {
+      const profile = window._savedPhaseProfiles.find(p => p.id === id);
+      if (!profile) return;
+      PPM_DOSE_FIELDS.forEach(fieldId => {
+        if (profile.doses[fieldId] !== undefined) document.getElementById(fieldId).value = profile.doses[fieldId];
+      });
+      calculatePPM();
+      const statusEl = document.getElementById('phase_save_status');
+      statusEl.textContent = `Wczytano profil „${profile.name}” do punktów 1–2 powyżej.`;
+    }
+    window.loadPhaseProfile = loadPhaseProfile;
+
+    function deletePhaseProfile(id) {
+      window._savedPhaseProfiles = window._savedPhaseProfiles.filter(p => p.id !== id);
+      persistSavedPhases();
+      renderSavedPhases();
+    }
+    window.deletePhaseProfile = deletePhaseProfile;
+
+    function formatPpmRange(range) {
+      if (!range) return '—';
+      return Math.abs(range.max - range.min) < 0.005
+        ? range.min.toFixed(2)
+        : `${range.min.toFixed(2)}–${range.max.toFixed(2)}`;
+    }
+
+    function renderSavedPhases() {
+      const listDiv = document.getElementById('saved-phases-list');
+      if (!listDiv) return;
+      if (!window._savedPhaseProfiles.length) {
+        listDiv.innerHTML = '<p class="note">Brak zapisanych profili — wpisz nazwę fazy powyżej i kliknij „+ Dodaj / Stwórz profil”.</p>';
+        return;
+      }
+      const sorted = [...window._savedPhaseProfiles].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+      let html = '<table><thead><tr><th>Faza</th>'
+        + PPM_PROFILE_ELEMENTS.map(e => `<th>${e.label} (ppm)</th>`).join('')
+        + '<th>Zapisano</th><th></th></tr></thead><tbody>';
+      sorted.forEach(profile => {
+        const savedDate = new Date(profile.savedAt).toLocaleString('pl-PL');
+        html += `<tr><td><strong>${profile.name}</strong></td>`
+          + PPM_PROFILE_ELEMENTS.map(e => `<td>${formatPpmRange(profile.ppm[e.key])}</td>`).join('')
+          + `<td class="explain">${savedDate}</td>`
+          + `<td><button class="col-btn" style="padding:5px 10px;" onclick="loadPhaseProfile('${profile.id}')">Wczytaj</button>`
+          + `<button class="col-btn" style="padding:5px 10px;" onclick="deletePhaseProfile('${profile.id}')">Usuń</button></td></tr>`;
+      });
+      html += '</tbody></table>';
+      listDiv.innerHTML = html;
+    }
+    window.renderSavedPhases = renderSavedPhases;
+
     function getOtherBases(ph) {
       if (ph > 6.1) return 11.4 - ph;
       if (ph > 3.0) return 17.4 - (2 * ph);
@@ -2185,6 +2329,8 @@
       renderProductsTable();
       calculatePPM();
       calculateCAC();
+      loadSavedPhasesFromStorage();
+      renderSavedPhases();
     };
   </script>
 </body>
