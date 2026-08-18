@@ -1777,6 +1777,11 @@
       if (state) {
         html += `<p class="note">pH liczone jest z sumy nasycenia zasadami (${state.totalBaseSat.toFixed(1)}%) — `
           + `„Start” to pH po wapnowaniu z zakładki CAC, „Razem” uwzględnia już wszystkie odżywki z listy. `
+          + (state.saturated
+            ? `<strong>Uwaga:</strong> ${state.surplusCa.toFixed(0)} ppm z ${state.totalCa.toFixed(0)} ppm wapnia nie mieści się `
+              + `już na kompleksie sorpcyjnym — kolumna „Razem” pokazuje wapń zmierzony w glebie, ale nasycenie obok liczy `
+              + `tylko część związaną. `
+            : '')
           + `Szczegóły w tabeli nasycenia kationów obok.</p>`;
       }
       document.getElementById('am_summary_table').innerHTML = html;
@@ -1925,17 +1930,48 @@
       const meqK = finalK / 390;
       const meqNa = finalNa / 230;
       const tcec = window._cac.tcec;
-      const satCa = tcec > 0 ? (meqCa / tcec) * 100 : 0;
-      const satMg = tcec > 0 ? (meqMg / tcec) * 100 : 0;
-      const satK = tcec > 0 ? (meqK / tcec) * 100 : 0;
-      const satNa = tcec > 0 ? (meqNa / tcec) * 100 : 0;
+
+      // Kompleks sorpcyjny ma skończoną liczbę miejsc (TCEC) — nasycenie nie może przekroczyć 100%.
+      // Wapń dosypany ponad tę pojemność nie siada na kompleksie: zostaje w roztworze albo
+      // jako nieprzereagowany węglan/krzemian. Ekstrakcja Mehlich 3 i tak go wykaże w ppm,
+      // dlatego sam odczyt ppm potrafi sugerować nasycenie powyżej 100%.
+      const meqOthers = meqMg + meqK + meqNa;
+      let exMeqCa = meqCa, exMeqMg = meqMg, exMeqK = meqK, exMeqNa = meqNa;
+      let surplusCa = 0;
+      let othersOverloaded = false;
+
+      if (meqOthers >= tcec) {
+        // Sam magnez, potas i sód wypełniają cały kompleks — na wapń nie ma już miejsca.
+        othersOverloaded = true;
+        const shrink = tcec / meqOthers;
+        exMeqMg = meqMg * shrink;
+        exMeqK = meqK * shrink;
+        exMeqNa = meqNa * shrink;
+        exMeqCa = 0;
+        surplusCa = finalCa;
+      } else {
+        const roomForCa = tcec - meqOthers;
+        if (meqCa > roomForCa) {
+          exMeqCa = roomForCa;
+          surplusCa = (meqCa - roomForCa) * 200;
+        }
+      }
+
+      const satCa = tcec > 0 ? (exMeqCa / tcec) * 100 : 0;
+      const satMg = tcec > 0 ? (exMeqMg / tcec) * 100 : 0;
+      const satK = tcec > 0 ? (exMeqK / tcec) * 100 : 0;
+      const satNa = tcec > 0 ? (exMeqNa / tcec) * 100 : 0;
       const totalBaseSat = satCa + satMg + satK + satNa;
       const ph = solvePhForBaseSaturation(totalBaseSat);
 
       return {
         tcec, satCa, satMg, satK, satNa, totalBaseSat,
         ph, reachable: ph !== null,
-        startPh: window._postLime.ph
+        startPh: window._postLime.ph,
+        surplusCa, othersOverloaded,
+        saturated: surplusCa > 0.05,
+        totalCa: finalCa,
+        exchangeableCa: exMeqCa * 200
       };
     }
 
@@ -1957,18 +1993,32 @@
       html += `<tr><td>Mg</td><td><span class="badge">${state.satMg.toFixed(1)}</span></td><td>10–15%</td></tr>`;
       html += `<tr><td>K</td><td><span class="badge">${state.satK.toFixed(1)}</span></td><td>3–5%</td></tr>`;
       html += `<tr><td>Na</td><td><span class="badge">${state.satNa.toFixed(1)}</span></td><td>&lt; 2%</td></tr>`;
-      html += `<tr><td><strong>Suma zasad</strong></td><td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td><td>—</td></tr>`;
+      html += `<tr><td><strong>Suma zasad</strong></td><td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td><td>maks. 100%</td></tr>`;
       html += `<tr><td><strong>TCEC</strong></td><td colspan="2"><span class="badge">${state.tcec.toFixed(2)}</span></td></tr>`;
+      if (state.saturated) {
+        html += `<tr class="el-cation"><td><strong>Wapń poza kompleksem</strong></td>`
+          + `<td colspan="2"><span class="badge highlight">${state.surplusCa.toFixed(0)}</span> ppm z ${state.totalCa.toFixed(0)} ppm</td></tr>`;
+      }
       html += `<tr><td><strong>pH gleby (końcowe)</strong></td><td><span class="badge highlight">${formatFinalPh(state)}</span></td>`
         + `<td>6,3–6,8</td></tr>`;
       html += '</tbody></table>';
-      html += `<p class="note">pH końcowe wynika z sumy nasycenia zasadami po wszystkich dodatkach: kationy zajmują miejsca `
-        + `po wymiennym wodorze, więc każdy dosypany wapń, magnez czy potas lekko podnosi pH. `
-        + `Start po wapnowaniu: pH ${state.startPh.toFixed(2)} → po odżywkach: pH ${formatFinalPh(state)}. `
-        + `TCEC nie zmienia się, bo dodatki nie tworzą nowych miejsc sorpcyjnych.`
-        + (state.reachable ? '' : ' <strong>Uwaga:</strong> suma zasad przekracza to, co gleba jest w stanie pomieścić — '
-          + 'to znak, że dawki kationów są za duże.')
-        + '</p>';
+
+      if (state.saturated) {
+        html += `<p class="note"><strong>Kompleks sorpcyjny jest wysycony.</strong> `
+          + (state.othersOverloaded
+            ? `Już sam magnez, potas i sód wypełniają całe TCEC, więc wapń nie ma gdzie usiąść. `
+            : `Wolne miejsca skończyły się przy ${state.exchangeableCa.toFixed(0)} ppm wapnia. `)
+          + `Pozostałe <strong>${state.surplusCa.toFixed(0)} ppm Ca</strong> nie siedzi na kompleksie — zostaje w roztworze `
+          + `albo jako nieprzereagowany wolastenit/węglan. Test glebowy i tak wykaże je w ppm, dlatego surowy odczyt `
+          + `potrafi sugerować nasycenie powyżej 100%; tutaj nasycenie jest liczone tylko z wapnia faktycznie związanego. `
+          + `Praktycznie: ta nadwyżka nie poprawi już nasycenia, a podnosi pH powyżej 7 i utrudnia pobieranie `
+          + `fosforu oraz mikroelementów. Zmniejsz dawkę.</p>`;
+      } else {
+        html += `<p class="note">pH końcowe wynika z sumy nasycenia zasadami po wszystkich dodatkach: kationy zajmują miejsca `
+          + `po wymiennym wodorze, więc każdy dosypany wapń, magnez czy potas lekko podnosi pH. `
+          + `Start po wapnowaniu: pH ${state.startPh.toFixed(2)} → po odżywkach: pH ${formatFinalPh(state)}. `
+          + `TCEC nie zmienia się, bo dodatki nie tworzą nowych miejsc sorpcyjnych.</p>`;
+      }
       box.innerHTML = html;
     }
 
