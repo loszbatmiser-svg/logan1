@@ -1,0 +1,2654 @@
+<!DOCTYPE html>
+<html lang="pl" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FDV Tracker — portfel świadomy rozwodnienia</title>
+<style>
+/* ============================================================
+   MOTYW — ciemny domyślnie, jasny opcjonalnie.
+   Paleta serii wykresów przeszła walidację kontrastu i CVD
+   dla powierzchni #1a1a19 (ciemna) oraz #fcfcfb (jasna).
+   ============================================================ */
+:root{
+  --bg:#0d0d0d; --surface:#1a1a19; --surface-2:#232322; --surface-3:#2c2c2a;
+  --border:rgba(255,255,255,.11); --border-strong:rgba(255,255,255,.20);
+  --text:#ffffff; --text-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --good-bg:rgba(12,163,12,.14); --warn-bg:rgba(250,178,25,.14);
+  --serious-bg:rgba(236,131,90,.14); --critical-bg:rgba(208,59,59,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+}
+html[data-theme="light"]{
+  --bg:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f1ee; --surface-3:#e8e7e2;
+  --border:rgba(11,11,11,.12); --border-strong:rgba(11,11,11,.22);
+  --text:#0b0b0b; --text-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+  --good-bg:rgba(12,163,12,.12); --warn-bg:rgba(250,178,25,.18);
+  --serious-bg:rgba(236,131,90,.16); --critical-bg:rgba(208,59,59,.12);
+  --shadow:0 1px 2px rgba(11,11,11,.06), 0 8px 24px rgba(11,11,11,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.5; -webkit-text-size-adjust:100%;
+}
+h1,h2,h3,h4{margin:0 0 .2em; line-height:1.25; font-weight:650}
+h1{font-size:1.35rem} h2{font-size:1.05rem} h3{font-size:.95rem} h4{font-size:.85rem}
+p{margin:0 0 .6em}
+a{color:var(--s1)}
+.sub{color:var(--muted); font-size:.8rem; margin:0}
+.tnum{font-variant-numeric:tabular-nums}
+.hidden{display:none !important}
+
+/* ---------- pasek górny ---------- */
+.topbar{
+  position:sticky; top:0; z-index:40; background:var(--surface);
+  border-bottom:1px solid var(--border); padding:8px 14px;
+  display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+}
+.brand{display:flex; align-items:baseline; gap:8px; font-weight:700; letter-spacing:-.01em}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--s1);display:inline-block}
+.brand small{color:var(--muted); font-weight:500; font-size:.72rem}
+nav.tabs{display:flex; gap:4px; flex-wrap:wrap; flex:1 1 320px}
+nav.tabs button{
+  background:transparent; border:1px solid transparent; color:var(--text-2);
+  padding:6px 11px; border-radius:8px; cursor:pointer; font-size:.82rem; font-family:inherit;
+}
+nav.tabs button:hover{background:var(--surface-2); color:var(--text)}
+nav.tabs button[aria-current="page"]{background:var(--surface-3); color:var(--text); border-color:var(--border-strong)}
+.topbar-right{display:flex; align-items:center; gap:8px; font-size:.72rem; color:var(--muted)}
+
+/* ---------- podstawowe klocki ---------- */
+main{max-width:1220px; margin:0 auto; padding:16px 14px 64px}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:16px; margin-bottom:14px; box-shadow:var(--shadow);
+}
+.card-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:12px}
+.grid{display:grid; gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.stack{display:flex; flex-direction:column; gap:12px}
+.row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+
+.kpi{background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px 13px}
+.kpi .label{font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em}
+.kpi .value{font-size:1.5rem; font-weight:660; margin-top:2px; letter-spacing:-.02em}
+.kpi .value.sm{font-size:1.15rem}
+.kpi .note{font-size:.75rem; color:var(--text-2); margin-top:2px}
+.pos{color:var(--good)} .neg{color:var(--critical)}
+
+/* ---------- kafelek sygnału ---------- */
+.signal{border-radius:14px; padding:18px; border:1px solid var(--border); display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap}
+.signal .ico{font-size:2rem; line-height:1}
+.signal .headline{font-size:1.4rem; font-weight:720; letter-spacing:-.02em}
+.signal .why{color:var(--text-2); font-size:.87rem; max-width:62ch}
+.signal .metrics{display:flex; gap:18px; flex-wrap:wrap; margin-top:10px}
+.signal .metrics div{font-size:.78rem; color:var(--muted)}
+.signal .metrics b{display:block; font-size:1.02rem; color:var(--text); font-weight:640}
+.sig-good{background:var(--good-bg); border-color:var(--good)}
+.sig-warn{background:var(--serious-bg); border-color:var(--serious)}
+.sig-bad{background:var(--critical-bg); border-color:var(--critical)}
+.sig-none{background:var(--surface-2)}
+
+/* ---------- tabele ---------- */
+.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+table{border-collapse:collapse; width:100%; font-size:.83rem}
+th,td{padding:8px 10px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--muted); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; position:sticky; top:0; background:var(--surface)}
+tbody tr:hover{background:var(--surface-2)}
+tr.clickable{cursor:pointer}
+th.sortable{cursor:pointer; user-select:none}
+th.sortable:hover{color:var(--text)}
+td.num,th.num{font-variant-numeric:tabular-nums}
+tfoot td{font-weight:640; border-top:1px solid var(--border-strong)}
+
+/* ---------- znaczniki ---------- */
+.badge{display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px; font-size:.72rem; font-weight:600; border:1px solid var(--border-strong); color:var(--text-2)}
+.badge.good{background:var(--good-bg); border-color:var(--good); color:var(--text)}
+.badge.warn{background:var(--warn-bg); border-color:var(--warn); color:var(--text)}
+.badge.serious{background:var(--serious-bg); border-color:var(--serious); color:var(--text)}
+.badge.critical{background:var(--critical-bg); border-color:var(--critical); color:var(--text)}
+.badge .dotc{width:8px;height:8px;border-radius:50%;display:inline-block}
+.flag{display:flex; gap:8px; align-items:flex-start; background:var(--critical-bg); border:1px solid var(--critical);
+  border-radius:8px; padding:7px 10px; font-size:.79rem; color:var(--text)}
+.flag.warnf{background:var(--warn-bg); border-color:var(--warn)}
+.chip{display:inline-block; padding:1px 7px; border-radius:6px; background:var(--surface-3); font-size:.7rem; color:var(--text-2); border:1px solid var(--border)}
+
+/* ---------- pasek postępu ---------- */
+.bar{height:8px; border-radius:99px; background:var(--surface-3); overflow:hidden; min-width:72px; border:1px solid var(--border)}
+.bar > span{display:block; height:100%; background:var(--s1)}
+.bar.b-good > span{background:var(--good)} .bar.b-warn > span{background:var(--warn)}
+.bar.b-serious > span{background:var(--serious)} .bar.b-critical > span{background:var(--critical)}
+
+/* ---------- formularze ---------- */
+label.field{display:block; margin-bottom:10px; font-size:.78rem; color:var(--text-2)}
+label.field > span.lab{display:block; margin-bottom:3px; color:var(--muted)}
+input,select,textarea,button{font-family:inherit; font-size:.87rem}
+input[type=text],input[type=number],input[type=date],select,textarea{
+  width:100%; background:var(--surface-2); color:var(--text); border:1px solid var(--border-strong);
+  border-radius:8px; padding:7px 9px;
+}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--s1); outline-offset:1px}
+textarea{min-height:120px; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem}
+.btn{background:var(--surface-2); color:var(--text); border:1px solid var(--border-strong); border-radius:8px;
+  padding:7px 13px; cursor:pointer; font-size:.83rem}
+.btn:hover{background:var(--surface-3)}
+.btn.primary{background:var(--s1); border-color:var(--s1); color:#fff; font-weight:600}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.danger{border-color:var(--critical); color:var(--critical)}
+.btn.small{padding:4px 9px; font-size:.76rem}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.seg{display:inline-flex; border:1px solid var(--border-strong); border-radius:8px; overflow:hidden}
+.seg button{background:transparent; border:0; color:var(--text-2); padding:5px 10px; cursor:pointer; font-size:.76rem}
+.seg button[aria-pressed="true"]{background:var(--surface-3); color:var(--text); font-weight:600}
+input[type=range]{width:100%; accent-color:var(--s1)}
+
+/* ---------- wykresy ---------- */
+.chart-wrap{position:relative; height:280px}
+.chart-wrap.tall{height:340px}
+.chart-wrap.short{height:190px}
+.chart-fallback{display:flex; align-items:center; justify-content:center; height:100%;
+  color:var(--muted); font-size:.8rem; text-align:center; padding:20px; border:1px dashed var(--border-strong); border-radius:10px}
+details.datatable{margin-top:8px}
+details.datatable summary{cursor:pointer; color:var(--muted); font-size:.76rem}
+
+/* ---------- pozostałe ---------- */
+.banner{border-radius:10px; padding:10px 13px; margin-bottom:12px; font-size:.82rem; border:1px solid var(--border-strong); background:var(--surface-2)}
+.banner.warn{background:var(--warn-bg); border-color:var(--warn)}
+.banner.bad{background:var(--critical-bg); border-color:var(--critical)}
+.banner.info{background:var(--surface-2)}
+.note{font-size:.78rem; color:var(--muted)}
+.identity{background:var(--surface-2); border:1px solid var(--s1); border-radius:10px; padding:12px 14px}
+.identity code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.86rem; color:var(--s1)}
+.legend-list{display:flex; flex-wrap:wrap; gap:10px; font-size:.76rem; color:var(--text-2); margin-top:8px}
+.legend-list span.sw{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:middle}
+.src{font-size:.72rem; color:var(--muted)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem}
+.scale-marks{position:relative; height:62px; margin-top:4px}
+.scale-marks .mk{position:absolute; top:0; transform:translateX(-50%); text-align:center; font-size:.66rem; color:var(--muted); white-space:nowrap}
+.scale-marks .mk i{display:block; width:2px; height:12px; margin:0 auto 2px; background:currentColor}
+.confirm-row{border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:var(--surface-2)}
+.confirm-row .snippet{font-size:.74rem; color:var(--muted); font-family:ui-monospace,monospace; background:var(--surface-3);
+  padding:6px 8px; border-radius:6px; margin-top:6px; max-height:74px; overflow:auto; white-space:pre-wrap; word-break:break-word}
+.tokenpick{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
+.tokenpick button{background:var(--surface-2); border:1px solid var(--border-strong); color:var(--text-2);
+  border-radius:999px; padding:5px 12px; cursor:pointer; font-size:.8rem}
+.tokenpick button[aria-pressed="true"]{background:var(--s1); border-color:var(--s1); color:#fff; font-weight:600}
+ul.tight{margin:.3em 0; padding-left:1.15em} ul.tight li{margin-bottom:.25em; font-size:.82rem; color:var(--text-2)}
+@media (max-width:640px){
+  main{padding:12px 10px 60px}
+  .card{padding:13px}
+  .kpi .value{font-size:1.25rem}
+  .signal .headline{font-size:1.15rem}
+  .chart-wrap{height:230px}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="dot"></span>FDV&nbsp;Tracker <small>portfel świadomy rozwodnienia</small></div>
+  <nav class="tabs" id="nav">
+    <button data-view="dashboard" aria-current="page">Pulpit</button>
+    <button data-view="token">Token</button>
+    <button data-view="edit">Dodaj / edytuj</button>
+    <button data-view="daily">Codzienna aktualizacja</button>
+    <button data-view="compare">Porównanie</button>
+    <button data-view="data">Dane i ustawienia</button>
+    <button data-view="tests">Testy</button>
+  </nav>
+  <div class="topbar-right">
+    <span id="saveInfo">—</span>
+    <button class="btn small" id="themeBtn" title="Przełącz motyw">◐</button>
+  </div>
+</header>
+
+<main>
+  <div id="bannerArea"></div>
+
+  <!-- ============ WIDOK 1: PULPIT ============ -->
+  <section id="view-dashboard" class="view">
+    <div id="signalTile" style="margin-bottom:14px"></div>
+
+    <div class="grid g4" id="portfolioKpis" style="margin-bottom:14px"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>FDV portfela w czasie</h2>
+          <p class="sub" id="fdvChartSub"></p>
+        </div>
+        <div class="row">
+          <div class="seg" id="fdvChartMode">
+            <button data-mode="weighted" aria-pressed="true">Ważone udziałem w podaży</button>
+            <button data-mode="raw" aria-pressed="false">Suma FDV sieci</button>
+          </div>
+          <label class="row" style="gap:5px; font-size:.76rem; color:var(--text-2)"><input type="checkbox" id="fdvLogScale" style="width:auto">skala logarytmiczna</label>
+        </div>
+      </div>
+      <div class="chart-wrap tall"><canvas id="chartPortfolioFdv"></canvas></div>
+      <details class="datatable"><summary>Pokaż dane liczbowo</summary><div class="table-wrap" id="fdvChartTable"></div></details>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Podaż w obiegu w czasie</h2>
+          <p class="sub">Indeks = 100 na początku historii. To jest headwind: każdy wzrost tej linii oznacza nowych sprzedających, których musi wchłonąć ta sama pula kapitału.</p>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="chartSupply"></canvas></div>
+      <details class="datatable"><summary>Pokaż dane liczbowo</summary><div class="table-wrap" id="supplyChartTable"></div></details>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div><h2>Tokeny</h2><p class="sub">Kliknij wiersz, żeby otworzyć szczegóły tokena.</p></div></div>
+      <div class="table-wrap" id="dashTable"></div>
+    </div>
+  </section>
+
+  <!-- ============ WIDOK 2: TOKEN ============ -->
+  <section id="view-token" class="view hidden">
+    <div class="tokenpick" id="tokenPick"></div>
+    <div id="tokenDetail"></div>
+  </section>
+
+  <!-- ============ WIDOK 3: DODAJ / EDYTUJ ============ -->
+  <section id="view-edit" class="view hidden">
+    <div class="card">
+      <div class="card-head">
+        <div><h2>Dodaj lub edytuj token</h2><p class="sub">Trzy ścieżki: ręcznie, z pliku PDF, z linku lub wklejonego tekstu.</p></div>
+        <div class="seg" id="editMode">
+          <button data-m="manual" aria-pressed="true">A. Ręcznie</button>
+          <button data-m="pdf" aria-pressed="false">B. Z pliku PDF</button>
+          <button data-m="link" aria-pressed="false">C. Z linku / tekstu</button>
+        </div>
+      </div>
+      <div id="editPaneManual"></div>
+      <div id="editPanePdf" class="hidden"></div>
+      <div id="editPaneLink" class="hidden"></div>
+    </div>
+    <div id="parseConfirm"></div>
+  </section>
+
+  <!-- ============ WIDOK 4: CODZIENNA AKTUALIZACJA ============ -->
+  <section id="view-daily" class="view hidden"><div id="dailyPane"></div></section>
+
+  <!-- ============ WIDOK 5: PORÓWNANIE ============ -->
+  <section id="view-compare" class="view hidden"><div id="comparePane"></div></section>
+
+  <!-- ============ DANE I USTAWIENIA ============ -->
+  <section id="view-data" class="view hidden"><div id="dataPane"></div></section>
+
+  <!-- ============ TESTY ============ -->
+  <section id="view-tests" class="view hidden"><div id="testsPane"></div></section>
+</main>
+
+<script>
+/* nic tu nie ląduje przed załadowaniem Chart.js — biblioteka jest opcjonalna */
+window.__chartReady = false;
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
+        onload="window.__chartReady=true" onerror="window.__chartReady=false"></script>
+<script>
+"use strict";
+
+/* ============================================================
+   1. FORMATOWANIE (pl-PL) I POMOCNIKI
+   ============================================================ */
+const NF = (min, max) => new Intl.NumberFormat('pl-PL', { minimumFractionDigits: min, maximumFractionDigits: max });
+
+function isNum(v){ return typeof v === 'number' && isFinite(v); }
+function num(v, dflt){ const n = Number(v); return isFinite(n) ? n : (dflt === undefined ? 0 : dflt); }
+
+/** Liczba z polskim separatorem (spacja) i przecinkiem dziesiętnym. */
+function fmt(v, dec){
+  if (!isFinite(v)) return '—';
+  dec = dec === undefined ? 2 : dec;
+  return NF(dec, dec).format(v);
+}
+/** Automatyczna liczba dziesiętnych zależna od rzędu wielkości. */
+function fmtAuto(v){
+  if (!isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a === 0) return '0';
+  if (a < 0.0001) return NF(2, 8).format(v);
+  if (a < 1) return NF(2, 6).format(v);
+  if (a < 1000) return NF(0, 2).format(v);
+  return NF(0, 0).format(v);
+}
+/** Cena w USD — dla groszowych tokenów pokazujemy więcej miejsc. */
+function usd(v){
+  if (!isFinite(v)) return '—';
+  const a = Math.abs(v);
+  let d = 2;
+  if (a < 0.00001) d = 8; else if (a < 0.001) d = 6; else if (a < 1) d = 5; else if (a < 100) d = 2; else d = 2;
+  return '$' + NF(d, d).format(v);
+}
+/** Duże kwoty w USD: 466 560 000 → „466,6 mln $”. */
+function usdBig(v){
+  if (!isFinite(v)) return '—';
+  const a = Math.abs(v), s = v < 0 ? '−' : '';
+  if (a >= 1e12) return s + NF(0, 2).format(a / 1e12) + ' bln $';
+  if (a >= 1e9)  return s + NF(0, 2).format(a / 1e9)  + ' mld $';
+  if (a >= 1e6)  return s + NF(0, 2).format(a / 1e6)  + ' mln $';
+  if (a >= 1e3)  return s + NF(0, 1).format(a / 1e3)  + ' tys. $';
+  return s + NF(0, 2).format(a) + ' $';
+}
+/** Liczba tokenów: 5 667 620 228 → „5,67 mld”. */
+function tokAmount(v){
+  if (!isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a >= 1e9) return NF(0, 2).format(v / 1e9) + ' mld';
+  if (a >= 1e6) return NF(0, 2).format(v / 1e6) + ' mln';
+  return NF(0, 2).format(v);
+}
+function pln(v){ return isFinite(v) ? NF(0, 0).format(v) + ' zł' : '—'; }
+function plnPrec(v){ return isFinite(v) ? NF(2, 2).format(v) + ' zł' : '—'; }
+function pct(v, dec){ return isFinite(v) ? NF(dec === undefined ? 1 : dec, dec === undefined ? 1 : dec).format(v) + '%' : '—'; }
+function pctSigned(v, dec){
+  if (!isFinite(v)) return '—';
+  dec = dec === undefined ? 1 : dec;
+  const s = v > 0 ? '+' : '';
+  return s + NF(dec, dec).format(v) + '%';
+}
+/** Mnożnik: „×5,4”. */
+function mult(v, dec){
+  if (!isFinite(v)) return '×∞';
+  dec = dec === undefined ? 1 : dec;
+  if (v >= 1000) return '×' + NF(0, 0).format(v);
+  return '×' + NF(dec, dec).format(v);
+}
+/** Parsowanie liczby wpisanej po polsku („1 234,56”) lub po angielsku („1,234.56”). */
+function parseLocaleNumber(str){
+  if (typeof str === 'number') return str;
+  if (str === null || str === undefined) return NaN;
+  let s = String(str).trim().replace(/\s| | /g, '');
+  if (s === '') return NaN;
+  const hasComma = s.indexOf(',') >= 0, hasDot = s.indexOf('.') >= 0;
+  if (hasComma && hasDot){
+    // ostatni separator jest dziesiętny
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasComma){
+    const parts = s.split(',');
+    // „1,234,567” → separator tysięcy; „0,0938” → przecinek dziesiętny
+    if (parts.length > 2 || (parts[1] && parts[1].length === 3 && parts[0].length <= 3 && parts[0] !== '0')) s = s.replace(/,/g, '');
+    else s = s.replace(',', '.');
+  }
+  const n = Number(s);
+  return isFinite(n) ? n : NaN;
+}
+function esc(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+const DAY = 86400000;
+function todayISO(){ const d = new Date(); return isoOf(d); }
+function isoOf(d){
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function parseISO(s){
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+  if (!m) { const d = new Date(s); return isNaN(d) ? null : d; }
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+function daysBetween(a, b){ return Math.round((b - a) / DAY); }
+function daysAgo(iso){ const d = parseISO(iso); return d ? daysBetween(d, new Date()) : null; }
+function addDays(d, n){ const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+function fmtDate(iso){
+  const d = parseISO(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString('pl-PL', { year: 'numeric', month: 'short', day: '2-digit' });
+}
+function fmtDateTime(iso){
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+}
+function uid(){ return 'tok_' + Math.random().toString(36).slice(2, 9); }
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function el(id){ return document.getElementById(id); }
+
+/* ============================================================
+   2. DANE STARTOWE
+   ============================================================ */
+/* Historia startowa jest WYGENEROWANA demonstracyjnie (patrz genHistory).
+   Służy do pokazania działania sygnału odbudowy zanim użytkownik nazbiera
+   własne odczyty. Każdy token ma to jawnie oznaczone flagą historyIsDemo. */
+function genHistory(anchors, days){
+  // anchors: [{d: ile dni temu, price, circ}] posortowane malejąco po d
+  const out = [];
+  const seedRnd = (function(){ let s = 12345; return function(){ s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })();
+  const now = new Date();
+  for (let d = days; d >= 0; d--){
+    // znajdź dwa najbliższe punkty kotwiczne i interpoluj liniowo
+    let hi = anchors[0], lo = anchors[anchors.length - 1];
+    for (let i = 0; i < anchors.length - 1; i++){
+      if (anchors[i].d >= d && anchors[i + 1].d <= d){ hi = anchors[i]; lo = anchors[i + 1]; break; }
+    }
+    const span = hi.d - lo.d;
+    const t = span === 0 ? 0 : (hi.d - d) / span;
+    let price = hi.price + (lo.price - hi.price) * t;
+    const circ = hi.circ + (lo.circ - hi.circ) * t;
+    // szum tylko poza punktami kotwicznymi, żeby liczby kontrolne pozostały dokładne
+    const isAnchor = anchors.some(a => a.d === d);
+    if (!isAnchor) price = price * (1 + (seedRnd() - 0.5) * 0.03);
+    out.push({ date: isoOf(addDays(now, -d)), price: price, circulatingSupply: Math.round(circ) });
+  }
+  return out;
+}
+
+function seedTokens(){
+  const peaq = {
+    id: 'peaq', symbol: 'PEAQ', name: 'peaq network', coingeckoId: 'peaq-2',
+    circulatingSupply: 2414494570, totalSupply: 5667620228,
+    supplySource: 'docs.peaq.xyz + CoinGecko (zweryfikuj — agregatory podają różne wartości)',
+    supplyUpdatedAt: '2026-08-01',
+    allocations: [
+      { name: 'Investors', pct: 26.82, isInsider: true },
+      { name: 'Inflation', pct: 21.13, isInsider: false },
+      { name: 'Community', pct: 16.56, isInsider: false },
+      { name: 'Core Contributors', pct: 15.77, isInsider: true },
+      { name: 'Ecosystem & Treasury', pct: 15.77, isInsider: false },
+      { name: 'Network Security', pct: 3.94, isInsider: false }
+    ],
+    unlocks: [
+      { date: '2026-09-12', tokens: 47000000, label: 'Core Contributors' },
+      { date: '2026-12-12', tokens: 47000000, label: 'Core Contributors' },
+      { date: '2027-03-12', tokens: 47000000, label: 'Investors' },
+      { date: '2027-06-12', tokens: 47000000, label: 'Investors' },
+      { date: '2027-09-12', tokens: 40000000, label: 'Ecosystem' },
+      { date: '2028-03-12', tokens: 40000000, label: 'Ecosystem' }
+    ],
+    unlocksNote: 'Harmonogram przykładowy — zweryfikuj w dokumentacji projektu.',
+    vestingEndDate: '2035-12-31', annualInflationPct: 3.5, inflationDecayPct: 10, inflationFloorPct: 1.0,
+    holdings: 140035, avgEntryPrice: 0.0938,
+    price: 0.01747, volume24h: 2800000,
+    athPrice: 0.7505, athDate: '2024-12-10', athMarketCap: 466560000,
+    notes: 'DePIN / Machine Economy. Cena startowa i wolumen to wartości poglądowe — odśwież w widoku „Codzienna aktualizacja”.',
+    historyIsDemo: true,
+    priceHistory: genHistory([
+      { d: 120, price: 0.01890, circ: 2150000000 },
+      { d: 90,  price: 0.01760, circ: 2230000000 },
+      { d: 60,  price: 0.01700, circ: 2265000000 },
+      { d: 30,  price: 0.01810, circ: 2290000000 },
+      { d: 0,   price: 0.01747, circ: 2414494570 }
+    ], 120)
+  };
+
+  const auki = {
+    id: 'auki', symbol: 'AUKI', name: 'Auki Labs', coingeckoId: 'auki',
+    circulatingSupply: 4750000000, totalSupply: 9990000000,
+    supplySource: 'materiały projektu (zweryfikuj)', supplyUpdatedAt: '2026-08-01',
+    allocations: [
+      { name: 'Team & Shareholders', pct: 22.5, isInsider: true },
+      { name: 'Treasury', pct: 18, isInsider: false },
+      { name: 'Community Airdrop', pct: 12.8, isInsider: false },
+      { name: 'Pre-Sale', pct: 8.18, isInsider: true },
+      { name: 'Nieprzypisane w danych startowych', pct: 38.52, isInsider: false }
+    ],
+    unlocks: [
+      { date: '2026-10-01', tokens: 150000000, label: 'Vesting kwartalny' },
+      { date: '2027-01-01', tokens: 150000000, label: 'Vesting kwartalny' },
+      { date: '2027-04-01', tokens: 150000000, label: 'Vesting kwartalny' },
+      { date: '2027-07-01', tokens: 150000000, label: 'Vesting kwartalny' }
+    ],
+    unlocksNote: 'Harmonogram przykładowy — zweryfikuj w dokumentacji projektu.',
+    vestingEndDate: '2031-12-31', annualInflationPct: 0, inflationDecayPct: 0, inflationFloorPct: 0,
+    holdings: 375992.98, avgEntryPrice: 0.0374,
+    price: 0.00365, volume24h: 900000,
+    athPrice: 0.06063, athDate: '2025-01-26', athMarketCap: 105600000,
+    notes: 'Alokacje sumują się do 61,48% — reszta oznaczona jako nieprzypisana, żeby nie udawać pełnych danych.',
+    historyIsDemo: true,
+    priceHistory: genHistory([
+      { d: 120, price: 0.00268, circ: 4420000000 },
+      { d: 90,  price: 0.00290, circ: 4530000000 },
+      { d: 60,  price: 0.00305, circ: 4620000000 },
+      { d: 30,  price: 0.00320, circ: 4690000000 },
+      { d: 0,   price: 0.00365, circ: 4750000000 }
+    ], 120)
+  };
+
+  const eth = {
+    id: 'eth', symbol: 'ETH', name: 'Ethereum', coingeckoId: 'ethereum',
+    circulatingSupply: 120700000, totalSupply: 120700000,
+    supplySource: 'brak twardej podaży maksymalnej — podaż w obiegu = podaż docelowa', supplyUpdatedAt: '2026-08-01',
+    allocations: [], unlocks: [], unlocksNote: '',
+    vestingEndDate: '', annualInflationPct: 0, inflationDecayPct: 0, inflationFloorPct: 0,
+    holdings: 0.59191991, avgEntryPrice: 1691.78,
+    price: 3150, volume24h: 18000000000,
+    athPrice: 4953.73, athDate: '2025-08-24', athMarketCap: 597520000000,
+    notes: 'Brak vestingu i brak zablokowanej podaży — komponent rozwodnienia z definicji zerowy (float 100%).',
+    historyIsDemo: true,
+    priceHistory: genHistory([
+      { d: 120, price: 2600, circ: 120500000 },
+      { d: 90,  price: 2700, circ: 120550000 },
+      { d: 60,  price: 2850, circ: 120620000 },
+      { d: 30,  price: 2980, circ: 120660000 },
+      { d: 0,   price: 3150, circ: 120700000 }
+    ], 120)
+  };
+
+  const gmac = {
+    id: 'gmac', symbol: 'GMAC', name: 'GMAC', coingeckoId: null,
+    circulatingSupply: 500000000, totalSupply: 2000000000,
+    supplySource: 'PODAŻ DOCELOWA WPISANA SZACUNKOWO — uzupełnij z dokumentacji', supplyUpdatedAt: '2026-08-01',
+    allocations: [
+      { name: 'Team', pct: 30, isInsider: true },
+      { name: 'Private Sale', pct: 22, isInsider: true },
+      { name: 'Ecosystem', pct: 25, isInsider: false },
+      { name: 'Community', pct: 23, isInsider: false }
+    ],
+    unlocks: [
+      { date: '2026-09-30', tokens: 120000000, label: 'Cliff zespołu' },
+      { date: '2027-03-31', tokens: 90000000, label: 'Private Sale' }
+    ],
+    unlocksNote: 'Harmonogram szacunkowy — token służy też jako test poprawności scoringu.',
+    vestingEndDate: '2032-12-31', annualInflationPct: 0, inflationDecayPct: 0, inflationFloorPct: 0,
+    holdings: 174226, avgEntryPrice: 0.008488,
+    price: 0.00080, volume24h: 1800,
+    athPrice: 0.01029, athDate: '2024-03-25', athMarketCap: 3600000,
+    notes: 'Token bez realnego rynku. Alokacje, podaż docelowa i harmonogram są szacunkowe — traktuj wynik jako sygnał ostrzegawczy, nie pomiar.',
+    historyIsDemo: true,
+    priceHistory: genHistory([
+      { d: 120, price: 0.00150, circ: 500000000 },
+      { d: 90,  price: 0.00130, circ: 500000000 },
+      { d: 60,  price: 0.00110, circ: 500000000 },
+      { d: 30,  price: 0.00095, circ: 500000000 },
+      { d: 0,   price: 0.00080, circ: 500000000 }
+    ], 120)
+  };
+
+  return [peaq, auki, eth, gmac];
+}
+
+function defaultState(){
+  return {
+    version: 1,
+    settings: {
+      usdPln: 3.7137,          // kurs edytowalny w ustawieniach (domyślnie 3,71)
+      horizonYears: 10,        // horyzont inwestycyjny — używany w scoringu vestingu
+      networkGrowthPct: 30,    // założony wzrost wyceny sieci r/r w projekcji
+      theme: 'dark'
+    },
+    tokens: seedTokens(),
+    meta: { savedAt: null, seededAt: new Date().toISOString() }
+  };
+}
+
+/* ============================================================
+   3. PERSYSTENCJA — localStorage owinięty w try/catch + eksport JSON
+   ============================================================ */
+const STORAGE_KEY = 'fdv-tracker-v1';
+let storageOk = true;
+let STATE = null;
+
+function saveState(silent){
+  STATE.meta.savedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+    storageOk = true;
+  } catch (e){
+    storageOk = false;
+    if (!silent) renderBanners();
+  }
+  updateSaveInfo();
+}
+function loadState(){
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); }
+  catch (e){ storageOk = false; }
+  if (!raw) return defaultState();
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeState(parsed);
+  } catch (e){
+    storageOk = true;
+    return defaultState();
+  }
+}
+/** Uzupełnia brakujące pola, żeby stary/zaimportowany JSON nie wywracał aplikacji. */
+function normalizeState(s){
+  const d = defaultState();
+  if (!s || typeof s !== 'object') return d;
+  const out = {
+    version: 1,
+    settings: Object.assign({}, d.settings, s.settings || {}),
+    tokens: Array.isArray(s.tokens) ? s.tokens.map(normalizeToken) : d.tokens,
+    meta: Object.assign({}, d.meta, s.meta || {})
+  };
+  return out;
+}
+function normalizeToken(t){
+  t = t || {};
+  const circ = num(t.circulatingSupply);
+  return {
+    id: t.id || uid(),
+    symbol: t.symbol || '?', name: t.name || t.symbol || '?',
+    coingeckoId: t.coingeckoId || null,
+    circulatingSupply: circ,
+    totalSupply: num(t.totalSupply) > 0 ? num(t.totalSupply) : circ,
+    supplySource: t.supplySource || '', supplyUpdatedAt: t.supplyUpdatedAt || '',
+    allocations: Array.isArray(t.allocations) ? t.allocations.map(a => ({
+      name: a.name || '?', pct: num(a.pct), isInsider: !!a.isInsider
+    })) : [],
+    unlocks: Array.isArray(t.unlocks) ? t.unlocks.map(u => ({
+      date: u.date || '', tokens: num(u.tokens), label: u.label || ''
+    })).sort((a, b) => String(a.date).localeCompare(String(b.date))) : [],
+    unlocksNote: t.unlocksNote || '',
+    vestingEndDate: t.vestingEndDate || '',
+    annualInflationPct: num(t.annualInflationPct), inflationDecayPct: num(t.inflationDecayPct),
+    inflationFloorPct: num(t.inflationFloorPct),
+    holdings: num(t.holdings), avgEntryPrice: num(t.avgEntryPrice),
+    price: num(t.price), volume24h: num(t.volume24h),
+    priceHistory: Array.isArray(t.priceHistory) ? t.priceHistory.map(h => ({
+      date: h.date, price: num(h.price), circulatingSupply: num(h.circulatingSupply)
+    })).filter(h => h.date).sort((a, b) => a.date.localeCompare(b.date)) : [],
+    athPrice: num(t.athPrice), athDate: t.athDate || '', athMarketCap: num(t.athMarketCap),
+    notes: t.notes || '',
+    historyIsDemo: !!t.historyIsDemo
+  };
+}
+function updateSaveInfo(){
+  const s = el('saveInfo');
+  if (!s) return;
+  if (!storageOk){ s.textContent = 'autozapis wyłączony'; s.style.color = 'var(--warn)'; return; }
+  s.style.color = '';
+  s.textContent = STATE.meta.savedAt ? 'zapisano: ' + fmtDateTime(STATE.meta.savedAt) : 'jeszcze nie zapisano';
+}
+/* ============================================================
+   4. OBLICZENIA — SERCE APLIKACJI
+   Wszystkie wzory rozwodnienia są tu policzone dosłownie tak,
+   jak w specyfikacji. Komentarze opisują, co która liczba znaczy.
+   ============================================================ */
+function metrics(t, settings){
+  const st = settings || STATE.settings;
+  const price = num(t.price);
+  const circ  = num(t.circulatingSupply);
+  // podaż docelowa; jeśli ktoś jej nie poda, przyjmujemy podaż w obiegu (brak rozwodnienia)
+  const total = num(t.totalSupply) > 0 ? num(t.totalSupply) : circ;
+
+  /* --- PODSTAWY ---
+     marketCap  — ile kapitału siedzi w tokenach będących w obiegu
+     fdv        — ile kapitału musiałoby siedzieć, gdyby CAŁA podaż była w obiegu
+     float      — jaka część podaży już krąży
+     remainingDilution — ile jeszcze podaży wejdzie względem dzisiejszej (0,5 = +50%) */
+  const marketCap = price * circ;
+  const fdv = price * total;
+  const float_ = total > 0 ? circ / total : 1;
+  const remainingDilution = circ > 0 ? (total / circ) - 1 : 0;
+
+  /* --- POZYCJA I TOŻSAMOŚĆ KLUCZOWA ---
+     supplyShare jest STAŁY: ani moje sztuki, ani podaż docelowa się nie zmieniają.
+     Stąd positionValue = supplyShare × fdv — wartość pozycji jest wprost
+     proporcjonalna do FDV, a cena to tylko FDV podzielone przez stałą. */
+  const positionValue = num(t.holdings) * price;
+  const invested = num(t.holdings) * num(t.avgEntryPrice);
+  const pnl = positionValue - invested;
+  const pnlPct = invested > 0 ? (pnl / invested) * 100 : NaN;
+  const supplyShare = total > 0 ? num(t.holdings) / total : 0;
+  const positionFromFdv = supplyShare * fdv;   // kontrola tożsamości — musi równać się positionValue
+
+  /* --- PROGI OPŁACALNOŚCI ---
+     breakEvenFDV jest STAŁYM celem w dolarach: tyle musi być warta cała podaż,
+     żeby moja średnia cena zakupu została odzyskana.
+     marketCapMultiple > priceMultiple dokładnie o stosunek total/circ — to jest
+     ta różnica, której nie widać na wykresie ceny. */
+  const breakEvenPrice = num(t.avgEntryPrice);
+  const breakEvenFDV = num(t.avgEntryPrice) * total;
+  const breakEvenMCifNoDilution = num(t.avgEntryPrice) * circ;
+  const priceMultiple = price > 0 ? num(t.avgEntryPrice) / price : Infinity;
+  const fdvMultiple = fdv > 0 ? breakEvenFDV / fdv : Infinity;
+  const marketCapMultiple = marketCap > 0 ? breakEvenFDV / marketCap : Infinity;
+  const progressToBreakEven = breakEvenFDV > 0 ? fdv / breakEvenFDV : 0;
+
+  /* --- TRZY SCENARIUSZE ATH ---
+     1) cena wraca do ATH — naiwny, ignoruje że podaż urosła
+     2) wycena wraca do ATH przy DZISIEJSZEJ podaży
+     3) wycena wraca do ATH przy PEŁNEJ podaży — realistyczny dla 10 lat */
+  const value_athPrice = num(t.holdings) * num(t.athPrice);
+  const price_athMC_now = circ > 0 ? num(t.athMarketCap) / circ : NaN;
+  const value_athMC_now = num(t.holdings) * price_athMC_now;
+  const price_athMC_full = total > 0 ? num(t.athMarketCap) / total : NaN;
+  const value_athMC_full = num(t.holdings) * price_athMC_full;
+  // ile musi być warta cała podaż, żeby CENA wróciła do ATH
+  const mcNeededForAthPrice = num(t.athPrice) * total;
+  const athPriceDifficulty = num(t.athMarketCap) > 0 ? mcNeededForAthPrice / num(t.athMarketCap) : NaN;
+
+  const volToMc = marketCap > 0 ? num(t.volume24h) / marketCap : 0;
+
+  return {
+    price, circ, total, marketCap, fdv, float: float_, remainingDilution,
+    positionValue, invested, pnl, pnlPct, supplyShare, positionFromFdv,
+    positionValuePln: positionValue * num(st.usdPln), investedPln: invested * num(st.usdPln), pnlPln: pnl * num(st.usdPln),
+    breakEvenPrice, breakEvenFDV, breakEvenMCifNoDilution,
+    priceMultiple, fdvMultiple, marketCapMultiple, progressToBreakEven,
+    value_athPrice, price_athMC_now, value_athMC_now, price_athMC_full, value_athMC_full,
+    mcNeededForAthPrice, athPriceDifficulty, volToMc
+  };
+}
+
+/* ---- historia: odczyt sprzed N dni (ostatni wpis nie nowszy niż cel) ---- */
+function histAt(hist, daysBack){
+  if (!hist || !hist.length) return null;
+  const target = addDays(new Date(), -daysBack);
+  const targetISO = isoOf(target);
+  let best = null;
+  for (let i = 0; i < hist.length; i++){
+    if (hist[i].date <= targetISO) best = hist[i];
+  }
+  return best;   // null gdy historia zaczyna się później niż cel → za mało danych
+}
+function histSpanDays(hist){
+  if (!hist || hist.length < 2) return 0;
+  const a = parseISO(hist[0].date), b = parseISO(hist[hist.length - 1].date);
+  return (a && b) ? daysBetween(a, b) : 0;
+}
+
+/* ---- WSKAŹNIK REALNEJ ODBUDOWY ----
+   FDV liczymy zawsze z podażą DOCELOWĄ (stałą), więc zmiana FDV = zmiana ceny.
+   Kapitalizację liczymy z podażą w obiegu Z DANEGO DNIA — dlatego może rosnąć
+   nawet wtedy, gdy cena stoi lub spada: rośnie sama podaż. */
+function recovery(t){
+  const total = num(t.totalSupply) > 0 ? num(t.totalSupply) : num(t.circulatingSupply);
+  const h = t.priceHistory || [];
+  const nowP = num(t.price), nowC = num(t.circulatingSupply);
+  const h30 = histAt(h, 30), h90 = histAt(h, 90);
+
+  const fdvNow = nowP * total, mcNow = nowP * nowC;
+  const out = { has30: !!h30, has90: !!h90, spanDays: histSpanDays(h) };
+
+  if (h30){
+    const fdv30 = num(h30.price) * total;
+    const mc30 = num(h30.price) * num(h30.circulatingSupply);
+    out.fdvChange30d = fdv30 > 0 ? (fdvNow / fdv30) - 1 : NaN;
+    out.mcChange30d = mc30 > 0 ? (mcNow / mc30) - 1 : NaN;
+    out.supplyGrowth30d = num(h30.circulatingSupply) > 0 ? (nowC / num(h30.circulatingSupply)) - 1 : NaN;
+  }
+  if (h90){
+    const fdv90 = num(h90.price) * total;
+    out.fdvChange90d = fdv90 > 0 ? (fdvNow / fdv90) - 1 : NaN;
+    out.supplyGrowth90d = num(h90.circulatingSupply) > 0 ? (nowC / num(h90.circulatingSupply)) - 1 : NaN;
+  }
+  out.status = recoveryStatus(out);
+  return out;
+}
+/* Kolejność sprawdzania ma znaczenie: „pozorny wzrost” jest sprawdzany PRZED
+   „brakiem odbudowy”, bo rozróżnienie zielony/pomarańczowy to sedno narzędzia. */
+function recoveryStatus(r){
+  if (!r.has30 || !r.has90 || !isFinite(r.fdvChange30d) || !isFinite(r.fdvChange90d)) return 'unknown';
+  if (r.fdvChange30d > 0 && r.fdvChange90d > 0) return 'real';
+  if (isFinite(r.mcChange30d) && r.mcChange30d > 0 && r.fdvChange30d <= 0) return 'illusory';
+  if (r.fdvChange30d <= 0 && r.fdvChange90d <= 0) return 'none';
+  return 'mixed';
+}
+const RECOVERY_META = {
+  real:     { label: 'REALNA ODBUDOWA', cls: 'sig-good', ico: '▲', why: 'Rynek wycenia całą sieć wyżej niż 30 i 90 dni temu. Wzrost nie bierze się z tego, że po prostu przybyło tokenów.' },
+  illusory: { label: 'POZORNY WZROST',  cls: 'sig-warn', ico: '◆', why: 'Kapitalizacja rośnie, ale FDV nie. Wyższa kapitalizacja bierze się z odblokowań — w sieci nie przybyło pieniędzy, przybyło tokenów.' },
+  none:     { label: 'BRAK ODBUDOWY',   cls: 'sig-bad',  ico: '▼', why: 'Wycena sieci jest niżej niż 30 i 90 dni temu. Wartość Twojej pozycji podąża wprost za FDV, więc spada razem z nim.' },
+  mixed:    { label: 'SYGNAŁ MIESZANY', cls: 'sig-none', ico: '≈', why: 'Kierunki 30- i 90-dniowy się nie zgadzają. Za wcześnie na wniosek — dopisuj codzienne odczyty.' },
+  unknown:  { label: 'ZA MAŁO DANYCH',  cls: 'sig-none', ico: '·', why: 'Potrzeba historii sięgającej 90 dni wstecz. Zapisuj odczyt w widoku „Codzienna aktualizacja”.' }
+};
+
+/* ---- SYGNAŁ NA POZIOMIE PORTFELA ----
+   Zmiana FDV portfela = zmiana sumy wartości pozycji, bo udział w podaży każdego
+   tokena jest stały (positionValue = supplyShare × fdv).
+   Zmiana kapitalizacji portfela to średnia ważona wartością pozycji — inaczej
+   ETH przykryłby wszystko i rozróżnienie zielony/pomarańczowy zniknęłoby. */
+function portfolioRecovery(tokens){
+  let posNow = 0, pos30 = 0, pos90 = 0, wsum = 0, mcw = 0, supw = 0;
+  let any30 = false, any90 = false;
+  tokens.forEach(t => {
+    const total = num(t.totalSupply) > 0 ? num(t.totalSupply) : num(t.circulatingSupply);
+    if (total <= 0) return;
+    const h30 = histAt(t.priceHistory, 30), h90 = histAt(t.priceHistory, 90);
+    const pv = num(t.holdings) * num(t.price);
+    posNow += pv;
+    if (h30){ any30 = true; pos30 += num(t.holdings) * num(h30.price); }
+    if (h90){ any90 = true; pos90 += num(t.holdings) * num(h90.price); }
+    const r = recovery(t);
+    if (isFinite(r.mcChange30d)){ mcw += r.mcChange30d * pv; wsum += pv; }
+    if (isFinite(r.supplyGrowth30d)) supw += r.supplyGrowth30d * pv;
+  });
+  const out = {
+    has30: any30 && pos30 > 0, has90: any90 && pos90 > 0,
+    fdvChange30d: pos30 > 0 ? (posNow / pos30) - 1 : NaN,
+    fdvChange90d: pos90 > 0 ? (posNow / pos90) - 1 : NaN,
+    mcChange30d: wsum > 0 ? mcw / wsum : NaN,
+    supplyGrowth30d: wsum > 0 ? supw / wsum : NaN
+  };
+  out.status = recoveryStatus(out);
+  return out;
+}
+
+/* ============================================================
+   5. SCORING RYZYKA (0–100, mniej = bezpieczniej)
+   ============================================================ */
+function bandPoints(value, steps){
+  // steps: [[próg, punkty], ...] — pierwszy próg, który value nie przekracza
+  for (let i = 0; i < steps.length; i++){
+    if (value < steps[i][0]) return steps[i][1];
+  }
+  return steps[steps.length - 1][1];
+}
+function riskScore(t, settings){
+  const st = settings || STATE.settings;
+  const m = metrics(t, st);
+  const comps = [];
+
+  // 1. ROZWODNIENIE (waga 25) — ile podaży jeszcze wejdzie na rynek
+  const rdPct = m.remainingDilution * 100;
+  comps.push({
+    key: 'dilution', label: 'Rozwodnienie', weight: 25,
+    points: bandPoints(rdPct, [[25, 0], [75, 10], [150, 18], [Infinity, 25]]),
+    value: pct(rdPct) + ' podaży jeszcze wejdzie',
+    desc: 'Do obiegu może dojść ' + pct(rdPct) + ' obecnej podaży; każdy nowy token potrzebuje nabywcy, żeby cena nie spadła.'
+  });
+
+  // 2. PRESJA ODBLOKOWAŃ (waga 20)
+  //    absorbDays = wartość odblokowań z najbliższych 90 dni / średni dzienny wolumen
+  //    czyli: ile dni całego obrotu potrzeba, żeby rynek wchłonął nadchodzącą podaż
+  const horizon90 = addDays(new Date(), 90);
+  let unlock90 = 0;
+  (t.unlocks || []).forEach(u => {
+    const d = parseISO(u.date);
+    if (d && d >= new Date() && d <= horizon90) unlock90 += num(u.tokens);
+  });
+  const unlock90Usd = unlock90 * m.price;
+  const absorbDays = num(t.volume24h) > 0 ? unlock90Usd / num(t.volume24h) : (unlock90Usd > 0 ? Infinity : 0);
+  comps.push({
+    key: 'unlock', label: 'Presja odblokowań', weight: 20,
+    points: bandPoints(absorbDays, [[5, 0], [20, 8], [60, 15], [Infinity, 20]]),
+    value: (isFinite(absorbDays) ? fmt(absorbDays, 1) : '∞') + ' dni obrotu',
+    desc: unlock90 > 0
+      ? 'W 90 dni odblokuje się ' + tokAmount(unlock90) + ' szt. (' + usdBig(unlock90Usd) + '), co odpowiada ' + (isFinite(absorbDays) ? fmt(absorbDays, 1) : '∞') + ' dniom całego obrotu tym tokenem.'
+      : 'W najbliższych 90 dniach nie ma zapisanych odblokowań (sprawdź, czy harmonogram jest kompletny).'
+  });
+
+  // 3. PŁYNNOŚĆ (waga 20) — czy da się wyjść z pozycji
+  const vm = m.volToMc * 100;
+  comps.push({
+    key: 'liquidity', label: 'Płynność', weight: 20,
+    points: (function(){
+      if (vm > 10) return 0; if (vm >= 3) return 7; if (vm >= 1) return 14; return 20;
+    })(),
+    value: pct(vm, 2) + ' kapitalizacji dziennie',
+    desc: 'Dzienny obrót to ' + usdBig(num(t.volume24h)) + ', czyli ' + pct(vm, 2) + ' kapitalizacji. Twoja pozycja to ' + usdBig(m.positionValue) + '.'
+  });
+
+  // 4. ALOKACJA INSIDERÓW (waga 15)
+  let insiderPct = 0;
+  (t.allocations || []).forEach(a => { if (a.isInsider) insiderPct += num(a.pct); });
+  comps.push({
+    key: 'insiders', label: 'Alokacja insiderów', weight: 15,
+    points: bandPoints(insiderPct, [[20, 0], [35, 6], [50, 11], [Infinity, 15]]),
+    value: pct(insiderPct) + ' podaży',
+    desc: (t.allocations || []).length
+      ? 'Zespół, fundusze i rundy prywatne mają ' + pct(insiderPct) + ' całej podaży — to potencjalna podaż o zerowym koszcie wejścia.'
+      : 'Brak wpisanych alokacji — ten składnik jest liczony jako 0, ale to znaczy „nie wiem”, a nie „bezpiecznie”.'
+  });
+
+  // 5. DYSTANS DO PROGU (waga 10) — ile razy FDV musi urosnąć do wyjścia na zero
+  comps.push({
+    key: 'distance', label: 'Dystans do progu', weight: 10,
+    points: bandPoints(m.fdvMultiple, [[2, 0], [5, 4], [10, 7], [Infinity, 10]]),
+    value: mult(m.fdvMultiple) + ' do progu',
+    desc: 'Wycena sieci musi wzrosnąć ' + mult(m.fdvMultiple) + ' (z ' + usdBig(m.fdv) + ' do ' + usdBig(m.breakEvenFDV) + '), żebyś wyszedł na zero.'
+  });
+
+  // 6. VESTING VS HORYZONT (waga 10)
+  const hz = num(st.horizonYears, 10);
+  const half = addDays(new Date(), Math.round(hz * 365.25 / 2));
+  const end = addDays(new Date(), Math.round(hz * 365.25));
+  const vEnd = parseISO(t.vestingEndDate);
+  let vPts, vDesc;
+  if (!vEnd){ vPts = 0; vDesc = 'Brak vestingu — presja podaży z odblokowań nie towarzyszy tej inwestycji.'; }
+  else if (vEnd <= half){ vPts = 0; vDesc = 'Vesting kończy się ' + fmtDate(t.vestingEndDate) + ', przed połową horyzontu — druga połowa inwestycji jest już wolna od odblokowań.'; }
+  else if (vEnd <= end){ vPts = 5; vDesc = 'Vesting kończy się ' + fmtDate(t.vestingEndDate) + ' — presja podaży towarzyszy większości horyzontu.'; }
+  else { vPts = 10; vDesc = 'Vesting kończy się ' + fmtDate(t.vestingEndDate) + ', czyli PO końcu Twojego horyzontu — przez cały czas trzymania coś się odblokowuje.'; }
+  comps.push({ key: 'vesting', label: 'Vesting vs horyzont', weight: 10, points: vPts, value: t.vestingEndDate ? fmtDate(t.vestingEndDate) : 'brak', desc: vDesc });
+
+  const score = comps.reduce((s, c) => s + c.points, 0);
+  return { score: score, band: riskBand(score), components: comps, absorbDays: absorbDays, insiderPct: insiderPct, unlock90: unlock90, unlock90Usd: unlock90Usd };
+}
+function riskBand(score){
+  if (score <= 25) return { key: 'low', label: 'niskie', cls: 'good' };
+  if (score <= 50) return { key: 'mid', label: 'umiarkowane', cls: 'warn' };
+  if (score <= 75) return { key: 'high', label: 'wysokie', cls: 'serious' };
+  return { key: 'extreme', label: 'skrajne', cls: 'critical' };
+}
+
+/* ---- FLAGI OSTRZEGAWCZE ---- */
+function warningFlags(t){
+  const m = metrics(t);
+  const out = [];
+  if (m.float < 0.30) out.push({ level: 'bad', text: 'Bardzo niski float (' + pct(m.float * 100) + ') — cena jest wyznaczana przez wąską podaż i łatwo nią poruszyć.' });
+  if (num(t.volume24h) < 50000) out.push({ level: 'bad', text: 'Token praktycznie bez rynku — dzienny obrót ' + usdBig(num(t.volume24h)) + '.' });
+  if (m.volToMc < 0.005) out.push({ level: 'bad', text: 'Obrót to ' + pct(m.volToMc * 100, 2) + ' kapitalizacji — wyjście z pozycji może być niemożliwe bez dużego poślizgu.' });
+  (t.unlocks || []).forEach(u => {
+    const d = parseISO(u.date);
+    if (d && d >= new Date() && num(u.tokens) > 0.05 * num(t.circulatingSupply)){
+      out.push({ level: 'bad', text: 'Cliff ' + fmtDate(u.date) + ': ' + tokAmount(u.tokens) + ' szt. to ' + pct(num(u.tokens) / num(t.circulatingSupply) * 100) + ' podaży w obiegu — spodziewaj się presji.' });
+    }
+  });
+  if (isFinite(m.athPriceDifficulty) && m.athPriceDifficulty > 3){
+    out.push({ level: 'warn', text: 'Powrót CENY do ATH wymaga wyceny ' + mult(m.athPriceDifficulty) + ' większej niż w szczycie (' + usdBig(m.mcNeededForAthPrice) + ' vs ' + usdBig(num(t.athMarketCap)) + ').' });
+  }
+  return out;
+}
+
+/* ============================================================
+   6. PROJEKCJA ROZWODNIENIA W CZASIE
+   Podaż(t) = podaż w obiegu + odblokowania do t + skumulowana emisja.
+   Emisja startuje od annualInflationPct i maleje o inflationDecayPct rocznie,
+   nie schodząc poniżej inflationFloorPct. Całość przycinamy do podaży docelowej.
+   ============================================================ */
+function projection(t, growthPct, years){
+  const m = metrics(t);
+  const g = num(growthPct) / 100;
+  const vEnd = parseISO(t.vestingEndDate);
+  const nowY = new Date().getFullYear();
+  let endY = vEnd ? vEnd.getFullYear() : nowY + num(years, 10);
+  const maxY = nowY + Math.max(num(years, 10), 1);
+  if (endY < nowY + 1) endY = nowY + 1;
+  if (endY > maxY) endY = maxY;                        // nie rysujemy dalej niż horyzont
+  const n = endY - nowY;
+
+  const rows = [];
+  let circ = m.circ;
+  let inflRate = num(t.annualInflationPct) / 100;
+  const decay = num(t.inflationDecayPct) / 100;
+  const floor = num(t.inflationFloorPct) / 100;
+  let cumEmission = 0;
+
+  for (let y = 0; y <= n; y++){
+    const date = new Date(nowY + y, new Date().getMonth(), 1);
+    if (y > 0){
+      // emisja liczona od podaży z początku roku — inflacja składa się na sobie
+      const emission = circ * inflRate;
+      cumEmission += emission;
+      circ += emission;
+      inflRate = Math.max(floor, inflRate * (1 - decay));
+    }
+    // odblokowania z harmonogramu narastająco do roku y
+    let unlocked = 0;
+    const boundary = (y === 0) ? new Date() : new Date(nowY + y, 11, 31);
+    (t.unlocks || []).forEach(u => {
+      const d = parseISO(u.date);
+      if (d && d > new Date() && d <= boundary) unlocked += num(u.tokens);
+    });
+    const supply = Math.min(m.total, m.circ + unlocked + cumEmission);
+    // Zakładamy, że KAPITAŁ realnie ulokowany w tokenie (kapitalizacja) rośnie g% r/r.
+    // Cena = kapitał / podaż w obiegu — dlatego przy rosnącej podaży cena potrafi stać w miejscu.
+    const assumedMC = m.marketCap * Math.pow(1 + g, y);
+    const price = supply > 0 ? assumedMC / supply : 0;
+    const fdv = price * m.total;
+    rows.push({
+      year: nowY + y, date: date, supply: supply, unlocked: unlocked, emission: cumEmission,
+      inflRate: inflRate, assumedMC: assumedMC, price: price, fdv: fdv,
+      position: num(t.holdings) * price
+    });
+  }
+  return rows;
+}
+
+/* ---- KALKULATOR SCENARIUSZY ---- */
+function scenario(t, targetFDV){
+  const m = metrics(t);
+  const impliedPrice = m.total > 0 ? targetFDV / m.total : 0;
+  const impliedPosition = num(t.holdings) * impliedPrice;
+  return {
+    targetFDV: targetFDV, impliedPrice: impliedPrice, impliedPosition: impliedPosition,
+    impliedPositionPln: impliedPosition * num(STATE.settings.usdPln),
+    impliedMultiple: m.invested > 0 ? impliedPosition / m.invested : NaN,
+    vsToday: m.fdv > 0 ? targetFDV / m.fdv : NaN
+  };
+}
+
+/* ---- AGREGAT PORTFELA ---- */
+function portfolioTotals(){
+  const st = STATE.settings;
+  let value = 0, invested = 0, fdvSum = 0, beFdvSum = 0, mcSum = 0;
+  STATE.tokens.forEach(t => {
+    const m = metrics(t, st);
+    value += m.positionValue; invested += m.invested;
+    fdvSum += m.fdv; beFdvSum += m.breakEvenFDV; mcSum += m.marketCap;
+  });
+  return {
+    value: value, invested: invested, pnl: value - invested,
+    pnlPct: invested > 0 ? (value - invested) / invested * 100 : NaN,
+    valuePln: value * num(st.usdPln), investedPln: invested * num(st.usdPln), pnlPln: (value - invested) * num(st.usdPln),
+    fdvSum: fdvSum, breakEvenFdvSum: beFdvSum, mcSum: mcSum
+  };
+}
+/* ============================================================
+   7. WYKRESY (Chart.js — opcjonalny; brak sieci nie psuje aplikacji)
+   ============================================================ */
+const CHARTS = {};
+const SERIES_VARS = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
+function seriesColor(i){ return cssVar(SERIES_VARS[i % SERIES_VARS.length]); }
+function chartAvailable(){ return !!window.__chartReady && typeof window.Chart !== 'undefined'; }
+
+function destroyChart(id){
+  if (CHARTS[id]){ try { CHARTS[id].destroy(); } catch (e){} delete CHARTS[id]; }
+}
+function chartFallback(canvasId, msg){
+  const c = el(canvasId);
+  if (!c) return;
+  const wrap = c.parentNode;
+  c.classList.add('hidden');
+  let fb = wrap.querySelector('.chart-fallback');
+  if (!fb){ fb = document.createElement('div'); fb.className = 'chart-fallback'; wrap.appendChild(fb); }
+  fb.textContent = msg;
+}
+function chartClearFallback(canvasId){
+  const c = el(canvasId);
+  if (!c) return;
+  c.classList.remove('hidden');
+  const fb = c.parentNode.querySelector('.chart-fallback');
+  if (fb) fb.remove();
+}
+function baseOptions(extra){
+  const ink = cssVar('--text-2'), muted = cssVar('--muted'), grid = cssVar('--grid');
+  const o = {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: true, position: 'top', align: 'start',
+        labels: { color: ink, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded', font: { size: 11 } } },
+      tooltip: {
+        backgroundColor: cssVar('--surface-2'), borderColor: cssVar('--border-strong'), borderWidth: 1,
+        titleColor: cssVar('--text'), bodyColor: ink, padding: 10, displayColors: true, boxWidth: 8, boxHeight: 8, usePointStyle: true
+      }
+    },
+    scales: {
+      x: { grid: { color: grid, drawTicks: false }, border: { color: cssVar('--axis') },
+           ticks: { color: muted, maxRotation: 0, autoSkipPadding: 24, font: { size: 10 } } },
+      y: { grid: { color: grid, drawTicks: false }, border: { display: false },
+           ticks: { color: muted, font: { size: 10 } } }
+    },
+    elements: { line: { borderWidth: 2, tension: 0.15 }, point: { radius: 0, hitRadius: 12, hoverRadius: 4 } }
+  };
+  return deepMerge(o, extra || {});
+}
+function deepMerge(a, b){
+  const out = Array.isArray(a) ? a.slice() : Object.assign({}, a);
+  Object.keys(b || {}).forEach(k => {
+    if (b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a && typeof a[k] === 'object') out[k] = deepMerge(a[k], b[k]);
+    else out[k] = b[k];
+  });
+  return out;
+}
+function makeChart(canvasId, cfg, emptyMsg){
+  destroyChart(canvasId);
+  if (!chartAvailable()){
+    chartFallback(canvasId, 'Wykresy wymagają biblioteki Chart.js z CDN. Nie udało się jej pobrać — reszta aplikacji działa normalnie, dane są kompletne w tabelach.');
+    return null;
+  }
+  const c = el(canvasId);
+  if (!c) return null;
+  if (emptyMsg){ chartFallback(canvasId, emptyMsg); return null; }
+  chartClearFallback(canvasId);
+  try { CHARTS[canvasId] = new Chart(c.getContext('2d'), cfg); return CHARTS[canvasId]; }
+  catch (e){ chartFallback(canvasId, 'Nie udało się narysować wykresu: ' + e.message); return null; }
+}
+/* Pionowa linia „dziś” — własny mini-plugin, bez zewnętrznych zależności. */
+const todayLinePlugin = {
+  id: 'todayLine',
+  afterDatasetsDraw(chart, args, opts){
+    const idx = opts && opts.index;
+    if (idx === undefined || idx === null || idx < 0) return;
+    const x = chart.scales.x.getPixelForValue(idx);
+    const ctx = chart.ctx, top = chart.chartArea.top, bot = chart.chartArea.bottom;
+    ctx.save();
+    ctx.strokeStyle = opts.color || '#888'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = opts.color || '#888'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+    ctx.fillText(opts.label || 'dziś', x + 4, top + 10);
+    ctx.restore();
+  }
+};
+
+/* ---- budowa wspólnej osi czasu z historii wszystkich tokenów ---- */
+function buildPortfolioSeries(mode){
+  const toks = STATE.tokens.filter(t => (t.priceHistory || []).length > 0);
+  if (!toks.length) return null;
+  // start = najpóźniejszy „pierwszy dzień”, żeby żaden token nie był domyślany wstecz
+  let start = null;
+  const dateSet = {};
+  toks.forEach(t => {
+    const first = t.priceHistory[0].date;
+    if (!start || first > start) start = first;
+    t.priceHistory.forEach(h => { dateSet[h.date] = true; });
+  });
+  const dates = Object.keys(dateSet).filter(d => d >= start).sort();
+  if (dates.length < 2) return null;
+  const values = [], beLine = [];
+  let be = 0;
+  toks.forEach(t => {
+    const m = metrics(t);
+    be += (mode === 'raw') ? m.breakEvenFDV : m.invested;
+  });
+  const cursors = toks.map(() => 0);
+  const lastPrice = toks.map(t => num(t.priceHistory[0].price));
+  dates.forEach(d => {
+    let v = 0;
+    toks.forEach((t, i) => {
+      const h = t.priceHistory;
+      while (cursors[i] < h.length && h[cursors[i]].date <= d){ lastPrice[i] = num(h[cursors[i]].price); cursors[i]++; }
+      const total = num(t.totalSupply) > 0 ? num(t.totalSupply) : num(t.circulatingSupply);
+      // FDV = cena × podaż docelowa; wersja „ważona” mnoży to przez stały udział w podaży,
+      // co daje dokładnie wartość pozycji (positionValue = supplyShare × fdv)
+      v += (mode === 'raw') ? lastPrice[i] * total
+                            : lastPrice[i] * num(t.holdings);
+    });
+    values.push(v); beLine.push(be);
+  });
+  return { dates: dates, values: values, beLine: beLine, be: be };
+}
+function buildSupplySeries(){
+  const toks = STATE.tokens.filter(t => (t.priceHistory || []).length > 1);
+  if (!toks.length) return null;
+  let start = null; const dateSet = {};
+  toks.forEach(t => {
+    const first = t.priceHistory[0].date;
+    if (!start || first > start) start = first;
+    t.priceHistory.forEach(h => { dateSet[h.date] = true; });
+  });
+  const dates = Object.keys(dateSet).filter(d => d >= start).sort();
+  const series = toks.map((t, i) => {
+    const cur = { i: 0, last: num(t.priceHistory[0].circulatingSupply) };
+    const base = num(t.priceHistory.filter(h => h.date >= start)[0].circulatingSupply) || 1;
+    const data = dates.map(d => {
+      const h = t.priceHistory;
+      while (cur.i < h.length && h[cur.i].date <= d){ cur.last = num(h[cur.i].circulatingSupply); cur.i++; }
+      return (cur.last / base) * 100;
+    });
+    return { token: t, label: t.symbol, data: data, base: base };
+  });
+  return { dates: dates, series: series };
+}
+
+/* ============================================================
+   8. WIDOK 1 — PULPIT
+   ============================================================ */
+let fdvChartMode = 'weighted';
+
+function renderDashboard(){
+  renderSignalTile();
+  renderPortfolioKpis();
+  renderFdvChart();
+  renderSupplyChart();
+  renderDashTable();
+}
+
+function signalTileHtml(r, title, extra){
+  const meta = RECOVERY_META[r.status];
+  const mrow = [];
+  mrow.push('<div>zmiana FDV 30 dni<b class="' + (r.fdvChange30d > 0 ? 'pos' : 'neg') + '">' + (isFinite(r.fdvChange30d) ? pctSigned(r.fdvChange30d * 100) : '—') + '</b></div>');
+  mrow.push('<div>zmiana FDV 90 dni<b class="' + (r.fdvChange90d > 0 ? 'pos' : 'neg') + '">' + (isFinite(r.fdvChange90d) ? pctSigned(r.fdvChange90d * 100) : '—') + '</b></div>');
+  mrow.push('<div>zmiana kapitalizacji 30 dni<b class="' + (r.mcChange30d > 0 ? 'pos' : 'neg') + '">' + (isFinite(r.mcChange30d) ? pctSigned(r.mcChange30d * 100) : '—') + '</b></div>');
+  mrow.push('<div>przyrost podaży 30 dni<b>' + (isFinite(r.supplyGrowth30d) ? pctSigned(r.supplyGrowth30d * 100) : '—') + '</b></div>');
+  return '<div class="signal ' + meta.cls + '">' +
+    '<div class="ico" aria-hidden="true">' + meta.ico + '</div>' +
+    '<div style="flex:1 1 320px">' +
+      (title ? '<p class="sub" style="margin-bottom:2px">' + esc(title) + '</p>' : '') +
+      '<div class="headline">' + meta.label + '</div>' +
+      '<div class="why">' + meta.why + '</div>' +
+      '<div class="metrics">' + mrow.join('') + '</div>' +
+      (extra || '') +
+    '</div></div>';
+}
+
+function renderSignalTile(){
+  const r = portfolioRecovery(STATE.tokens);
+  const extra = '<p class="sub" style="margin-top:10px">Zmiana FDV portfela = zmiana sumy wartości pozycji (udział w podaży jest stały). Zmiana kapitalizacji to średnia ważona wartością pozycji — inaczej największy token przykryłby resztę.</p>';
+  el('signalTile').innerHTML = signalTileHtml(r, 'Sygnał dla całego portfela', extra);
+}
+
+function renderPortfolioKpis(){
+  const p = portfolioTotals();
+  const cls = p.pnl >= 0 ? 'pos' : 'neg';
+  // Postęp portfela liczymy udziałami w podaży: suma(udział × FDV) / suma(udział × breakEvenFDV),
+  // co jest równe wartość / włożone. Surowa suma FDV byłaby zdominowana przez największą sieć.
+  const prog = p.invested > 0 ? p.value / p.invested : 0;
+  const progRaw = p.breakEvenFdvSum > 0 ? p.fdvSum / p.breakEvenFdvSum : 0;
+  const html = [
+    kpi('Wartość portfela', usdBig(p.value), pln(p.valuePln)),
+    kpi('Włożone', usdBig(p.invested), pln(p.investedPln)),
+    kpi('Wynik', '<span class="' + cls + '">' + usdBig(p.pnl) + '</span>', '<span class="' + cls + '">' + pctSigned(p.pnlPct) + ' · ' + pln(p.pnlPln) + '</span>'),
+    kpi('Postęp do progu (FDV)', pct(prog * 100), 'ważony udziałem w podaży; surowa suma FDV ' + usdBig(p.fdvSum) + ' / ' + usdBig(p.breakEvenFdvSum) + ' = ' + pct(progRaw * 100))
+  ].join('');
+  el('portfolioKpis').innerHTML = html;
+}
+function kpi(label, value, note, small){
+  return '<div class="kpi"><div class="label">' + esc(label) + '</div>' +
+    '<div class="value' + (small ? ' sm' : '') + '">' + value + '</div>' +
+    (note ? '<div class="note">' + note + '</div>' : '') + '</div>';
+}
+
+function renderFdvChart(){
+  const s = buildPortfolioSeries(fdvChartMode);
+  const sub = fdvChartMode === 'weighted'
+    ? 'FDV każdego tokena przemnożone przez mój stały udział w podaży — czyli dokładnie wartość pozycji. Linia przerywana to suma włożonego kapitału (próg opłacalności wyrażony w tej samej skali).'
+    : 'Surowa suma FDV wszystkich sieci w portfelu. Linia przerywana to suma breakEvenFDV. Uwaga: największa sieć dominuje skalę.';
+  el('fdvChartSub').textContent = sub;
+  if (!s){ makeChart('chartPortfolioFdv', null, 'Za mało historii, żeby narysować wykres. Zapisz odczyty w widoku „Codzienna aktualizacja”.'); el('fdvChartTable').innerHTML = ''; return; }
+  const c1 = seriesColor(0), muted = cssVar('--muted');
+  makeChart('chartPortfolioFdv', {
+    type: 'line',
+    data: {
+      labels: s.dates,
+      datasets: [
+        { label: fdvChartMode === 'weighted' ? 'FDV portfela (ważone udziałem)' : 'Suma FDV sieci',
+          data: s.values, borderColor: c1, backgroundColor: c1 + '22', fill: true, pointRadius: 0 },
+        { label: fdvChartMode === 'weighted' ? 'Próg opłacalności (włożony kapitał)' : 'Suma breakEvenFDV',
+          data: s.beLine, borderColor: muted, borderDash: [6, 4], borderWidth: 2, pointRadius: 0, fill: false }
+      ]
+    },
+    options: baseOptions({
+      scales: {
+        y: { type: (el('fdvLogScale') && el('fdvLogScale').checked) ? 'logarithmic' : 'linear', ticks: { callback: v => usdBig(v) } },
+        x: { ticks: { callback: function(v, i){ return shortDate(s.dates[i]); } } }
+      },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + usdBig(ctx.parsed.y) } } }
+    })
+  });
+  // widok tabelaryczny (co 10. punkt) — dane muszą być dostępne także bez wykresu
+  const step = Math.max(1, Math.floor(s.dates.length / 12));
+  let rows = '<table><thead><tr><th>Data</th><th class="num">Wartość</th><th class="num">Próg</th><th class="num">Postęp</th></tr></thead><tbody>';
+  for (let i = 0; i < s.dates.length; i += step){
+    rows += '<tr><td>' + fmtDate(s.dates[i]) + '</td><td class="num">' + usdBig(s.values[i]) + '</td><td class="num">' + usdBig(s.be) + '</td><td class="num">' + pct(s.be > 0 ? s.values[i] / s.be * 100 : 0) + '</td></tr>';
+  }
+  el('fdvChartTable').innerHTML = rows + '</tbody></table>';
+}
+function shortDate(iso){ const d = parseISO(iso); return d ? d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' }) : iso; }
+
+function renderSupplyChart(){
+  const s = buildSupplySeries();
+  if (!s){ makeChart('chartSupply', null, 'Za mało historii podaży.'); el('supplyChartTable').innerHTML = ''; return; }
+  makeChart('chartSupply', {
+    type: 'line',
+    data: {
+      labels: s.dates,
+      datasets: s.series.map((ser, i) => ({
+        label: ser.label + ' (start: ' + tokAmount(ser.base) + ')',
+        data: ser.data, borderColor: seriesColor(i), backgroundColor: seriesColor(i), pointRadius: 0, fill: false
+      }))
+    },
+    options: baseOptions({
+      scales: { y: { ticks: { callback: v => fmt(v, 0) } }, x: { ticks: { callback: function(v, i){ return shortDate(s.dates[i]); } } } },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label.split(' (')[0] + ': indeks ' + fmt(ctx.parsed.y, 1) + ' (' + pctSigned(ctx.parsed.y - 100) + ')' } } }
+    })
+  });
+  let rows = '<table><thead><tr><th>Token</th><th class="num">Podaż na starcie historii</th><th class="num">Podaż dziś</th><th class="num">Przyrost</th></tr></thead><tbody>';
+  s.series.forEach(ser => {
+    const nowS = num(ser.token.circulatingSupply);
+    rows += '<tr><td>' + esc(ser.label) + '</td><td class="num">' + tokAmount(ser.base) + '</td><td class="num">' + tokAmount(nowS) + '</td><td class="num">' + pctSigned((nowS / ser.base - 1) * 100) + '</td></tr>';
+  });
+  el('supplyChartTable').innerHTML = rows + '</tbody></table>';
+}
+
+function renderDashTable(){
+  if (!STATE.tokens.length){ el('dashTable').innerHTML = '<p class="note">Brak tokenów. Dodaj pierwszy w widoku „Dodaj / edytuj”.</p>'; return; }
+  let h = '<table><thead><tr>' +
+    '<th>Token</th><th class="num">Cena</th><th class="num">FDV</th><th class="num">Float</th>' +
+    '<th class="num">Cena ×</th><th class="num">Kapitał ×</th><th>Postęp do progu</th><th>Ryzyko</th>' +
+    '<th class="num">Wartość</th><th class="num">Wynik</th><th>Sygnał</th></tr></thead><tbody>';
+  STATE.tokens.forEach(t => {
+    const m = metrics(t), rs = riskScore(t), r = recovery(t);
+    const prog = Math.max(0, Math.min(1, m.progressToBreakEven));
+    const barCls = prog >= 1 ? 'b-good' : prog >= 0.5 ? 'b-warn' : 'b-serious';
+    const flags = warningFlags(t).filter(f => f.level === 'bad').length;
+    h += '<tr class="clickable" data-token="' + esc(t.id) + '">' +
+      '<td><b>' + esc(t.symbol) + '</b> <span class="sub">' + esc(t.name) + '</span>' +
+        (flags ? ' <span class="badge critical" title="czerwone flagi">⚑ ' + flags + '</span>' : '') + '</td>' +
+      '<td class="num">' + usd(m.price) + '</td>' +
+      '<td class="num">' + usdBig(m.fdv) + '</td>' +
+      '<td class="num">' + pct(m.float * 100) + '</td>' +
+      '<td class="num">' + mult(m.priceMultiple) + '</td>' +
+      '<td class="num"><b>' + mult(m.marketCapMultiple) + '</b></td>' +
+      '<td><div class="row" style="gap:6px"><div class="bar ' + barCls + '" style="flex:1"><span style="width:' + (prog * 100).toFixed(1) + '%"></span></div>' +
+        '<span class="tnum" style="font-size:.75rem">' + pct(m.progressToBreakEven * 100) + '</span></div></td>' +
+      '<td><span class="badge ' + rs.band.cls + '"><span class="dotc" style="background:var(--' + bandVar(rs.band.cls) + ')"></span>' + rs.score + ' · ' + rs.band.label + '</span></td>' +
+      '<td class="num">' + usdBig(m.positionValue) + '<div class="sub">' + pln(m.positionValuePln) + '</div></td>' +
+      '<td class="num ' + (m.pnl >= 0 ? 'pos' : 'neg') + '">' + usdBig(m.pnl) + '<div class="sub">' + pctSigned(m.pnlPct) + '</div></td>' +
+      '<td><span class="badge ' + recoveryBadgeCls(r.status) + '">' + RECOVERY_META[r.status].ico + ' ' + RECOVERY_META[r.status].label + '</span></td>' +
+      '</tr>';
+  });
+  const p = portfolioTotals();
+  h += '</tbody><tfoot><tr><td>Razem</td><td colspan="7"></td>' +
+    '<td class="num">' + usdBig(p.value) + '<div class="sub">' + pln(p.valuePln) + '</div></td>' +
+    '<td class="num ' + (p.pnl >= 0 ? 'pos' : 'neg') + '">' + usdBig(p.pnl) + '<div class="sub">' + pctSigned(p.pnlPct) + '</div></td><td></td></tr></tfoot></table>';
+  el('dashTable').innerHTML = h;
+  el('dashTable').querySelectorAll('tr.clickable').forEach(tr => {
+    tr.addEventListener('click', () => openToken(tr.getAttribute('data-token')));
+  });
+}
+function bandVar(cls){ return cls === 'good' ? 'good' : cls === 'warn' ? 'warn' : cls === 'serious' ? 'serious' : 'critical'; }
+function recoveryBadgeCls(status){
+  return status === 'real' ? 'good' : status === 'illusory' ? 'serious' : status === 'none' ? 'critical' : '';
+}
+/* ============================================================
+   9. WIDOK 2 — SZCZEGÓŁY TOKENA
+   ============================================================ */
+let currentTokenId = null;
+let scenarioPos = 500;      // pozycja suwaka scenariuszowego (0–1000, skala log)
+let projGrowth = null;      // założony wzrost wyceny sieci r/r (%), null = z ustawień
+
+function tokenById(id){ return STATE.tokens.filter(t => t.id === id)[0] || null; }
+function openToken(id){
+  currentTokenId = id;
+  const t = tokenById(id);
+  if (t){
+    const m = metrics(t);
+    scenarioPos = fdvToPos(m.fdv);        // suwak startuje na dzisiejszym FDV
+  }
+  showView('token');
+}
+/* Skala logarytmiczna suwaka: 10 mln $ → 10 mld $ */
+const SC_MIN = 1e7, SC_MAX = 1e10;
+function posToFdv(pos){ return Math.pow(10, Math.log10(SC_MIN) + (pos / 1000) * (Math.log10(SC_MAX) - Math.log10(SC_MIN))); }
+function fdvToPos(fdv){
+  if (!(fdv > 0)) return 0;
+  const p = (Math.log10(fdv) - Math.log10(SC_MIN)) / (Math.log10(SC_MAX) - Math.log10(SC_MIN)) * 1000;
+  return Math.max(0, Math.min(1000, Math.round(p)));
+}
+function fdvToPctPos(fdv){
+  if (!(fdv > 0)) return null;
+  const p = (Math.log10(fdv) - Math.log10(SC_MIN)) / (Math.log10(SC_MAX) - Math.log10(SC_MIN)) * 100;
+  return (p < -2 || p > 102) ? null : Math.max(0, Math.min(100, p));
+}
+
+function renderTokenPick(){
+  const wrap = el('tokenPick');
+  if (!STATE.tokens.length){ wrap.innerHTML = ''; return; }
+  wrap.innerHTML = STATE.tokens.map(t =>
+    '<button data-token="' + esc(t.id) + '" aria-pressed="' + (t.id === currentTokenId) + '">' + esc(t.symbol) + '</button>').join('');
+  wrap.querySelectorAll('button').forEach(b => b.addEventListener('click', () => openToken(b.getAttribute('data-token'))));
+}
+
+function renderTokenView(){
+  renderTokenPick();
+  const host = el('tokenDetail');
+  if (!STATE.tokens.length){ host.innerHTML = '<div class="card"><p class="note">Brak tokenów.</p></div>'; return; }
+  if (!currentTokenId || !tokenById(currentTokenId)) currentTokenId = STATE.tokens[0].id;
+  const t = tokenById(currentTokenId);
+  const m = metrics(t), rs = riskScore(t), r = recovery(t), flags = warningFlags(t);
+
+  const parts = [];
+
+  /* --- nagłówek --- */
+  parts.push('<div class="card"><div class="card-head">' +
+    '<div><h1>' + esc(t.symbol) + ' <span class="sub">' + esc(t.name) + '</span></h1>' +
+    '<p class="src">Podaż: ' + esc(t.supplySource || 'brak źródła') + ' · zaktualizowano ' + (t.supplyUpdatedAt ? fmtDate(t.supplyUpdatedAt) : '—') + '</p></div>' +
+    '<div class="row"><button class="btn small" id="btnEditToken">Edytuj</button>' +
+    '<button class="btn small danger" id="btnDeleteToken">Usuń</button></div></div>' +
+    '<div class="grid g4">' +
+      kpi('Cena', usd(m.price), 'wolumen 24h ' + usdBig(num(t.volume24h))) +
+      kpi('FDV', usdBig(m.fdv), 'kapitalizacja ' + usdBig(m.marketCap)) +
+      kpi('Float', pct(m.float * 100), 'do wejścia jeszcze ' + pct(m.remainingDilution * 100) + ' podaży') +
+      kpi('Wartość pozycji', pln(m.positionValuePln), usdBig(m.positionValue) + ' · wynik ' + '<span class="' + (m.pnl >= 0 ? 'pos' : 'neg') + '">' + pctSigned(m.pnlPct) + '</span>') +
+    '</div>' +
+    (t.notes ? '<p class="note" style="margin-top:10px">' + esc(t.notes) + '</p>' : '') +
+    (t.historyIsDemo ? '<p class="note" style="margin-top:6px">⚠ Historia tego tokena jest startowa/demonstracyjna. Zastąp ją własnymi odczytami z widoku „Codzienna aktualizacja”.</p>' : '') +
+    '</div>');
+
+  /* --- sygnał odbudowy dla tokena --- */
+  parts.push('<div style="margin-bottom:14px">' + signalTileHtml(r, 'Sygnał dla ' + esc(t.symbol), '') + '</div>');
+
+  /* --- TOŻSAMOŚĆ KLUCZOWA --- */
+  parts.push('<div class="card"><h2>Dlaczego liczy się FDV, a nie cena</h2>' +
+    '<div class="identity"><p style="margin-bottom:6px"><code>wartość pozycji = udział w podaży × FDV</code></p>' +
+    '<p class="mono" style="margin:0">' + pln(m.positionValuePln) + ' &nbsp;=&nbsp; ' + fmt(m.supplyShare * 100, 6) + '% &nbsp;×&nbsp; ' + usdBig(m.fdv) + '</p>' +
+    '<p class="sub" style="margin-top:8px">Trzymasz ' + fmt(num(t.holdings), 2) + ' szt. z docelowych ' + tokAmount(m.total) + '. Ten udział nigdy się nie zmienia — więc wartość Twojej pozycji jest wprost proporcjonalna do wyceny całej sieci. Cena to tylko FDV podzielone przez stałą liczbę.</p></div>' +
+    '<div class="grid g2" style="margin-top:12px">' +
+      '<div class="kpi"><div class="label">Cena musi</div><div class="value">' + mult(m.priceMultiple) + '</div>' +
+        '<div class="note">Tyle musi urosnąć notowanie: z ' + usd(m.price) + ' do ' + usd(m.breakEvenPrice) + '. To jedyna liczba, którą widzisz na wykresie.</div></div>' +
+      '<div class="kpi"><div class="label">Kapitał w tokenie musi</div><div class="value">' + mult(m.marketCapMultiple) + '</div>' +
+        '<div class="note">Tyle realnych pieniędzy musi w nim usiąść: z ' + usdBig(m.marketCap) + ' do ' + usdBig(m.breakEvenFDV) + '. Różnica bierze się stąd, że nowe tokeny też potrzebują nabywców.</div></div>' +
+    '</div>' +
+    '<p class="sub" style="margin-top:10px">Próg opłacalności w dolarach jest stały: <b>' + usdBig(m.breakEvenFDV) + '</b> (średnia cena zakupu × podaż docelowa). Gdyby podaż nigdy nie urosła, wystarczyłaby kapitalizacja ' + usdBig(m.breakEvenMCifNoDilution) + '. Postęp: ' + pct(m.progressToBreakEven * 100) + '.</p>' +
+    '<div class="bar ' + (m.progressToBreakEven >= 1 ? 'b-good' : m.progressToBreakEven >= 0.5 ? 'b-warn' : 'b-serious') + '" style="margin-top:6px"><span style="width:' + Math.max(0, Math.min(100, m.progressToBreakEven * 100)).toFixed(1) + '%"></span></div>' +
+    '</div>');
+
+  /* --- flagi --- */
+  if (flags.length){
+    parts.push('<div class="card"><h2>Flagi ostrzegawcze</h2><div class="stack" style="gap:8px">' +
+      flags.map(f => '<div class="flag' + (f.level === 'warn' ? ' warnf' : '') + '"><span aria-hidden="true">' + (f.level === 'warn' ? '▲' : '⚑') + '</span><span>' + esc(f.text) + '</span></div>').join('') +
+      '</div></div>');
+  }
+
+  /* --- TRZY SCENARIUSZE ATH --- */
+  const usdPln = num(STATE.settings.usdPln);
+  parts.push('<div class="card"><div class="card-head"><div><h2>Trzy scenariusze „powrotu do ATH”</h2>' +
+    '<p class="sub">ATH ' + usd(num(t.athPrice)) + ' z ' + fmtDate(t.athDate) + ', kapitalizacja w szczycie ' + usdBig(num(t.athMarketCap)) + '. To są trzy różne pytania i trzy różne odpowiedzi.</p></div></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Scenariusz</th><th class="num">Cena</th><th class="num">Wartość pozycji</th><th class="num">W PLN</th><th class="num">vs dziś</th></tr></thead><tbody>' +
+    athRow('1. Cena wraca do ATH', 'Naiwny — zakłada, że notowanie wróci na szczyt mimo większej podaży.', num(t.athPrice), m.value_athPrice, usdPln, m.positionValue) +
+    athRow('2. Wycena wraca do ATH, dzisiejsza podaż', 'Kapitalizacja z ATH rozłożona na dzisiejszą podaż w obiegu.', m.price_athMC_now, m.value_athMC_now, usdPln, m.positionValue) +
+    athRow('3. Wycena wraca do ATH, pełna podaż', 'Realistyczny dla horyzontu 10 lat — do tego czasu w obiegu będzie cała podaż.', m.price_athMC_full, m.value_athMC_full, usdPln, m.positionValue) +
+    '</tbody></table></div>' +
+    '<p class="note" style="margin-top:10px">Żeby CENA wróciła do ATH przy pełnej podaży, sieć musi być warta ' + usdBig(m.mcNeededForAthPrice) +
+    ' — to ' + mult(m.athPriceDifficulty) + ' więcej niż w historycznym szczycie. Różnica między wierszem 1 a 3 to główny wniosek całej aplikacji.</p></div>');
+
+  /* --- KALKULATOR SCENARIUSZY --- */
+  const sc = scenario(t, posToFdv(scenarioPos));
+  const marks = [
+    { v: m.fdv, label: 'dziś', color: 'var(--s1)' },
+    { v: m.breakEvenFDV, label: 'próg', color: 'var(--warn)' },
+    { v: num(t.athMarketCap), label: 'kapit. ATH', color: 'var(--s5)' }
+  ];
+  parts.push('<div class="card"><h2>Kalkulator scenariuszy</h2>' +
+    '<p class="sub">Ustaw wycenę całej sieci (FDV) i zobacz, co to znaczy dla Twojej pozycji. Skala logarytmiczna: 10 mln $ – 10 mld $.</p>' +
+    '<div style="margin-top:14px"><input type="range" id="scSlider" min="0" max="1000" step="1" value="' + scenarioPos + '"></div>' +
+    '<div class="scale-marks" id="scMarks">' + marks.map((mk, i) => {
+      const p = fdvToPctPos(mk.v);
+      if (p === null) return '';
+      const lvl = i % 2;   // co drugi znacznik niżej, żeby etykiety się nie zlewały
+      return '<div class="mk" style="left:' + p.toFixed(2) + '%; top:' + (lvl * 20) + 'px; color:' + mk.color + '">' +
+        '<i style="height:' + (14 - lvl * 4) + 'px"></i>' + mk.label + '<br>' + usdBig(mk.v) + '</div>';
+    }).join('') + '</div>' +
+    '<div class="grid g4" id="scOut" style="margin-top:8px">' + scenarioKpis(t, sc) + '</div></div>');
+
+  /* --- oś czasu odblokowań --- */
+  parts.push('<div class="card"><div class="card-head"><div><h2>Oś czasu odblokowań</h2>' +
+    '<p class="sub">' + ((t.unlocks || []).length ? esc(t.unlocksNote || '') : 'Brak wpisanego harmonogramu — to znaczy „nie wiem”, a nie „nie ma odblokowań”.') + '</p></div></div>' +
+    '<div class="chart-wrap short"><canvas id="chartUnlocks"></canvas></div>' +
+    '<div class="table-wrap" id="unlockTable" style="margin-top:10px"></div></div>');
+
+  /* --- alokacje --- */
+  parts.push('<div class="card"><div class="card-head"><div><h2>Rozkład podaży</h2>' +
+    '<p class="sub">Insiderzy (zespół, fundusze, rundy prywatne) wyróżnieni czerwoną rodziną kolorów i etykietą.</p></div></div>' +
+    '<div class="grid g2"><div><div class="chart-wrap"><canvas id="chartAlloc"></canvas></div></div>' +
+    '<div id="allocLegend"></div></div></div>');
+
+  /* --- scoring --- */
+  parts.push(riskCardHtml(t, rs));
+
+  /* --- projekcja --- */
+  const growth = projGrowth === null ? num(STATE.settings.networkGrowthPct) : projGrowth;
+  parts.push('<div class="card"><div class="card-head"><div><h2>Projekcja rozwodnienia</h2>' +
+    '<p class="sub">Założenie: kapitał realnie ulokowany w tokenie (kapitalizacja) rośnie o zadany procent rocznie, a podaż rośnie zgodnie z harmonogramem i emisją. Cena = kapitał ÷ podaż w obiegu.</p></div>' +
+    '<div><label class="field" style="margin:0"><span class="lab">Wzrost wyceny sieci r/r</span>' +
+    '<input type="range" id="growthSlider" min="-20" max="100" step="5" value="' + growth + '"> <span id="growthOut" class="mono">' + pctSigned(growth, 0) + '</span></label></div></div>' +
+    '<div class="grid g2">' +
+      '<div><h4>Podaż w obiegu</h4><div class="chart-wrap short"><canvas id="chartProjSupply"></canvas></div></div>' +
+      '<div><h4>Wycena sieci</h4><div class="chart-wrap short"><canvas id="chartProjValue"></canvas></div></div>' +
+    '</div>' +
+    '<div style="margin-top:12px"><h4>Wynikowa cena i wartość pozycji</h4><div class="chart-wrap short"><canvas id="chartProjPrice"></canvas></div></div>' +
+    '<div class="table-wrap" id="projTable" style="margin-top:12px"></div></div>');
+
+  host.innerHTML = parts.join('');
+  wireTokenView(t);
+}
+
+function athRow(title, desc, price, value, usdPln, todayValue){
+  return '<tr><td><b>' + title + '</b><div class="sub" style="white-space:normal; max-width:44ch">' + desc + '</div></td>' +
+    '<td class="num">' + usd(price) + '</td>' +
+    '<td class="num">' + usdBig(value) + '</td>' +
+    '<td class="num"><b>' + pln(value * usdPln) + '</b></td>' +
+    '<td class="num">' + (todayValue > 0 ? mult(value / todayValue) : '—') + '</td></tr>';
+}
+function scenarioKpis(t, sc){
+  const m = metrics(t);
+  return kpi('Wycena sieci (FDV)', usdBig(sc.targetFDV), mult(sc.vsToday) + ' względem dzisiejszego FDV') +
+    kpi('Cena', usd(sc.impliedPrice), mult(m.price > 0 ? sc.impliedPrice / m.price : NaN) + ' względem dzisiejszej') +
+    kpi('Wartość pozycji', pln(sc.impliedPositionPln), usdBig(sc.impliedPosition)) +
+    kpi('Zwrot z wkładu', mult(sc.impliedMultiple, 2), 'włożone ' + usdBig(m.invested) + ' · ' + (sc.impliedPosition >= m.invested ? 'powyżej progu' : 'poniżej progu'));
+}
+
+function riskCardHtml(t, rs){
+  let h = '<div class="card"><div class="card-head"><div><h2>Scoring ryzyka</h2>' +
+    '<p class="sub">0–100, mniej znaczy bezpieczniej. Pasma: 0–25 niskie · 26–50 umiarkowane · 51–75 wysokie · 76–100 skrajne.</p></div>' +
+    '<div><span class="badge ' + rs.band.cls + '" style="font-size:.95rem; padding:6px 12px">' +
+    '<span class="dotc" style="background:var(--' + bandVar(rs.band.cls) + ')"></span>' + rs.score + ' / 100 · ' + rs.band.label + '</span></div></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Wymiar</th><th class="num">Waga</th><th class="num">Punkty</th><th>Wartość</th><th>Co to znaczy</th></tr></thead><tbody>';
+  rs.components.forEach(c => {
+    const ratio = c.weight > 0 ? c.points / c.weight : 0;
+    const cls = ratio <= 0.01 ? 'b-good' : ratio < 0.5 ? 'b-warn' : ratio < 0.8 ? 'b-serious' : 'b-critical';
+    h += '<tr><td><b>' + esc(c.label) + '</b></td><td class="num">' + c.weight + '</td>' +
+      '<td class="num"><div class="row" style="justify-content:flex-end; gap:6px"><div class="bar ' + cls + '" style="width:52px"><span style="width:' + (ratio * 100).toFixed(0) + '%"></span></div><b>' + c.points + '</b></div></td>' +
+      '<td>' + esc(c.value) + '</td><td style="white-space:normal; max-width:52ch" class="sub">' + esc(c.desc) + '</td></tr>';
+  });
+  h += '</tbody><tfoot><tr><td>Razem</td><td class="num">100</td><td class="num"><b>' + rs.score + '</b></td><td colspan="2">' + rs.band.label + '</td></tr></tfoot></table></div></div>';
+  return h;
+}
+/* ---- podpięcie interakcji i wykresów w widoku tokena ---- */
+function wireTokenView(t){
+  const bE = el('btnEditToken'), bD = el('btnDeleteToken');
+  if (bE) bE.addEventListener('click', () => { editTokenId = t.id; showView('edit'); });
+  if (bD) bD.addEventListener('click', () => {
+    if (confirm('Usunąć token ' + t.symbol + ' wraz z całą historią? Tej operacji nie da się cofnąć — najpierw rozważ eksport JSON.')){
+      STATE.tokens = STATE.tokens.filter(x => x.id !== t.id);
+      currentTokenId = STATE.tokens.length ? STATE.tokens[0].id : null;
+      saveState(); renderAll();
+    }
+  });
+
+  const sl = el('scSlider');
+  if (sl) sl.addEventListener('input', () => {
+    scenarioPos = Number(sl.value);
+    el('scOut').innerHTML = scenarioKpis(t, scenario(t, posToFdv(scenarioPos)));
+  });
+
+  const gs = el('growthSlider');
+  if (gs) gs.addEventListener('input', () => {
+    projGrowth = Number(gs.value);
+    el('growthOut').textContent = pctSigned(projGrowth, 0);
+    renderProjection(t);
+  });
+
+  renderUnlockChart(t);
+  renderAllocChart(t);
+  renderProjection(t);
+}
+
+function renderUnlockChart(t){
+  const us = (t.unlocks || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (!us.length){ makeChart('chartUnlocks', null, 'Brak wpisanego harmonogramu odblokowań.'); el('unlockTable').innerHTML = ''; return; }
+  const now = new Date();
+  const past = us.map(u => { const d = parseISO(u.date); return d && d < now; });
+  let firstFuture = past.indexOf(false);
+  if (firstFuture < 0) firstFuture = us.length;
+  const colFuture = seriesColor(1), colPast = cssVar('--muted');
+  makeChart('chartUnlocks', {
+    type: 'bar',
+    plugins: [todayLinePlugin],
+    data: {
+      labels: us.map(u => fmtDate(u.date)),
+      datasets: [{
+        label: 'Odblokowane tokeny',
+        data: us.map(u => num(u.tokens)),
+        backgroundColor: us.map((u, i) => past[i] ? colPast : colFuture),
+        borderRadius: 4, borderSkipped: false
+      }]
+    },
+    options: baseOptions({
+      plugins: {
+        legend: { display: false },
+        todayLine: { index: firstFuture - 0.5, color: cssVar('--text-2'), label: 'dziś' },
+        tooltip: { callbacks: {
+          label: ctx => tokAmount(ctx.parsed.y) + ' szt. · ' + usdBig(ctx.parsed.y * num(t.price)),
+          afterLabel: ctx => (us[ctx.dataIndex].label || '') + ' · ' + pct(num(us[ctx.dataIndex].tokens) / num(t.circulatingSupply) * 100) + ' dzisiejszej podaży'
+        } }
+      },
+      scales: { y: { ticks: { callback: v => tokAmount(v) } } }
+    })
+  });
+  let h = '<table><thead><tr><th>Data</th><th>Opis</th><th class="num">Tokeny</th><th class="num">Wartość dziś</th><th class="num">% podaży w obiegu</th></tr></thead><tbody>';
+  us.forEach((u, i) => {
+    h += '<tr' + (past[i] ? ' class="sub"' : '') + '><td>' + fmtDate(u.date) + (past[i] ? ' <span class="chip">za nami</span>' : '') + '</td>' +
+      '<td>' + esc(u.label || '—') + '</td><td class="num">' + tokAmount(num(u.tokens)) + '</td>' +
+      '<td class="num">' + usdBig(num(u.tokens) * num(t.price)) + '</td>' +
+      '<td class="num">' + pct(num(u.tokens) / num(t.circulatingSupply) * 100) + '</td></tr>';
+  });
+  el('unlockTable').innerHTML = h + '</tbody></table>';
+}
+
+/* Alokacje: insiderzy dostają rodzinę czerwieni, reszta rodzinę błękitu.
+   Kolor nie niesie znaczenia sam — legenda ma jawną etykietę „insider”. */
+const RAMP_INSIDER = ['#d03b3b', '#e66767', '#8f2323', '#f09b9b'];
+const RAMP_OTHER   = ['#3987e5', '#6da7ec', '#1c5cab', '#9ec5f4', '#104281', '#cde2fb'];
+function renderAllocChart(t){
+  const al = (t.allocations || []).slice().filter(a => num(a.pct) > 0);
+  if (!al.length){
+    makeChart('chartAlloc', null, 'Brak wpisanego rozkładu podaży.');
+    el('allocLegend').innerHTML = '<p class="note">Brak alokacji. To znaczy „nie wiem, kto trzyma podaż”, a nie „nikt jej nie trzyma” — składnik ryzyka „alokacja insiderów” jest wtedy liczony jako 0.</p>';
+    return;
+  }
+  let ii = 0, oi = 0;
+  const colors = al.map(a => a.isInsider ? RAMP_INSIDER[ii++ % RAMP_INSIDER.length] : RAMP_OTHER[oi++ % RAMP_OTHER.length]);
+  makeChart('chartAlloc', {
+    type: 'doughnut',
+    data: { labels: al.map(a => a.name + (a.isInsider ? ' (insider)' : '')), datasets: [{ data: al.map(a => num(a.pct)), backgroundColor: colors, borderColor: cssVar('--surface'), borderWidth: 2 }] },
+    options: baseOptions({
+      cutout: '58%',
+      scales: { x: { display: false }, y: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.label + ': ' + pct(ctx.parsed) } } }
+    })
+  });
+  const insiderPct = al.reduce((s, a) => s + (a.isInsider ? num(a.pct) : 0), 0);
+  const sum = al.reduce((s, a) => s + num(a.pct), 0);
+  let h = '<div class="legend-list" style="flex-direction:column; gap:6px">';
+  al.forEach((a, i) => {
+    h += '<div><span class="sw" style="background:' + colors[i] + '"></span>' + esc(a.name) + ' — <b>' + pct(num(a.pct)) + '</b>' +
+      (a.isInsider ? ' <span class="badge critical">insider</span>' : '') + '</div>';
+  });
+  h += '</div><p class="note" style="margin-top:10px">Insiderzy razem: <b>' + pct(insiderPct) + '</b> podaży. Suma wpisanych alokacji: ' + pct(sum) +
+    (sum < 99 ? ' — reszta nie jest opisana w danych.' : '.') + '</p>';
+  el('allocLegend').innerHTML = h;
+}
+
+function renderProjection(t){
+  const growth = projGrowth === null ? num(STATE.settings.networkGrowthPct) : projGrowth;
+  const rows = projection(t, growth, num(STATE.settings.horizonYears, 10));
+  const m = metrics(t);
+  const labels = rows.map(r => String(r.year));
+  const c1 = seriesColor(0), c2 = seriesColor(1), c3 = seriesColor(2), muted = cssVar('--muted');
+
+  makeChart('chartProjSupply', {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: 'Podaż w obiegu', data: rows.map(r => r.supply), borderColor: c1, backgroundColor: c1 + '22', fill: true },
+      { label: 'Podaż docelowa', data: rows.map(() => m.total), borderColor: muted, borderDash: [6, 4], fill: false }
+    ] },
+    options: baseOptions({
+      scales: { y: { beginAtZero: true, ticks: { callback: v => tokAmount(v) } } },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + tokAmount(ctx.parsed.y) } } }
+    })
+  });
+
+  makeChart('chartProjValue', {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: 'Kapitał w tokenie (kapitalizacja)', data: rows.map(r => r.assumedMC), borderColor: c2, fill: false },
+      { label: 'FDV', data: rows.map(r => r.fdv), borderColor: c3, fill: false },
+      { label: 'Próg opłacalności (breakEvenFDV)', data: rows.map(() => m.breakEvenFDV), borderColor: muted, borderDash: [6, 4], fill: false }
+    ] },
+    options: baseOptions({
+      scales: { y: { ticks: { callback: v => usdBig(v) } } },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + usdBig(ctx.parsed.y) } } }
+    })
+  });
+
+  makeChart('chartProjPrice', {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: 'Cena wynikowa', data: rows.map(r => r.price), borderColor: c1, backgroundColor: c1 + '22', fill: true },
+      { label: 'Średnia cena zakupu', data: rows.map(() => m.breakEvenPrice), borderColor: muted, borderDash: [6, 4], fill: false }
+    ] },
+    options: baseOptions({
+      scales: { y: { beginAtZero: true, ticks: { callback: v => usd(v) } } },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + usd(ctx.parsed.y) } } }
+    })
+  });
+
+  const last = rows[rows.length - 1], first = rows[0];
+  const priceChange = first.price > 0 ? (last.price / first.price - 1) * 100 : NaN;
+  const mcChange = first.assumedMC > 0 ? (last.assumedMC / first.assumedMC - 1) * 100 : NaN;
+  let h = '<p class="note">Przy założeniu ' + pctSigned(growth, 0) + ' r/r kapitał w tokenie zmienia się o ' + pctSigned(mcChange) +
+    ' do ' + last.year + ' roku, a cena o <b>' + pctSigned(priceChange) + '</b>. Całą różnicę zjada podaż: z ' + tokAmount(first.supply) + ' do ' + tokAmount(last.supply) + ' szt.</p>' +
+    '<table><thead><tr><th>Rok</th><th class="num">Podaż w obiegu</th><th class="num">Inflacja</th><th class="num">Kapitalizacja</th><th class="num">FDV</th><th class="num">Cena</th><th class="num">Wartość pozycji</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    h += '<tr><td>' + r.year + '</td><td class="num">' + tokAmount(r.supply) + '</td><td class="num">' + pct(r.inflRate * 100) + '</td>' +
+      '<td class="num">' + usdBig(r.assumedMC) + '</td><td class="num">' + usdBig(r.fdv) + '</td><td class="num">' + usd(r.price) + '</td>' +
+      '<td class="num">' + pln(r.position * num(STATE.settings.usdPln)) + '</td></tr>';
+  });
+  el('projTable').innerHTML = h + '</tbody></table>';
+}
+/* ============================================================
+   10. WIDOK 3 — DODAJ / EDYTUJ TOKEN
+   ============================================================ */
+let editTokenId = null;     // null = nowy token
+let editDraft = null;
+let editMode = 'manual';
+
+function newDraft(){
+  return normalizeToken({
+    id: uid(), symbol: '', name: '', coingeckoId: '',
+    circulatingSupply: 0, totalSupply: 0, supplySource: '', supplyUpdatedAt: todayISO(),
+    allocations: [], unlocks: [], vestingEndDate: '',
+    annualInflationPct: 0, inflationDecayPct: 0, inflationFloorPct: 0,
+    holdings: 0, avgEntryPrice: 0, price: 0, volume24h: 0,
+    priceHistory: [], athPrice: 0, athDate: '', athMarketCap: 0, notes: ''
+  });
+}
+/* Szkic formularza wczytujemy z tokena TYLKO wtedy, gdy jeszcze go nie ma
+   albo dotyczy innego tokena — inaczej przerysowanie widoku kasowałoby
+   niezapisane zmiany (np. właśnie przepisane z parsera). */
+function syncDraft(){
+  if (editDraft && (!editTokenId || editDraft.id === editTokenId)) return;
+  if (editTokenId){
+    const t = tokenById(editTokenId);
+    editDraft = t ? JSON.parse(JSON.stringify(t)) : newDraft();
+  } else {
+    editDraft = newDraft();
+  }
+}
+function fieldText(label, key, hint, type){
+  const v = editDraft[key];
+  return '<label class="field"><span class="lab">' + esc(label) + (hint ? ' <span class="sub">· ' + esc(hint) + '</span>' : '') + '</span>' +
+    '<input type="' + (type || 'text') + '" data-k="' + key + '" data-t="' + (type === 'date' ? 'date' : 'text') + '" value="' + esc(v === null || v === undefined ? '' : v) + '"></label>';
+}
+function fieldNum(label, key, hint, dec){
+  const v = num(editDraft[key]);
+  const shown = v === 0 ? '' : NF(0, dec === undefined ? 10 : dec).format(v);
+  return '<label class="field"><span class="lab">' + esc(label) + (hint ? ' <span class="sub">· ' + esc(hint) + '</span>' : '') + '</span>' +
+    '<input type="text" inputmode="decimal" data-k="' + key + '" data-t="num" value="' + esc(shown) + '"></label>';
+}
+
+function renderEditView(){
+  syncDraft();
+  ['manual', 'pdf', 'link'].forEach(m => {
+    const pane = el('editPane' + m.charAt(0).toUpperCase() + m.slice(1));
+    if (pane) pane.classList.toggle('hidden', m !== editMode);
+  });
+  el('editMode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-m') === editMode)));
+  renderManualPane();
+  renderPdfPane();
+  renderLinkPane();
+  renderParseConfirm();
+}
+
+function renderManualPane(){
+  const d = editDraft;
+  const host = el('editPaneManual');
+  const picker = '<div class="tokenpick" style="margin-bottom:14px">' +
+    '<button data-e="" aria-pressed="' + (!editTokenId) + '">+ Nowy token</button>' +
+    STATE.tokens.map(t => '<button data-e="' + esc(t.id) + '" aria-pressed="' + (editTokenId === t.id) + '">' + esc(t.symbol) + '</button>').join('') + '</div>';
+  host.innerHTML = picker +
+    '<div class="grid g3">' +
+      '<div><h3>Identyfikacja</h3>' +
+        fieldText('Symbol', 'symbol', 'np. PEAQ') +
+        fieldText('Nazwa', 'name') +
+        fieldText('ID w CoinGecko', 'coingeckoId', 'do pobierania ceny; puste = brak API') +
+        fieldText('Notatki', 'notes') +
+      '</div>' +
+      '<div><h3>Tokenomia</h3>' +
+        fieldNum('Podaż w obiegu', 'circulatingSupply', 'szt.') +
+        fieldNum('Podaż docelowa / maksymalna', 'totalSupply', 'szt.') +
+        fieldText('Źródło danych o podaży', 'supplySource', 'widoczne w UI') +
+        fieldText('Data aktualizacji podaży', 'supplyUpdatedAt', 'RRRR-MM-DD', 'date') +
+      '</div>' +
+      '<div><h3>Emisja i vesting</h3>' +
+        fieldText('Koniec vestingu', 'vestingEndDate', 'RRRR-MM-DD', 'date') +
+        fieldNum('Inflacja roczna (%)', 'annualInflationPct', 'emisja poza vestingiem') +
+        fieldNum('Spadek inflacji r/r (%)', 'inflationDecayPct') +
+        fieldNum('Podłoga inflacji (%)', 'inflationFloorPct') +
+      '</div>' +
+      '<div><h3>Pozycja</h3>' +
+        fieldNum('Ile sztuk mam', 'holdings') +
+        fieldNum('Średnia cena zakupu (USD)', 'avgEntryPrice') +
+      '</div>' +
+      '<div><h3>Rynek</h3>' +
+        fieldNum('Cena (USD)', 'price') +
+        fieldNum('Wolumen 24h (USD)', 'volume24h') +
+      '</div>' +
+      '<div><h3>Historia</h3>' +
+        fieldNum('Cena ATH (USD)', 'athPrice') +
+        fieldText('Data ATH', 'athDate', 'RRRR-MM-DD', 'date') +
+        fieldNum('Kapitalizacja w momencie ATH (USD)', 'athMarketCap', 'kluczowe dla scenariuszy') +
+      '</div>' +
+    '</div>' +
+    '<div class="grid g2" style="margin-top:6px">' +
+      '<div><div class="card-head"><h3>Alokacje podaży</h3><button class="btn small" id="addAlloc">+ Dodaj wiersz</button></div><div id="allocRows"></div></div>' +
+      '<div><div class="card-head"><h3>Harmonogram odblokowań</h3><button class="btn small" id="addUnlock">+ Dodaj wiersz</button></div><div id="unlockRows"></div></div>' +
+    '</div>' +
+    '<div class="row" style="margin-top:14px">' +
+      '<button class="btn primary" id="saveToken">' + (editTokenId ? 'Zapisz zmiany' : 'Dodaj token') + '</button>' +
+      '<button class="btn" id="resetToken">Wyczyść formularz</button>' +
+      '<span class="note" id="editMsg"></span>' +
+    '</div>';
+
+  host.querySelectorAll('.tokenpick button').forEach(b => b.addEventListener('click', () => {
+    const id = b.getAttribute('data-e');
+    editTokenId = id || null;
+    if (!id) editDraft = newDraft(); else editDraft = null;
+    renderEditView();
+  }));
+  host.querySelectorAll('input[data-k]').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const k = inp.getAttribute('data-k'), t = inp.getAttribute('data-t');
+      if (t === 'num'){ const v = parseLocaleNumber(inp.value); editDraft[k] = isFinite(v) ? v : 0; }
+      else editDraft[k] = inp.value;
+    });
+  });
+  renderAllocRows(); renderUnlockRows();
+  el('addAlloc').addEventListener('click', () => { editDraft.allocations.push({ name: '', pct: 0, isInsider: false }); renderAllocRows(); });
+  el('addUnlock').addEventListener('click', () => { editDraft.unlocks.push({ date: todayISO(), tokens: 0, label: '' }); renderUnlockRows(); });
+  el('saveToken').addEventListener('click', saveDraft);
+  el('resetToken').addEventListener('click', () => { editTokenId = null; editDraft = newDraft(); renderEditView(); });
+}
+
+function renderAllocRows(){
+  const host = el('allocRows');
+  if (!host) return;
+  const sum = editDraft.allocations.reduce((s, a) => s + num(a.pct), 0);
+  host.innerHTML = (editDraft.allocations.length ? '' : '<p class="note">Brak alokacji.</p>') +
+    editDraft.allocations.map((a, i) =>
+      '<div class="row" style="margin-bottom:6px; flex-wrap:nowrap">' +
+        '<input type="text" data-a="' + i + '" data-f="name" value="' + esc(a.name) + '" placeholder="Nazwa" style="flex:2">' +
+        '<input type="text" inputmode="decimal" data-a="' + i + '" data-f="pct" value="' + esc(num(a.pct) || '') + '" placeholder="%" style="flex:1">' +
+        '<label class="row" style="gap:4px; font-size:.76rem; white-space:nowrap"><input type="checkbox" data-a="' + i + '" data-f="isInsider" ' + (a.isInsider ? 'checked' : '') + ' style="width:auto">insider</label>' +
+        '<button class="btn small danger" data-del-a="' + i + '">×</button>' +
+      '</div>').join('') +
+    '<p class="note">Suma: ' + pct(sum) + (sum > 100.5 ? ' — więcej niż 100%, sprawdź dane.' : '') + '</p>';
+  host.querySelectorAll('input[data-a]').forEach(inp => inp.addEventListener('input', () => {
+    const i = Number(inp.getAttribute('data-a')), f = inp.getAttribute('data-f');
+    if (f === 'isInsider') editDraft.allocations[i].isInsider = inp.checked;
+    else if (f === 'pct') editDraft.allocations[i].pct = parseLocaleNumber(inp.value) || 0;
+    else editDraft.allocations[i][f] = inp.value;
+  }));
+  host.querySelectorAll('[data-del-a]').forEach(b => b.addEventListener('click', () => {
+    editDraft.allocations.splice(Number(b.getAttribute('data-del-a')), 1); renderAllocRows();
+  }));
+}
+function renderUnlockRows(){
+  const host = el('unlockRows');
+  if (!host) return;
+  host.innerHTML = (editDraft.unlocks.length ? '' : '<p class="note">Brak odblokowań.</p>') +
+    editDraft.unlocks.map((u, i) =>
+      '<div class="row" style="margin-bottom:6px; flex-wrap:nowrap">' +
+        '<input type="date" data-u="' + i + '" data-f="date" value="' + esc(u.date) + '" style="flex:1">' +
+        '<input type="text" inputmode="decimal" data-u="' + i + '" data-f="tokens" value="' + esc(num(u.tokens) || '') + '" placeholder="szt." style="flex:1">' +
+        '<input type="text" data-u="' + i + '" data-f="label" value="' + esc(u.label) + '" placeholder="Opis" style="flex:1">' +
+        '<button class="btn small danger" data-del-u="' + i + '">×</button>' +
+      '</div>').join('');
+  host.querySelectorAll('input[data-u]').forEach(inp => inp.addEventListener('input', () => {
+    const i = Number(inp.getAttribute('data-u')), f = inp.getAttribute('data-f');
+    if (f === 'tokens') editDraft.unlocks[i].tokens = parseLocaleNumber(inp.value) || 0;
+    else editDraft.unlocks[i][f] = inp.value;
+  }));
+  host.querySelectorAll('[data-del-u]').forEach(b => b.addEventListener('click', () => {
+    editDraft.unlocks.splice(Number(b.getAttribute('data-del-u')), 1); renderUnlockRows();
+  }));
+}
+
+function saveDraft(){
+  const msg = el('editMsg');
+  if (!editDraft.symbol.trim()){ msg.textContent = 'Podaj symbol tokena.'; msg.style.color = 'var(--critical)'; return; }
+  if (!(num(editDraft.circulatingSupply) > 0)){ msg.textContent = 'Podaż w obiegu musi być większa od zera.'; msg.style.color = 'var(--critical)'; return; }
+  const t = normalizeToken(editDraft);
+  if (!t.name) t.name = t.symbol;
+  const idx = STATE.tokens.findIndex(x => x.id === t.id);
+  if (idx >= 0){
+    t.priceHistory = STATE.tokens[idx].priceHistory;   // historii nie nadpisujemy formularzem
+    t.historyIsDemo = STATE.tokens[idx].historyIsDemo;
+    STATE.tokens[idx] = t;
+  } else {
+    STATE.tokens.push(t);
+  }
+  editTokenId = t.id; editDraft = null;
+  saveState();
+  msg.textContent = 'Zapisano ' + t.symbol + '.'; msg.style.color = 'var(--good)';
+  renderAll();
+  showView('token'); openToken(t.id);
+}
+/* ============================================================
+   11. PARSER TOKENOMII (wspólny dla PDF, linku i wklejonego tekstu)
+   Heurystyki są zawodne z definicji — dlatego wynik NIGDY nie zapisuje
+   się sam, tylko trafia na ekran „Znaleziono — potwierdź”.
+   ============================================================ */
+const MULTIPLIERS = [
+  [/^(trillion|bln|t)$/i, 1e12],
+  [/^(billion|bn|mld|miliard\w*|b)$/i, 1e9],
+  [/^(million|mln|milion\w*|mm|m)$/i, 1e6],
+  [/^(thousand|tys\.?|k)$/i, 1e3]
+];
+function applyMultiplier(v, word){
+  if (!word) return v;
+  for (let i = 0; i < MULTIPLIERS.length; i++){
+    if (MULTIPLIERS[i][0].test(word.trim())) return v * MULTIPLIERS[i][1];
+  }
+  return v;
+}
+const INSIDER_WORDS = /(team|investor|seed|private|pre-?sale|founder|advisor|contributor|shareholder|strategic|insider|vc|zespół|zespol|założyciel|zalozyciel|inwestor|prywatn)/i;
+function snippetAt(text, index, len){
+  const a = Math.max(0, index - 80), b = Math.min(text.length, index + len + 80);
+  return (a > 0 ? '…' : '') + text.slice(a, b).replace(/\s+/g, ' ').trim() + (b < text.length ? '…' : '');
+}
+function findNumberNear(text, labelRe){
+  const re = new RegExp('(?:' + labelRe.source + ')[^0-9]{0,45}([0-9][0-9\\u00a0 .,\']*[0-9]|[0-9])\\s*(trillion|billion|bn|million|mln|mld|miliard\\w*|milion\\w*|thousand|tys\\.?|[bmkt])?\\b', 'gi');
+  let mm, best = null;
+  while ((mm = re.exec(text)) !== null){
+    const raw = mm[mm.length - 2], word = mm[mm.length - 1];
+    let v = parseLocaleNumber(raw);
+    if (!isFinite(v) || v <= 0) continue;
+    v = applyMultiplier(v, word);
+    if (v < 1000) continue;                      // odsiewamy numery stron i procenty
+    const cand = { value: v, raw: (raw + (word ? ' ' + word : '')), snippet: snippetAt(text, mm.index, mm[0].length) };
+    if (!best) best = cand;
+  }
+  return best;
+}
+function parseTokenomics(text){
+  const out = { fields: [], allocations: [], vestingHints: [], sourceLength: text.length };
+  const push = (key, label, found, hint) => { if (found) out.fields.push({ key: key, label: label, value: found.value, raw: found.raw, snippet: found.snippet, hint: hint, use: true }); };
+
+  push('totalSupply', 'Podaż docelowa / maksymalna',
+    findNumberNear(text, /(?:total|maximum|max\.?|całkowita|maksymalna|docelowa)\s*(?:token\s*)?(?:supply|podaż|podaz)|podaż\s*(?:całkowita|maksymalna|docelowa)/));
+  push('circulatingSupply', 'Podaż w obiegu',
+    findNumberNear(text, /circulating\s*supply|in\s*circulation|podaż\s*w\s*obiegu|podaz\s*w\s*obiegu|circulating/));
+
+  // Inflacja roczna. Najpierw wzorzec jednoznaczny („annual inflation … 3,5%”),
+  // dopiero potem luźny — ten drugi bywa mylony z wierszem tabeli alokacji,
+  // więc trafia na ekran potwierdzenia ODZNACZONY.
+  const inflStrict = /((?:annual|yearly|per\s*year|roczn\w*)[^0-9%]{0,30}(?:inflation|emission|inflacja|emisja)|(?:inflation|emission|inflacja|emisja)[^0-9%]{0,30}(?:rate|per\s*year|annually|rocznie|r\/r|starts?\s*at|wynosi))[^0-9%]{0,30}([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*%/i.exec(text);
+  const inflLoose = inflStrict ? null : /(inflation|emission|inflacja|emisja)[^0-9%]{0,45}([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*%/i.exec(text);
+  const infl = inflStrict || inflLoose;
+  if (infl) out.fields.push({ key: 'annualInflationPct', label: 'Inflacja roczna (%)' + (inflStrict ? '' : ' — dopasowanie niepewne'),
+    value: parseLocaleNumber(infl[2]), raw: infl[2] + '%', snippet: snippetAt(text, infl.index, infl[0].length), use: !!inflStrict });
+
+  /* --- tabele alokacji: „Investors ... 26.8%” albo „26.8% Investors” --- */
+  const lines = text.split(/[\n\r]+/);
+  const seen = {};
+  const reA = /^[\s•\-*·]*([\p{L}][\p{L}\s&\-\/().,'’]{2,44}?)[\s.:\-–—]{0,12}([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*%/u;
+  const reB = /^[\s•\-*·]*([0-9]{1,2}(?:[.,][0-9]{1,2})?)\s*%[\s.:\-–—]{0,12}([\p{L}][\p{L}\s&\-\/().,'’]{2,44})/u;
+  lines.forEach(line => {
+    const l = line.trim();
+    if (l.length < 4 || l.length > 120) return;
+    let name = null, p = NaN;
+    let m = reA.exec(l);
+    if (m){ name = m[1]; p = parseLocaleNumber(m[2]); }
+    else { m = reB.exec(l); if (m){ p = parseLocaleNumber(m[1]); name = m[2]; } }
+    if (!name || !isFinite(p) || p <= 0 || p > 100) return;
+    name = name.replace(/[\s.:\-–—]+$/, '').trim();
+    if (name.length < 3) return;
+    if (/^(total|razem|suma|supply|apy|apr|fee|of|the|and)$/i.test(name)) return;
+    const k = name.toLowerCase();
+    if (seen[k]) return;
+    seen[k] = true;
+    out.allocations.push({ name: name, pct: p, isInsider: INSIDER_WORDS.test(name), snippet: snippetAt(text, text.indexOf(l), l.length), use: true });
+  });
+  if (out.allocations.length > 24) out.allocations = out.allocations.slice(0, 24);
+
+  /* --- vesting: zdania z cliff / linear / months / TGE + daty --- */
+  const sentences = text.split(/(?<=[.!?;])\s+|\n+/);
+  const kw = /(cliff|linear|vesting|unlock|TGE|month|miesi|lock-?up|harmonogram)/i;
+  sentences.forEach(s => {
+    const t2 = s.trim().replace(/\s+/g, ' ');
+    if (t2.length < 12 || t2.length > 240) return;
+    if (kw.test(t2) && /[0-9]/.test(t2) && out.vestingHints.length < 10) out.vestingHints.push(t2);
+  });
+  // najpóźniejsza sensowna data / rok → propozycja końca vestingu
+  const nowY = new Date().getFullYear();
+  let bestDate = null;
+  const reIso = /\b(20\d{2})-(\d{2})-(\d{2})\b/g;
+  let mi;
+  while ((mi = reIso.exec(text)) !== null){ if (!bestDate || mi[0] > bestDate) bestDate = mi[0]; }
+  if (!bestDate){
+    const reYear = /\b(20[2-4]\d)\b/g;
+    let y = null, my;
+    while ((my = reYear.exec(text)) !== null){ const v = Number(my[1]); if (v >= nowY && v <= nowY + 30 && (y === null || v > y)) y = v; }
+    if (y) bestDate = y + '-12-31';
+  }
+  if (bestDate) out.fields.push({ key: 'vestingEndDate', label: 'Koniec vestingu (propozycja)', value: bestDate, raw: bestDate, snippet: 'Najpóźniejsza data/rok znaleziona w tekście — sprawdź, czy naprawdę dotyczy vestingu.', isDate: true, use: false });
+  return out;
+}
+
+/* ---- ekran „Znaleziono — potwierdź” ---- */
+let parseResult = null;
+function renderParseConfirm(){
+  const host = el('parseConfirm');
+  if (!parseResult){ host.innerHTML = ''; return; }
+  const r = parseResult;
+  let h = '<div class="card"><div class="card-head"><div><h2>Znaleziono — potwierdź</h2>' +
+    '<p class="sub">Przeanalizowano ' + fmt(r.sourceLength, 0) + ' znaków tekstu.</p></div></div>' +
+    '<div class="banner warn"><b>Nic nie zostało zapisane.</b> Parsowanie whitepaperów jest zawodne: liczby bywają w tabelach, przypisach albo w innych jednostkach. Zaznacz tylko te pola, które zgadzają się z fragmentem źródłowym, przepisz je do formularza, a potem zapisz token ręcznie.</div>';
+
+  if (!r.fields.length && !r.allocations.length && !r.vestingHints.length){
+    h += '<p class="note">Nie udało się rozpoznać żadnych pól. Wpisz dane ręcznie w zakładce „A. Ręcznie”.</p>';
+  }
+  r.fields.forEach((f, i) => {
+    h += '<div class="confirm-row"><label class="row" style="gap:8px; align-items:flex-start">' +
+      '<input type="checkbox" data-pf="' + i + '" ' + (f.use ? 'checked' : '') + ' style="width:auto; margin-top:4px">' +
+      '<span style="flex:1"><b>' + esc(f.label) + '</b>' +
+      '<input type="' + (f.isDate ? 'date' : 'text') + '" data-pv="' + i + '" value="' + esc(f.isDate ? f.value : (isFinite(f.value) ? NF(0, 10).format(f.value) : f.value)) + '" style="margin-top:4px">' +
+      '<div class="snippet">' + esc(f.snippet) + '</div></span></label></div>';
+  });
+  if (r.allocations.length){
+    h += '<h3 style="margin-top:14px">Alokacje (' + r.allocations.length + ')</h3>';
+    r.allocations.forEach((a, i) => {
+      h += '<div class="confirm-row"><div class="row" style="flex-wrap:nowrap; gap:8px">' +
+        '<input type="checkbox" data-pa="' + i + '" ' + (a.use ? 'checked' : '') + ' style="width:auto">' +
+        '<input type="text" data-pan="' + i + '" value="' + esc(a.name) + '" style="flex:2">' +
+        '<input type="text" data-pap="' + i + '" value="' + esc(NF(0, 2).format(a.pct)) + '" style="flex:1">' +
+        '<label class="row" style="gap:4px; font-size:.76rem; white-space:nowrap"><input type="checkbox" data-pai="' + i + '" ' + (a.isInsider ? 'checked' : '') + ' style="width:auto">insider</label>' +
+        '</div><div class="snippet">' + esc(a.snippet) + '</div></div>';
+    });
+  }
+  if (r.vestingHints.length){
+    h += '<h3 style="margin-top:14px">Fragmenty o vestingu (do przeczytania, nie do wpisania)</h3>' +
+      '<div class="snippet" style="max-height:200px">' + r.vestingHints.map(esc).join('\n\n') + '</div>';
+  }
+  h += '<div class="row" style="margin-top:14px">' +
+    '<button class="btn primary" id="applyParse">Przepisz zaznaczone do formularza</button>' +
+    '<button class="btn" id="dropParse">Odrzuć wynik</button>' +
+    '<span class="note">Po przepisaniu i tak trzeba kliknąć „Zapisz”.</span></div></div>';
+  host.innerHTML = h;
+
+  el('dropParse').addEventListener('click', () => { parseResult = null; renderParseConfirm(); });
+  el('applyParse').addEventListener('click', () => {
+    syncDraft();
+    const host2 = el('parseConfirm');
+    r.fields.forEach((f, i) => {
+      const cb = host2.querySelector('[data-pf="' + i + '"]');
+      if (!cb || !cb.checked) return;
+      const inp = host2.querySelector('[data-pv="' + i + '"]');
+      const val = inp ? inp.value : f.value;
+      editDraft[f.key] = f.isDate ? val : (parseLocaleNumber(val) || 0);
+    });
+    const picked = [];
+    r.allocations.forEach((a, i) => {
+      const cb = host2.querySelector('[data-pa="' + i + '"]');
+      if (!cb || !cb.checked) return;
+      picked.push({
+        name: host2.querySelector('[data-pan="' + i + '"]').value,
+        pct: parseLocaleNumber(host2.querySelector('[data-pap="' + i + '"]').value) || 0,
+        isInsider: host2.querySelector('[data-pai="' + i + '"]').checked
+      });
+    });
+    if (picked.length) editDraft.allocations = picked;
+    if (!editDraft.supplySource) editDraft.supplySource = 'z parsowania dokumentu — zweryfikowane ręcznie ' + todayISO();
+    parseResult = null;
+    editMode = 'manual';
+    renderEditView();
+    const m = el('editMsg');
+    if (m){ m.textContent = 'Przepisano do formularza. Sprawdź pola i kliknij „Zapisz”.'; m.style.color = 'var(--warn)'; }
+  });
+}
+
+/* ---- ładowanie bibliotek z CDN na żądanie ---- */
+const loadedScripts = {};
+function loadScript(url){
+  if (loadedScripts[url]) return loadedScripts[url];
+  loadedScripts[url] = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = url; s.onload = () => res(true);
+    s.onerror = () => rej(new Error('Nie udało się pobrać biblioteki z CDN: ' + url));
+    document.head.appendChild(s);
+  });
+  return loadedScripts[url];
+}
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+function renderPdfPane(){
+  el('editPanePdf').innerHTML =
+    '<p class="sub">Wgraj whitepaper lub dokument tokenomii. Tekst jest wyciągany w przeglądarce (PDF.js), nic nie wychodzi na zewnątrz. Skany bez warstwy tekstowej nie zadziałają.</p>' +
+    '<div class="row" style="margin:10px 0"><input type="file" accept="application/pdf,.pdf" id="pdfFile" style="max-width:340px">' +
+    '<button class="btn primary" id="pdfGo">Wczytaj i przeanalizuj</button><span class="note" id="pdfMsg"></span></div>' +
+    '<details class="datatable"><summary>Pokaż wyciągnięty tekst</summary><textarea id="pdfText" readonly placeholder="tu pojawi się tekst z PDF"></textarea></details>';
+  el('pdfGo').addEventListener('click', doParsePdf);
+}
+function doParsePdf(){
+  const msg = el('pdfMsg'), f = el('pdfFile').files[0];
+  if (!f){ msg.textContent = 'Wybierz plik PDF.'; msg.style.color = 'var(--critical)'; return; }
+  msg.style.color = ''; msg.textContent = 'Ładowanie biblioteki…';
+  loadScript(PDFJS_URL).then(() => {
+    const lib = window.pdfjsLib;
+    if (!lib) throw new Error('PDF.js nie wystartował.');
+    try { lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; } catch (e){ /* fallback: praca w głównym wątku */ }
+    msg.textContent = 'Czytanie pliku…';
+    return f.arrayBuffer();
+  }).then(buf => {
+    return window.pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  }).then(pdf => {
+    const pages = [];
+    let chain = Promise.resolve();
+    for (let i = 1; i <= pdf.numPages; i++){
+      chain = chain.then(() => {
+        msg.textContent = 'Strona ' + i + ' z ' + pdf.numPages + '…';
+        return pdf.getPage(i).then(pg => pg.getTextContent()).then(tc => {
+          pages.push(tc.items.map(it => it.str).join(' '));
+        });
+      });
+    }
+    return chain.then(() => pages.join('\n'));
+  }).then(text => {
+    el('pdfText').value = text;
+    msg.textContent = 'Gotowe — sprawdź wynik poniżej.';
+    parseResult = parseTokenomics(text);
+    renderParseConfirm();
+    el('parseConfirm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }).catch(e => {
+    msg.style.color = 'var(--critical)';
+    msg.textContent = 'Nie udało się: ' + e.message + ' — możesz wkleić tekst w zakładce „C. Z linku / tekstu”.';
+  });
+}
+
+function renderLinkPane(){
+  el('editPaneLink').innerHTML =
+    '<p class="sub">Przeglądarka otwarta z dysku prawie zawsze dostanie od serwera odmowę (CORS). Przycisk poniżej próbuje mimo to — jeśli się nie uda, wklej tekst ręcznie.</p>' +
+    '<div class="row" style="margin:10px 0"><input type="text" id="linkUrl" placeholder="https://docs.projekt.xyz/tokenomics" style="flex:2 1 320px">' +
+    '<button class="btn" id="linkGo">Spróbuj pobrać</button></div>' +
+    '<div id="linkMsg" class="note"></div>' +
+    '<label class="field" style="margin-top:10px"><span class="lab">Tekst tokenomii — wklej i przeanalizuj tym samym parserem co PDF</span>' +
+    '<textarea id="linkText" placeholder="Wklej tu fragment dokumentu: tabelę alokacji, zdania o total supply, circulating supply, cliffie i vestingu."></textarea></label>' +
+    '<button class="btn primary" id="textGo">Analizuj wklejony tekst</button>';
+  el('linkGo').addEventListener('click', () => {
+    const url = el('linkUrl').value.trim(), msg = el('linkMsg');
+    if (!url){ msg.textContent = 'Podaj adres.'; return; }
+    msg.textContent = 'Próbuję pobrać…'; msg.style.color = '';
+    fetch(url, { mode: 'cors' })
+      .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.text(); })
+      .then(txt => {
+        const plain = txt.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
+        el('linkText').value = plain;
+        msg.style.color = 'var(--good)';
+        msg.textContent = 'Udało się pobrać. Sprawdź tekst poniżej i kliknij „Analizuj”.';
+      })
+      .catch(() => {
+        msg.style.color = 'var(--warn)';
+        msg.textContent = 'Przeglądarka nie może pobrać tej strony (CORS). Skopiuj tekst tokenomii i wklej poniżej albo wgraj PDF.';
+      });
+  });
+  el('textGo').addEventListener('click', () => {
+    const txt = el('linkText').value;
+    if (txt.trim().length < 20){ el('linkMsg').textContent = 'Za mało tekstu do analizy.'; return; }
+    parseResult = parseTokenomics(txt);
+    renderParseConfirm();
+    el('parseConfirm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+/* ============================================================
+   12. WIDOK 4 — CODZIENNA AKTUALIZACJA
+   ============================================================ */
+let dailyInputs = {};
+const CG_URL = 'https://api.coingecko.com/api/v3/simple/price';
+
+function lastReadingInfo(){
+  let last = null;
+  STATE.tokens.forEach(t => {
+    const h = t.priceHistory || [];
+    if (h.length){ const d = h[h.length - 1].date; if (!last || d > last) last = d; }
+  });
+  return { date: last, days: last ? daysAgo(last) : null };
+}
+function renderDaily(){
+  const info = lastReadingInfo();
+  const stale = info.days === null || info.days > 3;
+  dailyInputs = {};
+  STATE.tokens.forEach(t => { dailyInputs[t.id] = { price: num(t.price), circ: num(t.circulatingSupply), vol: num(t.volume24h) }; });
+
+  let h = '<div class="card"><div class="card-head"><div><h2>Codzienna aktualizacja</h2>' +
+    '<p class="sub">Jedno kliknięcie dziennie: pobierz ceny, popraw ręcznie co trzeba, zapisz odczyt.</p></div>' +
+    '<div class="banner ' + (stale ? 'bad' : 'info') + '" style="margin:0">' +
+      (info.date ? 'Ostatni odczyt: <b>' + fmtDate(info.date) + '</b> — ' + (info.days === 0 ? 'dzisiaj' : info.days + ' dni temu') : 'Brak zapisanych odczytów') +
+      (stale ? ' ⚠ przerwa dłuższa niż 3 dni psuje sygnał odbudowy' : '') + '</div></div>' +
+    '<div class="row" style="margin-bottom:12px">' +
+      '<button class="btn primary" id="fetchPrices">Pobierz ceny</button>' +
+      '<label class="row" style="gap:5px; font-size:.78rem"><input type="checkbox" id="deriveSupply" checked style="width:auto">wylicz podaż w obiegu z kapitalizacji CoinGecko</label>' +
+      '<span class="note" id="fetchMsg"></span></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Token</th><th>ID CoinGecko</th><th class="num">Cena USD</th>' +
+    '<th class="num">Podaż w obiegu</th><th class="num">Wolumen 24h USD</th><th class="num">Poprzedni odczyt</th></tr></thead><tbody>';
+  STATE.tokens.forEach(t => {
+    const hLast = (t.priceHistory || []).length ? t.priceHistory[t.priceHistory.length - 1] : null;
+    h += '<tr><td><b>' + esc(t.symbol) + '</b></td><td class="sub">' + esc(t.coingeckoId || '—') + '</td>' +
+      '<td class="num"><input type="text" inputmode="decimal" data-d="' + esc(t.id) + '" data-f="price" value="' + esc(NF(0, 10).format(num(t.price))) + '" style="width:130px; text-align:right"></td>' +
+      '<td class="num"><input type="text" inputmode="decimal" data-d="' + esc(t.id) + '" data-f="circ" value="' + esc(NF(0, 0).format(num(t.circulatingSupply))) + '" style="width:150px; text-align:right"></td>' +
+      '<td class="num"><input type="text" inputmode="decimal" data-d="' + esc(t.id) + '" data-f="vol" value="' + esc(NF(0, 0).format(num(t.volume24h))) + '" style="width:130px; text-align:right"></td>' +
+      '<td class="num sub">' + (hLast ? usd(hLast.price) + ' · ' + fmtDate(hLast.date) : '—') + '</td></tr>';
+  });
+  h += '</tbody></table></div>' +
+    '<div class="row" style="margin-top:12px"><button class="btn primary" id="saveReading">Zapisz dzisiejszy odczyt</button>' +
+    '<span class="note" id="saveReadingMsg">Dopisuje wpis z dzisiejszą datą do historii każdego tokena (ponowny zapis tego samego dnia nadpisuje wpis).</span></div></div>';
+
+  el('dailyPane').innerHTML = h;
+  el('dailyPane').querySelectorAll('input[data-d]').forEach(inp => inp.addEventListener('input', () => {
+    const id = inp.getAttribute('data-d'), f = inp.getAttribute('data-f');
+    const v = parseLocaleNumber(inp.value);
+    dailyInputs[id][f] = isFinite(v) ? v : 0;
+  }));
+  el('fetchPrices').addEventListener('click', fetchPrices);
+  el('saveReading').addEventListener('click', saveReading);
+}
+function fetchPrices(){
+  const msg = el('fetchMsg');
+  const ids = STATE.tokens.filter(t => t.coingeckoId).map(t => t.coingeckoId);
+  if (!ids.length){ msg.style.color = 'var(--warn)'; msg.textContent = 'Żaden token nie ma ID CoinGecko — wpisz ceny ręcznie.'; return; }
+  msg.style.color = ''; msg.textContent = 'Pobieram…';
+  const url = CG_URL + '?ids=' + encodeURIComponent(ids.join(',')) + '&vs_currencies=usd&include_24hr_vol=true&include_market_cap=true';
+  fetch(url)
+    .then(res => {
+      if (res.status === 429) throw new Error('CoinGecko chwilowo blokuje zapytania (limit). Spróbuj za minutę albo wpisz ceny ręcznie.');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(data => {
+      const derive = el('deriveSupply').checked;
+      let okCount = 0, missing = [];
+      STATE.tokens.forEach(t => {
+        const d = t.coingeckoId ? data[t.coingeckoId] : null;
+        if (!d || !isFinite(d.usd)){ if (t.coingeckoId) missing.push(t.symbol + ' (' + t.coingeckoId + ')'); return; }
+        okCount++;
+        dailyInputs[t.id].price = d.usd;
+        if (isFinite(d.usd_24h_vol)) dailyInputs[t.id].vol = d.usd_24h_vol;
+        // CoinGecko nie zwraca podaży w obiegu wprost — wynika z kapitalizacji / ceny
+        if (derive && isFinite(d.usd_market_cap) && d.usd > 0) dailyInputs[t.id].circ = d.usd_market_cap / d.usd;
+        const row = el('dailyPane').querySelector('input[data-d="' + t.id + '"][data-f="price"]');
+        if (row) row.value = NF(0, 10).format(dailyInputs[t.id].price);
+        const rc = el('dailyPane').querySelector('input[data-d="' + t.id + '"][data-f="circ"]');
+        if (rc) rc.value = NF(0, 0).format(dailyInputs[t.id].circ);
+        const rv = el('dailyPane').querySelector('input[data-d="' + t.id + '"][data-f="vol"]');
+        if (rv) rv.value = NF(0, 0).format(dailyInputs[t.id].vol);
+      });
+      msg.style.color = okCount ? 'var(--good)' : 'var(--warn)';
+      msg.textContent = 'Pobrano ' + okCount + ' z ' + ids.length + '.' + (missing.length ? ' Brak danych dla: ' + missing.join(', ') + ' — sprawdź ID albo wpisz ręcznie.' : '') + ' Nic jeszcze nie zapisano.';
+    })
+    .catch(e => {
+      msg.style.color = 'var(--critical)';
+      msg.textContent = 'Nie udało się pobrać: ' + e.message + ' Wpisz ceny ręcznie w polach obok.';
+    });
+}
+function saveReading(){
+  const today = todayISO();
+  STATE.tokens.forEach(t => {
+    const d = dailyInputs[t.id];
+    if (!d) return;
+    if (d.price > 0) t.price = d.price;
+    if (d.circ > 0) t.circulatingSupply = d.circ;
+    if (d.vol >= 0) t.volume24h = d.vol;
+    if (num(t.totalSupply) < num(t.circulatingSupply)) t.totalSupply = num(t.circulatingSupply);
+    const h = t.priceHistory || (t.priceHistory = []);
+    const existing = h.filter(x => x.date === today)[0];
+    const entry = { date: today, price: num(t.price), circulatingSupply: num(t.circulatingSupply) };
+    if (existing){ existing.price = entry.price; existing.circulatingSupply = entry.circulatingSupply; }
+    else h.push(entry);
+    h.sort((a, b) => a.date.localeCompare(b.date));
+  });
+  saveState();
+  const m = el('saveReadingMsg');
+  m.textContent = 'Zapisano odczyt z ' + fmtDate(today) + '.';
+  m.style.color = 'var(--good)';
+  renderAll();
+}
+
+/* ============================================================
+   13. WIDOK 5 — PORÓWNANIE
+   ============================================================ */
+let cmpSort = { key: 'risk', dir: 'desc' };
+const CMP_COLS = [
+  { key: 'symbol', label: 'Token', num: false },
+  { key: 'float', label: 'Float', num: true },
+  { key: 'dilution', label: 'Pozostałe rozwodnienie', num: true },
+  { key: 'risk', label: 'Ryzyko', num: true },
+  { key: 'fdvMultiple', label: 'FDV × do progu', num: true },
+  { key: 'absorbDays', label: 'Wchłonięcie odblokowań (dni obrotu)', num: true },
+  { key: 'insiders', label: 'Insiderzy', num: true },
+  { key: 'volToMc', label: 'Obrót / kapitalizacja', num: true },
+  { key: 'position', label: 'Wartość pozycji', num: true },
+  { key: 'pnlPct', label: 'Wynik', num: true }
+];
+function compareRows(){
+  return STATE.tokens.map(t => {
+    const m = metrics(t), rs = riskScore(t);
+    return {
+      id: t.id, symbol: t.symbol, name: t.name,
+      float: m.float * 100, dilution: m.remainingDilution * 100, risk: rs.score, band: rs.band,
+      fdvMultiple: m.fdvMultiple, absorbDays: rs.absorbDays, insiders: rs.insiderPct,
+      volToMc: m.volToMc * 100, position: m.positionValue, positionPln: m.positionValuePln, pnlPct: m.pnlPct
+    };
+  });
+}
+function renderCompare(){
+  const rows = compareRows();
+  rows.sort((a, b) => {
+    const k = cmpSort.key, dir = cmpSort.dir === 'asc' ? 1 : -1;
+    if (k === 'symbol') return dir * String(a.symbol).localeCompare(String(b.symbol));
+    const av = isFinite(a[k]) ? a[k] : -Infinity, bv = isFinite(b[k]) ? b[k] : -Infinity;
+    return dir * (av - bv);
+  });
+  let h = '<div class="card"><div class="card-head"><div><h2>Porównanie struktury podaży</h2>' +
+    '<p class="sub">Który token ma najgorszą strukturę podaży? Kliknij nagłówek, żeby posortować.</p></div></div><div class="table-wrap"><table><thead><tr>' +
+    CMP_COLS.map(c => '<th class="sortable ' + (c.num ? 'num' : '') + '" data-sk="' + c.key + '">' + esc(c.label) +
+      (cmpSort.key === c.key ? (cmpSort.dir === 'asc' ? ' ▲' : ' ▼') : '') + '</th>').join('') +
+    '</tr></thead><tbody>';
+  rows.forEach(r => {
+    h += '<tr class="clickable" data-token="' + esc(r.id) + '">' +
+      '<td><b>' + esc(r.symbol) + '</b></td>' +
+      '<td class="num">' + pct(r.float) + '</td>' +
+      '<td class="num">' + pct(r.dilution) + '</td>' +
+      '<td class="num"><span class="badge ' + r.band.cls + '">' + r.risk + ' · ' + r.band.label + '</span></td>' +
+      '<td class="num">' + mult(r.fdvMultiple) + '</td>' +
+      '<td class="num">' + (isFinite(r.absorbDays) ? fmt(r.absorbDays, 1) : '∞') + '</td>' +
+      '<td class="num">' + pct(r.insiders) + '</td>' +
+      '<td class="num">' + pct(r.volToMc, 2) + '</td>' +
+      '<td class="num">' + pln(r.positionPln) + '</td>' +
+      '<td class="num ' + (r.pnlPct >= 0 ? 'pos' : 'neg') + '">' + pctSigned(r.pnlPct) + '</td></tr>';
+  });
+  h += '</tbody></table></div><p class="note" style="margin-top:10px">„FDV × do progu” mówi, ile razy musi urosnąć wycena sieci, żeby wyjść na zero. „Wchłonięcie odblokowań” to liczba dni pełnego obrotu potrzebna, żeby rynek przyjął podaż z najbliższych 90 dni.</p></div>';
+  el('comparePane').innerHTML = h;
+  el('comparePane').querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => {
+    const k = th.getAttribute('data-sk');
+    if (cmpSort.key === k) cmpSort.dir = cmpSort.dir === 'asc' ? 'desc' : 'asc';
+    else { cmpSort.key = k; cmpSort.dir = k === 'symbol' ? 'asc' : 'desc'; }
+    renderCompare();
+  }));
+  el('comparePane').querySelectorAll('tr.clickable').forEach(tr => tr.addEventListener('click', () => openToken(tr.getAttribute('data-token'))));
+}
+/* ============================================================
+   14. DANE I USTAWIENIA — eksport / import / kurs / czyszczenie
+   ============================================================ */
+function renderData(){
+  const st = STATE.settings;
+  const info = lastReadingInfo();
+  let h = '<div class="card"><h2>Ustawienia</h2><div class="grid g3">' +
+    '<label class="field"><span class="lab">Kurs USD/PLN</span><input type="text" inputmode="decimal" id="setUsdPln" value="' + esc(NF(0, 6).format(num(st.usdPln))) + '"></label>' +
+    '<label class="field"><span class="lab">Horyzont inwestycyjny (lata)</span><input type="text" inputmode="decimal" id="setHorizon" value="' + esc(NF(0, 1).format(num(st.horizonYears))) + '"></label>' +
+    '<label class="field"><span class="lab">Domyślny wzrost wyceny sieci r/r (%)</span><input type="text" inputmode="decimal" id="setGrowth" value="' + esc(NF(0, 1).format(num(st.networkGrowthPct))) + '"></label>' +
+    '</div><button class="btn primary" id="saveSettings">Zapisz ustawienia</button> <span class="note" id="setMsg"></span></div>';
+
+  h += '<div class="card"><h2>Twoje dane</h2>' +
+    '<p class="note">Stan trzymany jest w pamięci przeglądarki. Autozapis do localStorage jest ' +
+    (storageOk ? '<b>aktywny</b>' : '<b>niedostępny</b> (przeglądarka go zablokowała — eksportuj JSON ręcznie)') + '. ' +
+    'Ostatni zapis: <b>' + fmtDateTime(STATE.meta.savedAt) + '</b>. Ostatni odczyt rynkowy: <b>' + (info.date ? fmtDate(info.date) : 'brak') + '</b>.</p>' +
+    '<div class="row" style="margin:12px 0">' +
+      '<button class="btn primary" id="exportJson">Pobierz dane (JSON)</button>' +
+      '<input type="file" accept="application/json,.json" id="importFile" style="max-width:250px">' +
+      '<button class="btn" id="importJson">Wczytaj dane</button>' +
+      '<button class="btn" id="saveNow">Zapisz teraz</button>' +
+    '</div>' +
+    '<details class="datatable"><summary>Albo skopiuj / wklej JSON ręcznie</summary>' +
+    '<textarea id="jsonBox" spellcheck="false"></textarea>' +
+    '<div class="row" style="margin-top:6px"><button class="btn small" id="fillJson">Wypełnij aktualnym stanem</button>' +
+    '<button class="btn small" id="loadJsonText">Wczytaj z pola</button></div></details>' +
+    '<p class="note" id="dataMsg" style="margin-top:10px"></p></div>';
+
+  h += '<div class="card"><h2>Źródła danych o podaży</h2>' +
+    '<p class="sub">Agregatory podają różne podaże. Tu widać, skąd wzięła się liczba i kiedy była sprawdzana.</p><div class="table-wrap"><table>' +
+    '<thead><tr><th>Token</th><th class="num">Podaż w obiegu</th><th class="num">Podaż docelowa</th><th>Źródło</th><th>Zaktualizowano</th><th class="num">Historia</th></tr></thead><tbody>';
+  STATE.tokens.forEach(t => {
+    const age = t.supplyUpdatedAt ? daysAgo(t.supplyUpdatedAt) : null;
+    h += '<tr><td><b>' + esc(t.symbol) + '</b></td><td class="num">' + tokAmount(num(t.circulatingSupply)) + '</td>' +
+      '<td class="num">' + tokAmount(num(t.totalSupply)) + '</td>' +
+      '<td style="white-space:normal; max-width:38ch" class="sub">' + esc(t.supplySource || '— brak źródła —') + '</td>' +
+      '<td>' + (t.supplyUpdatedAt ? fmtDate(t.supplyUpdatedAt) + (age > 60 ? ' <span class="badge warn">' + age + ' dni</span>' : '') : '—') + '</td>' +
+      '<td class="num">' + (t.priceHistory || []).length + (t.historyIsDemo ? ' <span class="chip">demo</span>' : '') + '</td></tr>';
+  });
+  h += '</tbody></table></div></div>';
+
+  h += '<div class="card"><h2>Operacje niszczące</h2><div class="row">' +
+    '<button class="btn danger" id="dropDemo">Usuń historię demonstracyjną</button>' +
+    '<button class="btn danger" id="resetAll">Przywróć dane startowe</button>' +
+    '<button class="btn danger" id="wipeAll">Wyczyść wszystko</button></div>' +
+    '<p class="note" style="margin-top:8px">Każda z tych operacji jest nieodwracalna. Najpierw pobierz JSON.</p></div>';
+
+  el('dataPane').innerHTML = h;
+
+  el('saveSettings').addEventListener('click', () => {
+    STATE.settings.usdPln = parseLocaleNumber(el('setUsdPln').value) || 3.7137;
+    STATE.settings.horizonYears = parseLocaleNumber(el('setHorizon').value) || 10;
+    STATE.settings.networkGrowthPct = parseLocaleNumber(el('setGrowth').value) || 0;
+    projGrowth = null;
+    saveState();
+    el('setMsg').textContent = 'Zapisano.'; el('setMsg').style.color = 'var(--good)';
+    renderAll();
+  });
+  el('exportJson').addEventListener('click', exportJson);
+  el('importJson').addEventListener('click', importJsonFile);
+  el('saveNow').addEventListener('click', () => { saveState(); renderData(); });
+  el('fillJson').addEventListener('click', () => { el('jsonBox').value = JSON.stringify(STATE, null, 2); });
+  el('loadJsonText').addEventListener('click', () => applyImported(el('jsonBox').value));
+  el('dropDemo').addEventListener('click', () => {
+    if (!confirm('Usunąć wygenerowaną historię demonstracyjną ze wszystkich tokenów?')) return;
+    STATE.tokens.forEach(t => { if (t.historyIsDemo){ t.priceHistory = []; t.historyIsDemo = false; } });
+    saveState(); renderAll();
+  });
+  el('resetAll').addEventListener('click', () => {
+    if (!confirm('Przywrócić dane startowe? Twoje zmiany i historia zostaną utracone.')) return;
+    STATE = defaultState(); currentTokenId = null; editTokenId = null; editDraft = null;
+    saveState(); renderAll();
+  });
+  el('wipeAll').addEventListener('click', () => {
+    if (!confirm('Usunąć wszystkie tokeny i historię? Zostanie pusta aplikacja.')) return;
+    STATE.tokens = []; currentTokenId = null;
+    saveState(); renderAll();
+  });
+}
+function exportJson(){
+  const data = JSON.stringify(STATE, null, 2);
+  const msg = el('dataMsg');
+  try {
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'fdv-tracker-' + todayISO() + '.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+    msg.style.color = 'var(--good)';
+    msg.textContent = 'Pobrano plik fdv-tracker-' + todayISO() + '.json';
+  } catch (e){
+    el('jsonBox').value = data;
+    msg.style.color = 'var(--warn)';
+    msg.textContent = 'Pobieranie zablokowane przez przeglądarkę — JSON jest w polu tekstowym poniżej, skopiuj go ręcznie.';
+  }
+}
+function importJsonFile(){
+  const f = el('importFile').files[0], msg = el('dataMsg');
+  if (!f){ msg.style.color = 'var(--critical)'; msg.textContent = 'Wybierz plik JSON.'; return; }
+  const fr = new FileReader();
+  fr.onload = () => applyImported(String(fr.result));
+  fr.onerror = () => { msg.style.color = 'var(--critical)'; msg.textContent = 'Nie udało się odczytać pliku.'; };
+  fr.readAsText(f);
+}
+function applyImported(text){
+  const msg = el('dataMsg');
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch (e){ msg.style.color = 'var(--critical)'; msg.textContent = 'To nie jest poprawny JSON: ' + e.message; return; }
+  if (!parsed || !Array.isArray(parsed.tokens)){ msg.style.color = 'var(--critical)'; msg.textContent = 'W pliku nie ma listy tokenów.'; return; }
+  if (!confirm('Zastąpić bieżący stan danymi z pliku? ' + parsed.tokens.length + ' tokenów.')) return;
+  STATE = normalizeState(parsed);
+  currentTokenId = null; editTokenId = null; editDraft = null;
+  saveState(); renderAll();
+  const m2 = el('dataMsg');
+  if (m2){ m2.style.color = 'var(--good)'; m2.textContent = 'Wczytano ' + STATE.tokens.length + ' tokenów.'; }
+}
+
+/* ============================================================
+   15. TESTY — kryteria akceptacji liczone na żywo
+   ============================================================ */
+function approx(a, b, tolPct){ return isFinite(a) && isFinite(b) && b !== 0 && Math.abs(a / b - 1) <= tolPct; }
+function runTests(){
+  const res = [];
+  const add = (name, pass, expected, actual, note) => res.push({ name: name, pass: pass, expected: expected, actual: actual, note: note || '' });
+  const peaq = STATE.tokens.filter(t => t.symbol === 'PEAQ')[0];
+  const eth = STATE.tokens.filter(t => t.symbol === 'ETH')[0];
+  const gmac = STATE.tokens.filter(t => t.symbol === 'GMAC')[0];
+  const rate = num(STATE.settings.usdPln);
+
+  // 1. tożsamość positionValue = supplyShare × fdv
+  let identityOk = true, worst = 0;
+  STATE.tokens.forEach(t => {
+    const m = metrics(t);
+    if (m.positionValue > 0){
+      const err = Math.abs(m.positionFromFdv / m.positionValue - 1);
+      worst = Math.max(worst, err);
+      if (err > 1e-9) identityOk = false;
+    }
+  });
+  add('Tożsamość: wartość pozycji = udział w podaży × FDV', identityOk, 'błąd < 1e-9', 'błąd ' + worst.toExponential(2),
+    'Sprawdzane dla każdego tokena w portfelu.');
+
+  // 2. PEAQ: dwie różne liczby — cena × i kapitał ×
+  if (peaq){
+    const m = metrics(peaq);
+    add('PEAQ pokazuje dwie różne krotności', Math.abs(m.marketCapMultiple - m.priceMultiple) > 0.01 && approx(m.priceMultiple, 5.4, 0.02) && approx(m.marketCapMultiple, 12.6, 0.02),
+      'cena ×5,4 · kapitał ×12,6', 'cena ' + mult(m.priceMultiple) + ' · kapitał ' + mult(m.marketCapMultiple),
+      'Krotności zależą od bieżącej ceny — po odświeżeniu ceny wynik testu się zmieni, to normalne.');
+
+    // 3. trzy scenariusze ATH
+    const v1 = m.value_athPrice * rate, v2 = m.value_athMC_now * rate, v3 = m.value_athMC_full * rate;
+    const distinct = Math.abs(v1 - v2) > 1 && Math.abs(v2 - v3) > 1;
+    add('PEAQ: trzy scenariusze ATH dają trzy różne liczby', distinct, 'trzy różne wartości', pln(v1) + ' · ' + pln(v2) + ' · ' + pln(v3), '');
+    add('PEAQ scenariusz 1 (cena wraca do ATH)', approx(v1, 390300, 0.01), '≈ 390 300 zł', pln(v1), '');
+    const impliedCirc = v2 > 0 ? num(peaq.holdings) * num(peaq.athMarketCap) * rate / 125100 : NaN;
+    add('PEAQ scenariusz 2 (wycena ATH, dzisiejsza podaż)', approx(v2, 125100, 0.01), '≈ 125 100 zł', pln(v2),
+      approx(v2, 125100, 0.01) ? '' : 'ROZBIEŻNOŚĆ W SPECYFIKACJI: wartość 125 100 zł wynika z podaży w obiegu ' + tokAmount(impliedCirc) +
+      ', a w danych startowych podano ' + tokAmount(num(peaq.circulatingSupply)) + '. Wzór athMarketCap / circulatingSupply jest policzony dokładnie tak, jak w specyfikacji — różni się dana wejściowa, nie formuła. Zmień podaż w obiegu na ' + tokAmount(impliedCirc) + ', a test przejdzie.');
+    add('PEAQ scenariusz 3 (wycena ATH, pełna podaż)', approx(v3, 42800, 0.01), '≈ 42 800 zł', pln(v3), '');
+
+    // 7. suwak scenariuszowy przy 1 mld $
+    const sc = scenario(peaq, 1e9);
+    add('PEAQ: suwak na 1 mld $', approx(sc.impliedPrice, 0.1764, 0.005) && approx(sc.impliedPositionPln, 91800, 0.01),
+      '$0,1764 · ≈ 91 800 zł', usd(sc.impliedPrice) + ' · ' + pln(sc.impliedPositionPln), '');
+  }
+
+  // 4. GMAC — scoring skrajny + flagi płynnościowe
+  if (gmac){
+    const rs = riskScore(gmac), fl = warningFlags(gmac);
+    const liq = fl.filter(f => /bez rynku|poślizg|float/i.test(f.text)).length;
+    add('GMAC: scoring w paśmie „skrajne”', rs.band.key === 'extreme', '76–100', rs.score + ' (' + rs.band.label + ')', '');
+    add('GMAC: co najmniej dwie flagi płynnościowe', liq >= 2, '≥ 2', String(liq), fl.map(f => f.text).join(' | '));
+  }
+
+  // 5. ETH — zerowy komponent rozwodnienia
+  if (eth){
+    const m = metrics(eth), rs = riskScore(eth);
+    const dil = rs.components.filter(c => c.key === 'dilution')[0];
+    add('ETH: zerowy komponent rozwodnienia, float 100%', dil.points === 0 && approx(m.float, 1, 0.0001),
+      '0 pkt · float 100%', dil.points + ' pkt · float ' + pct(m.float * 100), '');
+  }
+
+  // 6. eksport → import odtwarza stan
+  try {
+    const dump = JSON.stringify(STATE);
+    const back = normalizeState(JSON.parse(dump));
+    const sameTokens = back.tokens.length === STATE.tokens.length;
+    const sameHist = back.tokens.every((t, i) => (t.priceHistory || []).length === (STATE.tokens[i].priceHistory || []).length);
+    const sameValue = Math.abs(back.tokens.reduce((s, t) => s + metrics(t, back.settings).positionValue, 0) - portfolioTotals().value) < 1e-6;
+    add('Eksport → import odtwarza pełny stan', sameTokens && sameHist && sameValue,
+      'tokeny, historia i wartość bez zmian',
+      back.tokens.length + ' tokenów · historia ' + (sameHist ? 'zgodna' : 'różna') + ' · wartość ' + (sameValue ? 'zgodna' : 'różna'), '');
+  } catch (e){ add('Eksport → import odtwarza pełny stan', false, 'brak błędu', e.message, ''); }
+
+  // 8. sygnał odbudowy na danych syntetycznych
+  const synth = (label, pricePath, circPath) => normalizeToken({
+    symbol: label, circulatingSupply: circPath[2], totalSupply: 1e9, holdings: 1, avgEntryPrice: 1, price: pricePath[2],
+    priceHistory: [
+      { date: isoOf(addDays(new Date(), -95)), price: pricePath[0], circulatingSupply: circPath[0] },
+      { date: isoOf(addDays(new Date(), -31)), price: pricePath[1], circulatingSupply: circPath[1] },
+      { date: todayISO(), price: pricePath[2], circulatingSupply: circPath[2] }
+    ]
+  });
+  const flat = synth('FLAT', [0.010, 0.010, 0.010], [4e8, 4.5e8, 5e8]);   // cena stoi, podaż rośnie
+  const up = synth('UP', [0.008, 0.009, 0.012], [5e8, 5e8, 5e8]);          // realny wzrost
+  const down = synth('DOWN', [0.020, 0.015, 0.010], [5e8, 5e8, 5e8]);      // spadek
+  add('Sygnał: cena stoi, podaż rośnie → POZORNY WZROST', recovery(flat).status === 'illusory', 'illusory', recovery(flat).status,
+    'Kapitalizacja +' + pct((recovery(flat).mcChange30d || 0) * 100) + ' przy zmianie FDV ' + pctSigned((recovery(flat).fdvChange30d || 0) * 100) + '.');
+  add('Sygnał: rosnące FDV → REALNA ODBUDOWA', recovery(up).status === 'real', 'real', recovery(up).status, '');
+  add('Sygnał: spadające FDV bez odblokowań → BRAK ODBUDOWY', recovery(down).status === 'none', 'none', recovery(down).status, '');
+
+  // 9. środowisko
+  add('Autozapis do localStorage', storageOk, 'dostępny', storageOk ? 'dostępny' : 'zablokowany — używaj eksportu JSON', '');
+  add('Chart.js z CDN', chartAvailable(), 'załadowany', chartAvailable() ? 'załadowany' : 'brak — aplikacja działa, wykresy zastąpione tabelami', '');
+  return res;
+}
+function renderTests(){
+  const res = runTests();
+  const passed = res.filter(r => r.pass).length;
+  let h = '<div class="card"><div class="card-head"><div><h2>Testy kryteriów akceptacji</h2>' +
+    '<p class="sub">Liczone na żywo z bieżących danych. Po zmianie ceny albo podaży wyniki testów opartych na konkretnych liczbach się zmienią — to nie jest błąd.</p></div>' +
+    '<div><span class="badge ' + (passed === res.length ? 'good' : 'warn') + '" style="font-size:.9rem; padding:6px 12px">' + passed + ' / ' + res.length + ' przeszło</span></div></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Test</th><th>Oczekiwane</th><th>Wynik</th><th>Status</th></tr></thead><tbody>';
+  res.forEach(r => {
+    h += '<tr><td style="white-space:normal; max-width:36ch"><b>' + esc(r.name) + '</b>' +
+      (r.note ? '<div class="sub" style="white-space:normal">' + esc(r.note) + '</div>' : '') + '</td>' +
+      '<td class="sub">' + esc(r.expected) + '</td><td>' + esc(r.actual) + '</td>' +
+      '<td><span class="badge ' + (r.pass ? 'good' : 'critical') + '">' + (r.pass ? '✓ ok' : '✗ nie') + '</span></td></tr>';
+  });
+  h += '</tbody></table></div><button class="btn" id="rerunTests" style="margin-top:12px">Uruchom ponownie</button></div>';
+  el('testsPane').innerHTML = h;
+  el('rerunTests').addEventListener('click', renderTests);
+}
+/* ============================================================
+   16. NAWIGACJA, BANERY, START
+   ============================================================ */
+let currentView = 'dashboard';
+const VIEWS = ['dashboard', 'token', 'edit', 'daily', 'compare', 'data', 'tests'];
+
+function showView(name){
+  if (VIEWS.indexOf(name) < 0) name = 'dashboard';
+  currentView = name;
+  VIEWS.forEach(v => {
+    const sec = el('view-' + v);
+    if (sec) sec.classList.toggle('hidden', v !== name);
+  });
+  el('nav').querySelectorAll('button').forEach(b => {
+    if (b.getAttribute('data-view') === name) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+  renderCurrentView();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function renderCurrentView(){
+  switch (currentView){
+    case 'dashboard': renderDashboard(); break;
+    case 'token': renderTokenView(); break;
+    case 'edit': renderEditView(); break;
+    case 'daily': renderDaily(); break;
+    case 'compare': renderCompare(); break;
+    case 'data': renderData(); break;
+    case 'tests': renderTests(); break;
+  }
+}
+function renderAll(){
+  renderBanners();
+  updateSaveInfo();
+  renderCurrentView();
+}
+
+let bannerDismissed = {};
+function renderBanners(){
+  const out = [];
+  if (!storageOk){
+    out.push('<div class="banner bad"><b>Autozapis niedostępny.</b> Przeglądarka zablokowała localStorage (tryb prywatny albo ustawienia dla plików lokalnych). Aplikacja działa normalnie, ale po zamknięciu karty dane przepadną — zapisuj je przyciskiem <b>„Pobierz dane (JSON)”</b> w zakładce „Dane i ustawienia”.</div>');
+  }
+  const info = lastReadingInfo();
+  if (info.days !== null && info.days > 3 && !bannerDismissed.stale){
+    out.push('<div class="banner warn">Ostatni odczyt rynkowy sprzed <b>' + info.days + ' dni</b> (' + fmtDate(info.date) + '). Sygnał odbudowy liczy się z historii — przy przerwach dłuższych niż kilka dni robi się nieostry. <button class="btn small" data-dismiss="stale">Ukryj</button></div>');
+  }
+  const demo = STATE.tokens.filter(t => t.historyIsDemo).length;
+  if (demo && !bannerDismissed.demo){
+    out.push('<div class="banner info">Historia ' + demo + ' tokenów pochodzi z <b>danych startowych wygenerowanych demonstracyjnie</b> — pokazuje, jak działa sygnał odbudowy, ale to nie są prawdziwe notowania. Ceny, podaże i harmonogramy odblokowań w danych startowych też wymagają weryfikacji. <button class="btn small" data-dismiss="demo">Ukryj</button></div>');
+  }
+  el('bannerArea').innerHTML = out.join('');
+  el('bannerArea').querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', () => {
+    bannerDismissed[b.getAttribute('data-dismiss')] = true;
+    renderBanners();
+  }));
+}
+
+function applyTheme(theme){
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+}
+
+function init(){
+  STATE = loadState();
+  applyTheme(STATE.settings.theme);
+
+  el('nav').querySelectorAll('button').forEach(b => b.addEventListener('click', () => showView(b.getAttribute('data-view'))));
+  el('themeBtn').addEventListener('click', () => {
+    STATE.settings.theme = STATE.settings.theme === 'light' ? 'dark' : 'light';
+    applyTheme(STATE.settings.theme);
+    saveState();
+    renderCurrentView();     // wykresy muszą przerysować się w nowych kolorach
+  });
+  el('fdvChartMode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    fdvChartMode = b.getAttribute('data-mode');
+    el('fdvChartMode').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    renderFdvChart();
+  }));
+  el('fdvLogScale').addEventListener('change', renderFdvChart);
+  el('editMode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    editMode = b.getAttribute('data-m');
+    renderEditView();
+  }));
+  window.addEventListener('resize', () => { /* Chart.js sam się przeskalowuje */ });
+
+  if (STATE.tokens.length) currentTokenId = STATE.tokens[0].id;
+  saveState(true);           // odnotuj otwarcie; przy zablokowanym storage po cichu przechodzi dalej
+  renderAll();
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+
+</script>
+</body>
+</html>
