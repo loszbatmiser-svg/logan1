@@ -312,6 +312,34 @@
           Suma zasad nie dochodzi do 100%, bo resztę miejsc zajmuje kwasowość. Cele pośrednie (pole
           „Docelowe nasycenie Ca” w punkcie 2) są interpolowane między wpisanymi wierszami.
         </p>
+
+        <h3 class="collapsible-heading" style="margin-top:22px;" onclick="toggleCollapse('whatif_body', this)">
+          <span class="caret">▾</span> Sprawdź parę: pH + wapń → nasycenie
+        </h3>
+        <div class="collapsible-body" id="whatif_body">
+          <p class="note">
+            Tu nic nie jest wybierane — <strong>podajesz pH i wapń, reszta jest policzona</strong>, dokładnie jak
+            w arkuszu Logan Labs. Mg, K i Na brane są z testu glebowego (punkt 1) i nie zmieniają się przy wapnowaniu.
+            Zmiana wartości tutaj nie rusza danych z testu ani dawki wapnowania.
+          </p>
+          <div class="input-group">
+            <div>
+              <label>pH</label>
+              <input type="number" id="whatif_ph" value="6.8" step="0.05" min="4" max="7.5" oninput="renderWhatIf()">
+            </div>
+            <div>
+              <label>Wapń (ppm)</label>
+              <input type="number" id="whatif_ca" value="1850" step="10" min="0" oninput="renderWhatIf()">
+            </div>
+            <div>
+              <label>Albo: zadaj nasycenie Ca (%)</label>
+              <input type="number" id="whatif_sat" value="" step="0.5" min="1" max="95"
+                placeholder="wpisz, by policzyć Ca" oninput="whatIfFromSat()">
+              <div class="explain">Wpisanie tu wartości przeliczy potrzebny wapń przy powyższym pH.</div>
+            </div>
+          </div>
+          <div id="whatif_result"></div>
+        </div>
       </div>
 
       <div class="section">
@@ -2371,6 +2399,7 @@
 
       window._cac = { tcec, meqCa, meqMg, meqK, meqNa, satCa, satMg, satK, satNa, ca, mg, k, na, other, exh, ph };
       updateDynTable();
+      renderWhatIf();
       calculateLime();
     }
     window.calculateCAC = calculateCAC;
@@ -2400,6 +2429,57 @@
         document.getElementById('dyn_tcec_' + i).innerText = sc.reachable ? sc.tcec.toFixed(2) : 'nieosiągalne';
       });
     }
+
+    // Przypadek w pełni wyznaczony: podane pH i podane kationy → TCEC i nasycenia są policzone,
+    // bez żadnego wyboru. Mg, K i Na bierzemy z testu glebowego (wapnowanie ich nie zmienia).
+    function renderWhatIf() {
+      const box = document.getElementById('whatif_result');
+      if (!box || !window._cac) return;
+      const d = window._cac;
+      const ph = Math.min(7.5, Math.max(4, parseFloat(document.getElementById('whatif_ph').value) || 6.8));
+      const ca = Math.max(0, parseFloat(document.getElementById('whatif_ca').value) || 0);
+
+      const meqCa = ca / 200;
+      const sumMeq = meqCa + d.meqMg + d.meqK + d.meqNa;
+      const o = getOtherBases(ph), e = getExH(ph);
+      const share = (100 - o - e) / 100;
+      const tcec = share > 0 ? sumMeq / share : sumMeq;
+      const sat = m => tcec > 0 ? (m / tcec) * 100 : 0;
+      const satCa = sat(meqCa), satMg = sat(d.meqMg), satK = sat(d.meqK), satNa = sat(d.meqNa);
+
+      box.innerHTML = '<table><tbody>'
+        + `<tr><td>Suma meq zasad</td><td><span class="badge">${sumMeq.toFixed(4)}</span> `
+        + `<span class="explain">Ca ${meqCa.toFixed(3)} + Mg ${d.meqMg.toFixed(3)} + K ${d.meqK.toFixed(3)} + Na ${d.meqNa.toFixed(3)}</span></td></tr>`
+        + `<tr><td>Other Bases / Ex H przy pH ${ph.toFixed(2)}</td><td><span class="badge">${o.toFixed(1)}</span> % / <span class="badge">${e.toFixed(1)}</span> %</td></tr>`
+        + `<tr><td>Zasady zajmują</td><td><span class="badge">${(share * 100).toFixed(1)}</span> % miejsc</td></tr>`
+        + `<tr><td><strong>TCEC = ${sumMeq.toFixed(4)} ÷ ${share.toFixed(4)}</strong></td><td class="big">${tcec.toFixed(2)}</td></tr>`
+        + `<tr class="el-cation"><td>Nasycenie Ca</td><td class="big">${satCa.toFixed(2)} %</td></tr>`
+        + `<tr class="el-cation"><td>Nasycenie Mg</td><td><span class="badge">${satMg.toFixed(2)}</span> %</td></tr>`
+        + `<tr class="el-cation"><td>Nasycenie K</td><td><span class="badge">${satK.toFixed(2)}</span> %</td></tr>`
+        + `<tr class="el-cation"><td>Nasycenie Na</td><td><span class="badge">${satNa.toFixed(2)}</span> %</td></tr>`
+        + `<tr><td><strong>Suma nasyceń</strong></td><td><span class="badge highlight">${(satCa + satMg + satK + satNa).toFixed(2)}</span> % `
+        + `<span class="explain">= 100 − ${o.toFixed(1)} − ${e.toFixed(1)}</span></td></tr>`
+        + '</tbody></table>';
+    }
+    window.renderWhatIf = renderWhatIf;
+
+    // Kierunek odwrotny, też jednoznaczny: przy zadanym pH nasycenie Ca wyznacza ilość wapnia,
+    // bo meqCa = s × (meqMg+meqK+meqNa) / (udział zasad − s).
+    function whatIfFromSat() {
+      if (!window._cac) return;
+      const d = window._cac;
+      const raw = document.getElementById('whatif_sat').value;
+      if (raw === '') { renderWhatIf(); return; }
+      const s = (parseFloat(raw) || 0) / 100;
+      const ph = Math.min(7.5, Math.max(4, parseFloat(document.getElementById('whatif_ph').value) || 6.8));
+      const share = (100 - getOtherBases(ph) - getExH(ph)) / 100;
+      const meqOthers = d.meqMg + d.meqK + d.meqNa;
+      if (s > 0 && s < share) {
+        document.getElementById('whatif_ca').value = ((s * meqOthers / (share - s)) * 200).toFixed(0);
+      }
+      renderWhatIf();
+    }
+    window.whatIfFromSat = whatIfFromSat;
 
     function calculateLime() {
       if (!window._cac) return;
