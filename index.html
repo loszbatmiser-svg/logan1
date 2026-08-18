@@ -111,6 +111,13 @@
         <div class="input-group">
           <div><label>Siarczan wapnia / Gips (g)</label><input type="number" id="dose_gips" value="0.81" step="0.01" oninput="calculatePPM()"></div>
           <div><label>Siarczan potasu (g)</label><input type="number" id="dose_sk" value="0" step="0.01" oninput="calculatePPM()"></div>
+          <div>
+            <label>Siarczan magnezu / sól gorzka (g)</label>
+            <input type="number" id="dose_ms" value="0" step="0.01" oninput="calculatePPM()">
+            <div class="explain">Przyjęto siedmiowodny MgSO₄·7H₂O (Mg 9,86%, S 13,01%)</div>
+          </div>
+        </div>
+        <div class="input-group">
           <div><label>Kompost Logan Labs Comp (ml)</label><input type="number" id="dose_kompost" value="100" step="1" oninput="calculatePPM()"></div>
         </div>
       </div>
@@ -1930,6 +1937,7 @@
       const d_sorbCa = parseFloat(document.getElementById('dose_agrosorb_ca').value) || 0;
       const d_gips = parseFloat(document.getElementById('dose_gips').value) || 0;
       const d_sk = parseFloat(document.getElementById('dose_sk').value) || 0;
+      const d_ms = parseFloat(document.getElementById('dose_ms').value) || 0;
       const d_kompost = parseFloat(document.getElementById('dose_kompost').value) || 0;
 
       const kg_komp = (d_kompost * 0.425) / 1000;
@@ -1938,6 +1946,7 @@
       const mg_sorbCa = d_sorbCa * 1200;
       const mg_gips = d_gips * 1000;
       const mg_sk = d_sk * 1000;
+      const mg_msulf = d_ms * 1000; // miligramy siarczanu magnezu (MgSO₄·7H₂O)
 
       const n_total = (mg_bloom * 0.02) + (mg_sorbK * 0.01) + (mg_sorbCa * 0.05) + (612.9 * kg_komp);
       const p_base = mg_bloom * 0.07 * 0.4364;
@@ -1949,9 +1958,10 @@
       const ca_base = (mg_sorbCa * 0.08 * 0.7147) + (mg_gips * 0.2328);
       const ca_min = ca_base + 805.0 * kg_komp;
       const ca_max = ca_base + 3736.0 * kg_komp;
-      const s_total = (mg_gips * 0.1862) + (mg_sk * 0.1800) + 56.0 * kg_komp;
-      const mg_min = 186.0 * kg_komp;
-      const mg_max = 464.0 * kg_komp;
+      const s_total = (mg_gips * 0.1862) + (mg_sk * 0.1800) + (mg_msulf * 0.1301) + 56.0 * kg_komp;
+      const mg_base = mg_msulf * 0.0986;
+      const mg_min = mg_base + 186.0 * kg_komp;
+      const mg_max = mg_base + 464.0 * kg_komp;
 
       document.getElementById('ppm_n_min').innerText = (n_total / V).toFixed(2);
       document.getElementById('ppm_n_max').innerText = (n_total / V).toFixed(2);
