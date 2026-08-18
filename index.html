@@ -1777,12 +1777,11 @@
       if (state) {
         html += `<p class="note">pH liczone jest z sumy nasycenia zasadami (${state.totalBaseSat.toFixed(1)}%) — `
           + `„Start” to pH po wapnowaniu z zakładki CAC, „Razem” uwzględnia już wszystkie odżywki z listy. `
-          + (state.saturated
-            ? `<strong>Uwaga:</strong> ${state.surplusCa.toFixed(0)} ppm z ${state.totalCa.toFixed(0)} ppm wapnia nie mieści się `
-              + `już na kompleksie sorpcyjnym — kolumna „Razem” pokazuje wapń zmierzony w glebie, ale nasycenie obok liczy `
-              + `tylko część związaną. `
+          + (state.overloaded
+            ? `<strong>Uwaga:</strong> kompleks sorpcyjny jest przeładowany o ${state.overloadPct.toFixed(0)}%, `
+              + `więc wapń wypiera magnez i potas. `
             : '')
-          + `Szczegóły w tabeli nasycenia kationów obok.</p>`;
+          + `Szczegóły i zmiany poszczególnych kationów w tabeli nasycenia obok.</p>`;
       }
       document.getElementById('am_summary_table').innerHTML = html;
 
@@ -1931,36 +1930,22 @@
       const meqNa = finalNa / 230;
       const tcec = window._cac.tcec;
 
-      // Kompleks sorpcyjny ma skończoną liczbę miejsc (TCEC) — nasycenie nie może przekroczyć 100%.
-      // Wapń dosypany ponad tę pojemność nie siada na kompleksie: zostaje w roztworze albo
-      // jako nieprzereagowany węglan/krzemian. Ekstrakcja Mehlich 3 i tak go wykaże w ppm,
-      // dlatego sam odczyt ppm potrafi sugerować nasycenie powyżej 100%.
-      const meqOthers = meqMg + meqK + meqNa;
-      let exMeqCa = meqCa, exMeqMg = meqMg, exMeqK = meqK, exMeqNa = meqNa;
-      let surplusCa = 0;
-      let othersOverloaded = false;
+      // Kompleks sorpcyjny ma skończoną liczbę miejsc (TCEC), więc nasycenia zawsze sumują się do 100%
+      // razem z kwasowością. Dopóki zostaje jeszcze wymienny wodór, dosypany wapń zajmuje jego miejsca
+      // i nie rusza magnezu ani potasu. Gdy wodór się skończy, kompleks jest pełny — wtedy kationy
+      // konkurują o te same miejsca i wapń zaczyna WYPIERAĆ magnez, potas i sód do roztworu
+      // (stąd znane zjawisko: przewapnowanie wywołuje niedobory Mg i K).
+      const sumMeq = meqCa + meqMg + meqK + meqNa;
+      const overloaded = sumMeq > tcec;
+      // Do momentu wysycenia dzielimy przez TCEC (reszta miejsc = kwasowość),
+      // po wysyceniu przez sumę kationów (kwasowości już nie ma, udziały są względne).
+      // Przy sumMeq = TCEC oba wzory dają to samo, więc przejście jest płynne.
+      const denomMeq = overloaded ? sumMeq : tcec;
 
-      if (meqOthers >= tcec) {
-        // Sam magnez, potas i sód wypełniają cały kompleks — na wapń nie ma już miejsca.
-        othersOverloaded = true;
-        const shrink = tcec / meqOthers;
-        exMeqMg = meqMg * shrink;
-        exMeqK = meqK * shrink;
-        exMeqNa = meqNa * shrink;
-        exMeqCa = 0;
-        surplusCa = finalCa;
-      } else {
-        const roomForCa = tcec - meqOthers;
-        if (meqCa > roomForCa) {
-          exMeqCa = roomForCa;
-          surplusCa = (meqCa - roomForCa) * 200;
-        }
-      }
-
-      const satCa = tcec > 0 ? (exMeqCa / tcec) * 100 : 0;
-      const satMg = tcec > 0 ? (exMeqMg / tcec) * 100 : 0;
-      const satK = tcec > 0 ? (exMeqK / tcec) * 100 : 0;
-      const satNa = tcec > 0 ? (exMeqNa / tcec) * 100 : 0;
+      const satCa = denomMeq > 0 ? (meqCa / denomMeq) * 100 : 0;
+      const satMg = denomMeq > 0 ? (meqMg / denomMeq) * 100 : 0;
+      const satK = denomMeq > 0 ? (meqK / denomMeq) * 100 : 0;
+      const satNa = denomMeq > 0 ? (meqNa / denomMeq) * 100 : 0;
       const totalBaseSat = satCa + satMg + satK + satNa;
       const ph = solvePhForBaseSaturation(totalBaseSat);
 
@@ -1968,11 +1953,17 @@
         tcec, satCa, satMg, satK, satNa, totalBaseSat,
         ph, reachable: ph !== null,
         startPh: window._postLime.ph,
-        surplusCa, othersOverloaded,
-        saturated: surplusCa > 0.05,
-        totalCa: finalCa,
-        exchangeableCa: exMeqCa * 200
+        overloaded,
+        overloadMeq: overloaded ? sumMeq - tcec : 0,
+        overloadPct: overloaded && tcec > 0 ? ((sumMeq / tcec) - 1) * 100 : 0,
+        sumMeq
       };
+    }
+
+    // Nasycenia przy samym punkcie startowym (bez odżywek z listy) — do pokazania,
+    // o ile dodatki przesunęły poszczególne kationy.
+    function getBaseSoilState(base) {
+      return getFinalSoilState(base, {});
     }
 
     function formatFinalPh(state) {
@@ -1988,36 +1979,50 @@
         return;
       }
 
-      let html = '<table><thead><tr><th>Pierwiastek</th><th>Nasycenie %</th><th>Cel</th></tr></thead><tbody>';
-      html += `<tr><td>Ca</td><td><span class="badge highlight">${state.satCa.toFixed(1)}</span></td><td>68–75%</td></tr>`;
-      html += `<tr><td>Mg</td><td><span class="badge">${state.satMg.toFixed(1)}</span></td><td>10–15%</td></tr>`;
-      html += `<tr><td>K</td><td><span class="badge">${state.satK.toFixed(1)}</span></td><td>3–5%</td></tr>`;
-      html += `<tr><td>Na</td><td><span class="badge">${state.satNa.toFixed(1)}</span></td><td>&lt; 2%</td></tr>`;
-      html += `<tr><td><strong>Suma zasad</strong></td><td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td><td>maks. 100%</td></tr>`;
-      html += `<tr><td><strong>TCEC</strong></td><td colspan="2"><span class="badge">${state.tcec.toFixed(2)}</span></td></tr>`;
-      if (state.saturated) {
-        html += `<tr class="el-cation"><td><strong>Wapń poza kompleksem</strong></td>`
-          + `<td colspan="2"><span class="badge highlight">${state.surplusCa.toFixed(0)}</span> ppm z ${state.totalCa.toFixed(0)} ppm</td></tr>`;
-      }
-      html += `<tr><td><strong>pH gleby (końcowe)</strong></td><td><span class="badge highlight">${formatFinalPh(state)}</span></td>`
-        + `<td>6,3–6,8</td></tr>`;
+      const start = getBaseSoilState(base);
+      const shift = (now, before) => {
+        const d = now - before;
+        if (Math.abs(d) < 0.05) return '<span class="explain">bez zmian</span>';
+        const arrow = d > 0 ? '▲' : '▼';
+        const color = d > 0 ? '#2b6cb0' : '#c53030';
+        return `<span style="color:${color}; font-weight:600;">${arrow} ${d > 0 ? '+' : ''}${d.toFixed(1)}</span>`;
+      };
+
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Start</th><th>Nasycenie %</th><th>Zmiana</th><th>Cel</th></tr></thead><tbody>';
+      const rows = [
+        ['Ca', start.satCa, state.satCa, '68–75%'],
+        ['Mg', start.satMg, state.satMg, '10–15%'],
+        ['K', start.satK, state.satK, '3–5%'],
+        ['Na', start.satNa, state.satNa, '&lt; 2%']
+      ];
+      rows.forEach(([label, before, now, target]) => {
+        html += `<tr><td>${label}</td><td class="explain">${before.toFixed(1)}</td>`
+          + `<td><span class="badge${label === 'Ca' ? ' highlight' : ''}">${now.toFixed(1)}</span></td>`
+          + `<td>${shift(now, before)}</td><td>${target}</td></tr>`;
+      });
+      html += `<tr><td><strong>Suma zasad</strong></td><td class="explain">${start.totalBaseSat.toFixed(1)}</td>`
+        + `<td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td>`
+        + `<td>${shift(state.totalBaseSat, start.totalBaseSat)}</td><td>maks. 100%</td></tr>`;
+      html += `<tr><td><strong>TCEC</strong></td><td colspan="4"><span class="badge">${state.tcec.toFixed(2)}</span> <span class="explain">stałe — dodatki nie tworzą nowych miejsc sorpcyjnych</span></td></tr>`;
+      html += `<tr><td><strong>pH gleby (końcowe)</strong></td><td class="explain">${state.startPh.toFixed(2)}</td>`
+        + `<td><span class="badge highlight">${formatFinalPh(state)}</span></td><td></td><td>6,3–6,8</td></tr>`;
       html += '</tbody></table>';
 
-      if (state.saturated) {
-        html += `<p class="note"><strong>Kompleks sorpcyjny jest wysycony.</strong> `
-          + (state.othersOverloaded
-            ? `Już sam magnez, potas i sód wypełniają całe TCEC, więc wapń nie ma gdzie usiąść. `
-            : `Wolne miejsca skończyły się przy ${state.exchangeableCa.toFixed(0)} ppm wapnia. `)
-          + `Pozostałe <strong>${state.surplusCa.toFixed(0)} ppm Ca</strong> nie siedzi na kompleksie — zostaje w roztworze `
-          + `albo jako nieprzereagowany wolastenit/węglan. Test glebowy i tak wykaże je w ppm, dlatego surowy odczyt `
-          + `potrafi sugerować nasycenie powyżej 100%; tutaj nasycenie jest liczone tylko z wapnia faktycznie związanego. `
-          + `Praktycznie: ta nadwyżka nie poprawi już nasycenia, a podnosi pH powyżej 7 i utrudnia pobieranie `
-          + `fosforu oraz mikroelementów. Zmniejsz dawkę.</p>`;
+      if (state.overloaded) {
+        html += `<p class="note"><strong>Kompleks sorpcyjny jest wysycony — kationy zaczęły się wypierać.</strong> `
+          + `Suma kationów to ${state.sumMeq.toFixed(2)} meq przy pojemności ${state.tcec.toFixed(2)} meq, `
+          + `czyli o <strong>${state.overloadPct.toFixed(0)}% za dużo</strong>. Wymiennego wodoru już nie ma, więc każdy kolejny `
+          + `wapń nie zajmuje wolnego miejsca, tylko <strong>spycha magnez, potas i sód</strong> z kompleksu do roztworu, `
+          + `skąd się wypłukują. Widać to w kolumnie „Zmiana”: `
+          + `Mg ${start.satMg.toFixed(1)}% → ${state.satMg.toFixed(1)}%, K ${start.satK.toFixed(1)}% → ${state.satK.toFixed(1)}%. `
+          + `Tak właśnie przewapnowanie wywołuje niedobory magnezu i potasu. Zmniejsz dawkę wapnia.</p>`;
       } else {
-        html += `<p class="note">pH końcowe wynika z sumy nasycenia zasadami po wszystkich dodatkach: kationy zajmują miejsca `
-          + `po wymiennym wodorze, więc każdy dosypany wapń, magnez czy potas lekko podnosi pH. `
+        const room = state.tcec - state.sumMeq;
+        html += `<p class="note">Kationy zajmują miejsca po wymiennym wodorze — zostało go jeszcze `
+          + `${room.toFixed(2)} meq (${(100 - state.totalBaseSat).toFixed(1)}% miejsc), więc dosypany wapń `
+          + `<strong>nie wypiera</strong> jeszcze magnezu ani potasu, tylko podnosi pH. `
           + `Start po wapnowaniu: pH ${state.startPh.toFixed(2)} → po odżywkach: pH ${formatFinalPh(state)}. `
-          + `TCEC nie zmienia się, bo dodatki nie tworzą nowych miejsc sorpcyjnych.</p>`;
+          + `Dopiero po wysyceniu kompleksu wapń zacznie spychać pozostałe kationy.</p>`;
       }
       box.innerHTML = html;
     }
