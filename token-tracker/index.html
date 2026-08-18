@@ -223,6 +223,7 @@ ul.tight{margin:.3em 0; padding-left:1.15em} ul.tight li{margin-bottom:.25em; fo
     <button data-view="daily">Codzienna aktualizacja</button>
     <button data-view="compare">Porównanie</button>
     <button data-view="market">Rynek</button>
+    <button data-view="flows">Przepływy</button>
     <button data-view="data">Dane i ustawienia</button>
     <button data-view="tests">Testy</button>
   </nav>
@@ -308,6 +309,9 @@ ul.tight{margin:.3em 0; padding-left:1.15em} ul.tight li{margin-bottom:.25em; fo
 
   <!-- ============ WIDOK 6: RYNEK ============ -->
   <section id="view-market" class="view hidden"><div id="marketPane"></div></section>
+
+  <!-- ============ WIDOK 7: PRZEPŁYWY ============ -->
+  <section id="view-flows" class="view hidden"><div id="flowsPane"></div></section>
 
   <!-- ============ DANE I USTAWIENIA ============ -->
   <section id="view-data" class="view hidden"><div id="dataPane"></div></section>
@@ -632,6 +636,7 @@ function defaultState(){
     tokens: seedTokens(),
     benchmark: seedBenchmark(),
     market: { updatedAt: null, coins: [], sectorOverrides: {}, history: [], excludeWrapped: true },
+    flows: { stables: null, defi: null, deriv: null, history: [] },
     meta: { savedAt: null, seededAt: new Date().toISOString() }
   };
 }
@@ -677,6 +682,7 @@ function normalizeState(s){
     settings: Object.assign({}, d.settings, s.settings || {}),
     tokens: Array.isArray(s.tokens) ? s.tokens.map(normalizeToken) : d.tokens,
     market: normalizeMarket(s.market),
+    flows: normalizeFlows(s.flows),
     benchmark: {
       label: bench.label || 'Kapitalizacja rynku krypto',
       isDemo: !!bench.isDemo,
@@ -719,6 +725,10 @@ function normalizeToken(t){
     /* --- podaż niehandlowa: staking, skarbiec, saldo giełd, głębokość księgi --- */
     stakedSupply: num(t.stakedSupply), treasurySupply: num(t.treasurySupply),
     exchangeBalance: num(t.exchangeBalance), depth2PctUsd: num(t.depth2PctUsd),
+    spreadPct: num(t.spreadPct), liquidityUpdatedAt: t.liquidityUpdatedAt || '',
+    topMarkets: Array.isArray(t.topMarkets) ? t.topMarkets.map(m => ({
+      name: m.name || '?', volUsd: num(m.volUsd), spread: num(m.spread), depth: num(m.depth), trust: m.trust || ''
+    })) : [],
 
     /* --- fundamenty sieci: przychód, value capture, subsydium z emisji, węzły --- */
     fundamentals: {
@@ -1166,6 +1176,10 @@ function warningFlags(t){
   if (m.hasLockData && num(t.exchangeBalance) > 0.2 * m.liquidSupply){
     out.push({ level: 'warn', text: 'Na giełdach leży ' + tokAmount(num(t.exchangeBalance)) + ' szt. — ' +
       pct(num(t.exchangeBalance) / m.liquidSupply * 100) + ' podaży płynnej gotowej do sprzedania w każdej chwili.' });
+  }
+  if (num(t.spreadPct) > 1){
+    out.push({ level: 'warn', text: 'Średni spread na giełdach to ' + pct(num(t.spreadPct), 2) +
+      ' — każde wejście i wyjście kosztuje tyle na starcie, zanim rynek w ogóle się ruszy.' });
   }
   if (num(t.depth2PctUsd) > 0 && m.positionValue > num(t.depth2PctUsd)){
     out.push({ level: 'bad', text: 'Twoja pozycja (' + usdBig(m.positionValue) + ') jest większa niż głębokość księgi w paśmie 2% (' +
@@ -1828,6 +1842,9 @@ function renderTokenView(){
     '<div class="grid g2"><div><div class="chart-wrap"><canvas id="chartAlloc"></canvas></div></div>' +
     '<div id="allocLegend"></div></div></div>');
 
+  /* --- płynność z giełd --- */
+  if ((t.topMarkets || []).length || num(t.depth2PctUsd) > 0) parts.push(liquidityCardHtml(t, m));
+
   /* --- fundamenty sieci --- */
   parts.push(fundamentalsCardHtml(t, m));
 
@@ -2069,6 +2086,29 @@ function fundamentalsCardHtml(t, m){
         (isFinite(rg) ? pctSigned(rg * 100) + ' r/r' : '—') + ', węzły ' + (isFinite(ng) ? pctSigned(ng * 100) + ' r/r' : '—') +
         '. Tempo wzrostu przychodu jest tym, co uzasadnia wysoki mnożnik — albo go nie uzasadnia.</p>';
     }
+  }
+  return h + '</div>';
+}
+
+function liquidityCardHtml(t, m){
+  const depth = num(t.depth2PctUsd), spread = num(t.spreadPct);
+  const exitRatio = depth > 0 ? m.positionValue / depth : NaN;
+  let h = '<div class="card"><div class="card-head"><div><h2>Płynność na giełdach</h2>' +
+    '<p class="sub">Głębokość to koszt przesunięcia ceny o 2% — realna miara tego, ile rynek przyjmie, zanim cena ucieknie. Wolumen 24h tego nie mówi, bo bywa przemywany.</p></div>' +
+    (t.liquidityUpdatedAt ? '<p class="src">z CoinGecko · ' + fmtDate(t.liquidityUpdatedAt) + '</p>' : '') + '</div>' +
+    '<div class="grid g4">' +
+      kpi('Głębokość ±2%', usdBig(depth), 'tyle kapitału mieści się po obu stronach księgi') +
+      kpi('Średni spread', isFinite(spread) ? pct(spread, 2) : '—', 'ważony wolumenem — tyle tracisz na samym wejściu i wyjściu') +
+      kpi('Twoja pozycja wobec księgi', isFinite(exitRatio) ? mult(exitRatio, 2) : '—',
+        exitRatio > 1 ? 'pozycja większa niż cała głębokość — wyjście trzeba rozłożyć w czasie' : 'mieści się w księdze') +
+      kpi('Rynków', String((t.topMarkets || []).length), 'pokazane największe wolumenem') +
+    '</div>';
+  if ((t.topMarkets || []).length){
+    h += '<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Rynek</th><th class="num">Wolumen 24h</th><th class="num">Spread</th><th class="num">Głębokość ±2%</th></tr></thead><tbody>' +
+      t.topMarkets.map(x => '<tr><td>' + esc(x.name) + (x.trust === 'green' ? ' <span class="badge good">zaufany</span>' : '') + '</td>' +
+        '<td class="num">' + usdBig(x.volUsd) + '</td><td class="num">' + (isFinite(x.spread) ? pct(x.spread, 2) : '—') + '</td>' +
+        '<td class="num">' + (isFinite(x.depth) ? usdBig(x.depth) : '—') + '</td></tr>').join('') +
+      '</tbody></table></div>';
   }
   return h + '</div>';
 }
@@ -2878,15 +2918,24 @@ function renderDaily(){
       '<button class="btn primary" id="fetchPrices">Pobierz ceny</button>' +
       '<label class="row" style="gap:5px; font-size:.78rem"><input type="checkbox" id="deriveSupply" checked style="width:auto">wylicz podaż w obiegu z kapitalizacji CoinGecko</label>' +
       '<span class="note" id="fetchMsg"></span></div>' +
+    '<div class="row" style="margin-bottom:12px">' +
+      '<button class="btn" id="fetchHistAll">Pobierz historię 365 dni</button>' +
+      '<button class="btn" id="fetchLiqAll">Pobierz płynność z giełd</button>' +
+      '<span class="note" id="bulkMsg">Historia zastępuje dane demonstracyjne i uruchamia sygnał odbudowy na prawdziwych liczbach. Płynność podstawia głębokość księgi i spread zamiast ręcznych wpisów.</span></div>' +
     '<div class="table-wrap"><table><thead><tr><th>Token</th><th>ID CoinGecko</th><th class="num">Cena USD</th>' +
-    '<th class="num">Podaż w obiegu</th><th class="num">Wolumen 24h USD</th><th class="num">Poprzedni odczyt</th></tr></thead><tbody>';
+    '<th class="num">Podaż w obiegu</th><th class="num">Wolumen 24h USD</th><th class="num">Poprzedni odczyt</th><th>Z API</th></tr></thead><tbody>';
   STATE.tokens.forEach(t => {
     const hLast = (t.priceHistory || []).length ? t.priceHistory[t.priceHistory.length - 1] : null;
     h += '<tr><td><b>' + esc(t.symbol) + '</b></td><td class="sub">' + esc(t.coingeckoId || '—') + '</td>' +
       '<td class="num"><input type="text" inputmode="decimal" data-d="' + esc(t.id) + '" data-f="price" value="' + esc(NF(0, 10).format(num(t.price))) + '" style="width:130px; text-align:right"></td>' +
       '<td class="num"><input type="text" inputmode="decimal" data-d="' + esc(t.id) + '" data-f="circ" value="' + esc(NF(0, 0).format(num(t.circulatingSupply))) + '" style="width:150px; text-align:right"></td>' +
       '<td class="num"><input type="text" inputmode="decimal" data-d="' + esc(t.id) + '" data-f="vol" value="' + esc(NF(0, 0).format(num(t.volume24h))) + '" style="width:130px; text-align:right"></td>' +
-      '<td class="num sub">' + (hLast ? usd(hLast.price) + ' · ' + fmtDate(hLast.date) : '—') + '</td></tr>';
+      '<td class="num sub">' + (hLast ? usd(hLast.price) + ' · ' + fmtDate(hLast.date) : '—') + '</td>' +
+      '<td><div class="row" style="gap:4px; flex-wrap:nowrap">' +
+        '<button class="btn small" data-hist="' + esc(t.id) + '"' + (t.coingeckoId ? '' : ' disabled title="brak ID CoinGecko"') + '>historia</button>' +
+        '<button class="btn small" data-liq="' + esc(t.id) + '"' + (t.coingeckoId ? '' : ' disabled title="brak ID CoinGecko"') + '>płynność</button>' +
+      '</div><div class="sub">' + (t.historyIsDemo ? 'historia demo' : (t.priceHistory || []).length + ' dni') +
+      (t.liquidityUpdatedAt ? ' · płynność ' + fmtDate(t.liquidityUpdatedAt) : '') + '</div></td></tr>';
   });
   h += '</tbody></table></div>' +
     '<div class="row" style="margin-top:12px"><button class="btn primary" id="saveReading">Zapisz dzisiejszy odczyt</button>' +
@@ -2900,12 +2949,55 @@ function renderDaily(){
   }));
   el('fetchPrices').addEventListener('click', fetchPrices);
   el('saveReading').addEventListener('click', saveReading);
+  el('fetchHistAll').addEventListener('click', () => bulkFetch('hist'));
+  el('fetchLiqAll').addEventListener('click', () => bulkFetch('liq'));
+  el('dailyPane').querySelectorAll('[data-hist]').forEach(b => b.addEventListener('click', () => oneFetch(b.getAttribute('data-hist'), 'hist')));
+  el('dailyPane').querySelectorAll('[data-liq]').forEach(b => b.addEventListener('click', () => oneFetch(b.getAttribute('data-liq'), 'liq')));
   el('benchInput').addEventListener('input', () => {
     const v = parseLocaleNumber(el('benchInput').value);
     dailyBenchmark = isFinite(v) ? v : 0;
   });
   dailyBenchmark = benchNow() ? benchNow().value : 0;
 }
+function describeFetch(kind, t, ok, val){
+  if (!ok) return t.symbol + ': ' + val.message;
+  return kind === 'hist' ? t.symbol + ': ' + val + ' dni historii'
+                         : t.symbol + ': głębokość ' + usdBig(t.depth2PctUsd) + ', spread ' + pct(num(t.spreadPct), 2);
+}
+function oneFetch(id, kind){
+  const t = tokenById(id), msg = el('bulkMsg');
+  if (!t) return;
+  msg.style.color = ''; msg.textContent = t.symbol + ': pobieram…';
+  const job = kind === 'hist' ? fetchHistoryFor(t) : fetchLiquidityFor(t);
+  job.then(v => {
+    saveState(); msg.style.color = 'var(--good)'; msg.textContent = describeFetch(kind, t, true, v);
+    renderDaily();
+  }).catch(e => {
+    msg.style.color = 'var(--critical)';
+    msg.textContent = t.symbol + ': nie udało się — ' + e.message +
+      (IN_FRAME ? ' (w ramce podglądu zapytania na zewnątrz są blokowane)' : '');
+  });
+}
+function bulkFetch(kind){
+  const msg = el('bulkMsg');
+  const list = STATE.tokens.filter(t => t.coingeckoId);
+  if (!list.length){ msg.style.color = 'var(--warn)'; msg.textContent = 'Żaden token nie ma ID CoinGecko.'; return; }
+  msg.style.color = ''; msg.textContent = 'Pobieram 1 z ' + list.length + '… (zapytania idą po kolei, żeby nie wpaść w limit)';
+  let done = 0;
+  const lines = [];
+  sequence(list, t => (kind === 'hist' ? fetchHistoryFor(t) : fetchLiquidityFor(t)), (t, ok, val) => {
+    done++;
+    lines.push((ok ? '✓ ' : '✗ ') + describeFetch(kind, t, ok, val));
+    msg.textContent = 'Pobrano ' + done + ' z ' + list.length + '…';
+  }).then(res => {
+    saveState();
+    const bad = res.filter(r => !r.ok).length;
+    msg.style.color = bad ? 'var(--warn)' : 'var(--good)';
+    msg.innerHTML = lines.map(esc).join('<br>');
+    renderAll();
+  });
+}
+
 function fetchPrices(){
   const msg = el('fetchMsg');
   const ids = STATE.tokens.filter(t => t.coingeckoId).map(t => t.coingeckoId);
@@ -2951,6 +3043,117 @@ function fetchPrices(){
                   : 'Wpisz ceny ręcznie w polach obok.');
     });
 }
+const CG_COIN = 'https://api.coingecko.com/api/v3/coins/';
+
+/* Historia z API zamiast czekania trzech miesięcy na własne odczyty.
+   market_chart zwraca ceny, kapitalizacje i wolumeny; podaż w obiegu dla danego
+   dnia wyliczamy jako kapitalizacja / cena — dokładnie tej liczby potrzebuje
+   sygnał odbudowy, żeby odróżnić wzrost wyceny od przyrostu podaży. */
+function parseMarketChart(json){
+  if (!json || !Array.isArray(json.prices) || !json.prices.length) throw new Error('Odpowiedź nie zawiera serii cen.');
+  const caps = {};
+  (json.market_caps || []).forEach(pt => { if (Array.isArray(pt) && pt.length >= 2) caps[isoOf(new Date(pt[0]))] = Number(pt[1]); });
+  const byDate = {};
+  json.prices.forEach(pt => {
+    if (!Array.isArray(pt) || pt.length < 2) return;
+    const d = isoOf(new Date(pt[0]));
+    const price = Number(pt[1]);
+    if (!isFinite(price) || price <= 0) return;
+    // w ciągu dnia bywa kilka punktów — bierzemy ostatni
+    const mcap = caps[d];
+    byDate[d] = { date: d, price: price, circulatingSupply: (isFinite(mcap) && mcap > 0) ? mcap / price : 0 };
+  });
+  const out = Object.keys(byDate).sort().map(k => byDate[k]);
+  if (!out.length) throw new Error('Nie udało się złożyć ani jednego dnia historii.');
+  return out;
+}
+function applyHistory(t, rows){
+  const wasDemo = t.historyIsDemo;
+  if (wasDemo || !(t.priceHistory || []).length){
+    t.priceHistory = rows;                       // dane demonstracyjne zastępujemy w całości
+  } else {
+    const have = {};
+    t.priceHistory.forEach(h => { have[h.date] = h; });
+    rows.forEach(r => { if (!have[r.date]) t.priceHistory.push(r); });   // własnych odczytów nie nadpisujemy
+    t.priceHistory.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  t.historyIsDemo = false;
+  // brak podaży w danym dniu → uzupełniamy ostatnią znaną, żeby wykresy nie miały dziur
+  let last = 0;
+  t.priceHistory.forEach(h => {
+    if (h.circulatingSupply > 0) last = h.circulatingSupply;
+    else if (last > 0) h.circulatingSupply = last;
+  });
+  return t.priceHistory.length;
+}
+function fetchHistoryFor(t, days){
+  if (!t.coingeckoId) return Promise.reject(new Error(t.symbol + ': brak ID CoinGecko'));
+  const url = CG_COIN + encodeURIComponent(t.coingeckoId) + '/market_chart?vs_currency=usd&days=' + (days || 365);
+  return fetch(url).then(res => {
+    if (res.status === 429) throw new Error('limit zapytań CoinGecko — odczekaj minutę');
+    if (res.status === 404) throw new Error('nieznane ID „' + t.coingeckoId + '”');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }).then(j => applyHistory(t, parseMarketChart(j)));
+}
+
+/* Płynność z realnych ksiąg zleceń: cost_to_move_*_usd to koszt przesunięcia
+   ceny o 2%, czyli dokładnie ta głębokość, którą do tej pory wpisywało się ręcznie. */
+function parseTickers(json){
+  const tk = (json && Array.isArray(json.tickers)) ? json.tickers : [];
+  if (!tk.length) throw new Error('Brak notowań giełdowych w odpowiedzi.');
+  const green = tk.filter(x => x.trust_score === 'green');
+  const use = green.length ? green : tk;
+  let depth = 0, volSum = 0, spreadWeighted = 0;
+  const markets = [];
+  use.forEach(x => {
+    const vol = Number((x.converted_volume || {}).usd);
+    const up = Number(x.cost_to_move_up_usd), down = Number(x.cost_to_move_down_usd);
+    const d = (isFinite(up) && isFinite(down)) ? Math.min(up, down) : (isFinite(up) ? up : (isFinite(down) ? down : NaN));
+    const sp = Number(x.bid_ask_spread_percentage);
+    if (isFinite(d)) depth += d;
+    if (isFinite(vol) && vol > 0 && isFinite(sp)){ volSum += vol; spreadWeighted += sp * vol; }
+    markets.push({ name: ((x.market || {}).name || '?') + ' · ' + (x.base || '') + '/' + (x.target || ''),
+      volUsd: isFinite(vol) ? vol : 0, spread: isFinite(sp) ? sp : NaN, depth: isFinite(d) ? d : NaN, trust: x.trust_score || '' });
+  });
+  markets.sort((a, b) => b.volUsd - a.volUsd);
+  return {
+    depth2PctUsd: depth, spreadPct: volSum > 0 ? spreadWeighted / volSum : NaN,
+    markets: markets.slice(0, 6), count: use.length, greenOnly: green.length > 0
+  };
+}
+function fetchLiquidityFor(t){
+  if (!t.coingeckoId) return Promise.reject(new Error(t.symbol + ': brak ID CoinGecko'));
+  const url = CG_COIN + encodeURIComponent(t.coingeckoId) + '/tickers?depth=true&order=volume_desc';
+  return fetch(url).then(res => {
+    if (res.status === 429) throw new Error('limit zapytań CoinGecko — odczekaj minutę');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }).then(j => {
+    const r = parseTickers(j);
+    t.depth2PctUsd = r.depth2PctUsd;
+    if (isFinite(r.spreadPct)) t.spreadPct = r.spreadPct;
+    t.topMarkets = r.markets;
+    t.liquidityUpdatedAt = todayISO();
+    return r;
+  });
+}
+/* Zapytania puszczamy po kolei z przerwą — darmowe API CoinGecko szybko odcina. */
+function sequence(items, fn, onStep){
+  let i = 0;
+  const results = [];
+  const next = () => {
+    if (i >= items.length) return Promise.resolve(results);
+    const it = items[i++];
+    return fn(it)
+      .then(r => { results.push({ item: it, ok: true, value: r }); if (onStep) onStep(it, true, r); })
+      .catch(e => { results.push({ item: it, ok: false, error: e }); if (onStep) onStep(it, false, e); })
+      .then(() => new Promise(res => setTimeout(res, 1400)))
+      .then(next);
+  };
+  return next();
+}
+
 function saveReading(){
   const today = todayISO();
   STATE.tokens.forEach(t => {
@@ -3424,6 +3627,47 @@ function runTests(){
     add('Rynek: parsowanie i agregacja', false, 'brak błędu', e.message, '');
   }
 
+  // przepływy: annualizacja finansowania, pomijanie kontraktów terminowych, peg inny niż dolar
+  try {
+    const der = parseDerivatives([
+      { market: 'A', index_id: 'BTC', contract_type: 'perpetual', open_interest: 1e9, volume_24h: 1e9, funding_rate: 0.01 },
+      { market: 'B', index_id: 'BTC', contract_type: 'perpetual', open_interest: 1e9, volume_24h: 1e9, funding_rate: 0.03 },
+      { market: 'C', index_id: 'BTC', contract_type: 'futures', open_interest: 5e9, volume_24h: 1e9, funding_rate: 9 }
+    ]);
+    const btc = der.assets[0];
+    // średnia ważona OI z 0,01% i 0,03% to 0,02% na okres, czyli 0,02 × 3 × 365 = 21,9% rocznie
+    add('Przepływy: finansowanie annualizowane, kontrakty terminowe pominięte',
+      btc.markets === 2 && Math.abs(btc.funding - 0.02) < 1e-9 && Math.abs(btc.fundingAnnual - 21.9) < 1e-9,
+      '2 rynki · 21,9% r/r', btc.markets + ' rynki · ' + pct(btc.fundingAnnual) + ' r/r',
+      'Stawka jest za okres ośmiogodzinny, więc mnożymy przez trzy okresy i 365 dni. Kontrakt z datą wygaśnięcia nie ma finansowania i nie wchodzi do średniej.');
+
+    const st = parseStables({ peggedAssets: [
+      { name: 'Euro', symbol: 'EURC', pegType: 'peggedEUR', circulating: { peggedEUR: 200 },
+        circulatingPrevMonth: { peggedEUR: 100 }, chainCirculating: { Ethereum: { current: { peggedEUR: 200 }, circulatingPrevMonth: { peggedEUR: 100 } } } },
+      { name: 'Dolar', symbol: 'USDX', pegType: 'peggedUSD', circulating: { peggedUSD: 800 },
+        circulatingPrevMonth: { peggedUSD: 900 }, chainCirculating: { Solana: { current: { peggedUSD: 800 }, circulatingPrevMonth: { peggedUSD: 900 } } } }
+    ] });
+    add('Przepływy: stablecoiny spoza dolara też są liczone',
+      Math.abs(st.total - 1000) < 1e-9 && st.assets.length === 2 && st.chains.length === 2 && Math.abs(st.prevMonth - 1000) < 1e-9,
+      'razem 1000 · 2 emitentów · 2 łańcuchy', fmt(st.total, 0) + ' · ' + st.assets.length + ' · ' + st.chains.length,
+      'DefiLlama trzyma wartości pod kluczem typu peg — czytamy je przez pegType aktywa, nie na sztywno po peggedUSD.');
+
+    const cats = parseProtocols([
+      { name: 'a', category: 'Lending', tvl: 110, change_1m: 10 },
+      { name: 'b', category: 'Lending', tvl: 90, change_1m: -10 },
+      { name: 'c', category: 'Dexes', tvl: 50, change_1m: 0 },
+      { name: 'd', category: 'Lending', tvl: 0 }
+    ]);
+    const lend = cats.filter(c => c.name === 'Lending')[0];
+    // 110/1,1 + 90/0,9 = 100 + 100 = 200, więc TVL 200 wobec 200 to zero zmiany
+    add('Przepływy: TVL kategorii i jego zmiana liczone z protokołów',
+      lend.tvl === 200 && lend.count === 2 && Math.abs(lend.chg30d) < 1e-9,
+      'Lending 200, 2 protokoły, 0%', lend.tvl + ' · ' + lend.count + ' · ' + pct(lend.chg30d),
+      'Protokół bez TVL jest pomijany, a zmiana kategorii wychodzi z odtworzonych wartości sprzed miesiąca.');
+  } catch (e){
+    add('Przepływy: parsowanie źródeł', false, 'brak błędu', e.message, '');
+  }
+
   // 9. środowisko
   add('Autozapis do localStorage', storageOk, 'dostępny', storageOk ? 'dostępny' : 'zablokowany — używaj eksportu JSON', '');
   add('Chart.js z CDN', chartAvailable(), 'załadowany', chartAvailable() ? 'załadowany' : 'brak — aplikacja działa, wykresy zastąpione tabelami', '');
@@ -3673,6 +3917,41 @@ function marketAggregate(){
   };
 }
 
+/* ---- SZEROKOŚĆ RYNKU ----
+   Czy rośnie cały rynek, czy tylko kilka molochów. Mediana powyżej zwrotu
+   ważonego kapitalizacją znaczy, że rośnie szeroki rynek — wtedy małe pozycje
+   mają paliwo. Poniżej: ciągną tylko największe, reszta stoi. */
+function marketBreadth(agg){
+  const coins = (STATE.market.coins || []).filter(c => {
+    const sec = sectorOf(c);
+    return sec !== SECTOR_STABLE && sec !== SECTOR_WRAPPED;
+  });
+  if (coins.length < 5) return null;
+  const btc = (STATE.market.coins || []).filter(c => c.id === 'bitcoin')[0];
+  const median = arr => {
+    const a = arr.filter(isFinite).slice().sort((x, y) => x - y);
+    if (!a.length) return NaN;
+    const h = Math.floor(a.length / 2);
+    return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2;
+  };
+  const out = { count: coins.length };
+  ['7d', '30d'].forEach(k => {
+    const key = 'chg' + k;
+    const vals = coins.map(c => c[key]).filter(isFinite);
+    const btcVal = btc ? btc[key] : NaN;
+    const beat = isFinite(btcVal) ? coins.filter(c => isFinite(c[key]) && c[key] > btcVal).length : NaN;
+    const capW = agg.marketChg[k === '7d' ? 'd7' : 'd30'];
+    out[k] = {
+      median: median(vals), capWeighted: capW, btc: btcVal,
+      beatBtcPct: isFinite(beat) ? beat / coins.length * 100 : NaN,
+      upPct: vals.length ? vals.filter(v => v > 0).length / vals.length * 100 : NaN,
+      // dodatnia różnica = rośnie szeroki rynek, ujemna = ciągną tylko molochy
+      spread: (isFinite(median(vals)) && isFinite(capW)) ? median(vals) - capW : NaN
+    };
+  });
+  return out;
+}
+
 /* ---- SYGNAŁ PRZEPŁYWU GOTÓWKI ----
    Ceny same z siebie nie mówią, czy do krypto weszły nowe pieniądze — rosnąć może
    wycena tego samego kapitału. Jedynym widocznym śladem świeżej gotówki jest
@@ -3759,11 +4038,12 @@ function renderMarket(){
   }
 
   const agg = marketAggregate();
-  const flow = cashFlowSignal(agg, historyHorizon());
+  const win = flowWindow();
+  const flow = cashFlowSignal(agg, win);
   const meta = CASH_META[flow.key];
 
   /* --- sygnał przepływu gotówki --- */
-  const hist = historyHorizon();
+  const hist = win;
   parts.push('<div class="signal ' + meta.cls + '" style="margin-bottom:14px">' +
     '<div class="ico" aria-hidden="true">' + meta.ico + '</div><div style="flex:1 1 320px">' +
     '<p class="sub" style="margin-bottom:2px">Przepływ gotówki na rynku' + (hist.days ? ' · ' + hist.days + ' dni z Twoich migawek' : ' · 24 godziny') + '</p>' +
@@ -3776,7 +4056,7 @@ function renderMarket(){
       '<div>ich udział w rynku<b>' + pct(agg.stableShare) + '</b></div>' +
     '</div>' +
     '<p class="sub" style="margin-top:10px">Obie strony liczone są tak samo: jako kapitalizacja, czyli realny kapitał ulokowany w gotówce (stablecoiny) i w ryzyku (reszta). Ceny same nie mówią, czy przyszły nowe pieniądze — ta sama gotówka potrafi podnieść wyceny. Jedyny widoczny ślad świeżego kapitału to kapitalizacja stablecoinów: rośnie, gdy ktoś wpłaca fiat. Trzecia liczba to zmiana samych wycen przy stałej podaży — różnica między nią a kapitalizacją ryzyka to nowe tokeny. ' +
-    (hist.days ? 'Liczone z Twoich migawek sprzed ' + hist.days + ' dni.' : 'Na razie liczone z 24 godzin — API daje tylko tyle. Zapisuj migawki, a policzę to na dłuższych oknach.') + '</p>' +
+    (hist.note || 'Na razie liczone z 24 godzin — sam top 100 daje tylko tyle. Zapisuj migawki albo pobierz stablecoiny w zakładce „Przepływy”, a policzę to na dłuższym oknie.') + '</p>' +
     '</div></div>');
 
   /* --- kafelki --- */
@@ -3791,6 +4071,23 @@ function renderMarket(){
   if (agg.unassigned){
     parts.push('<div class="banner warn">' + agg.unassigned + ' monet nie ma przypisanego sektora i wpada do „' + SECTOR_UNASSIGNED +
       '”. Przypisz je w tabeli poniżej — dopóki tam siedzą, zaniżają sektory, do których należą.</div>');
+  }
+
+  /* --- szerokość rynku --- */
+  const br = marketBreadth(agg);
+  if (br){
+    const row = (k, label) => {
+      const b = br[k];
+      const broad = isFinite(b.spread) && b.spread > 0;
+      return '<div class="kpi"><div class="label">' + label + '</div>' +
+        '<div class="value sm ' + (broad ? 'pos' : 'neg') + '">' + (broad ? 'szeroki rynek' : 'ciągną molochy') + '</div>' +
+        '<div class="note">mediana ' + pctSigned(b.median) + ' wobec ' + pctSigned(b.capWeighted) + ' ważonego kapitalizacją' +
+        (isFinite(b.beatBtcPct) ? ' · ' + pct(b.beatBtcPct, 0) + ' monet bije BTC' : '') +
+        ' · ' + pct(b.upPct, 0) + ' na plusie</div></div>';
+    };
+    parts.push('<div class="card"><div class="card-head"><div><h2>Szerokość rynku</h2>' +
+      '<p class="sub">Mediana zwrotu ponad zwrot ważony kapitalizacją znaczy, że rośnie cały rynek — wtedy małe pozycje mają paliwo. Poniżej: ciągną tylko największe, a reszta stoi mimo zielonych indeksów. Liczone z ' + br.count + ' monet, bez stablecoinów i derywatów.</p></div></div>' +
+      '<div class="grid g2">' + row('7d', 'Ostatnie 7 dni') + row('30d', 'Ostatnie 30 dni') + '</div></div>');
   }
 
   /* --- rotacja: wykres kwadrantowy --- */
@@ -3918,6 +4215,26 @@ function saveMarketSnapshot(agg){
   else M.history.push(entry);
   M.history.sort((a, b) => a.date.localeCompare(b.date));
   if (M.history.length > 400) M.history = M.history.slice(-400);
+}
+/* Które dane zasilają sygnał przepływu. Kolejność od najlepszych:
+   1) migawki rynku — obie strony liczone kapitalizacją, spójnie,
+   2) podaż stablecoinów z DefiLlama (twarda dana) zestawiona ze zmianą wycen,
+   3) sam top 100 z ostatnich 24 godzin.
+   Każde źródło mierzy trochę co innego, więc kafelek mówi wprost, które działa. */
+function flowWindow(){
+  const h = historyHorizon();
+  if (h.days) return { days: h.days, stable: h.stable, risk: h.risk,
+    note: 'Obie strony z Twoich migawek rynku, liczone kapitalizacją.' };
+  const F = STATE.flows;
+  if (F && F.stables){
+    const d = flowsDerived();
+    const agg = (STATE.market.coins || []).length ? marketAggregate() : null;
+    if (agg && isFinite(d.stableChg.d7)) return {
+      days: 7, stable: d.stableChg.d7, risk: agg.marketChg.d7,
+      note: 'Gotówka: realna podaż stablecoinów z DefiLlama. Ryzyko: zmiana wycen przy stałej podaży — to nie to samo co przepływ kapitału, ale najbliższe, co mamy bez migawek.'
+    };
+  }
+  return {};
 }
 /* Najdłuższe okno, jakie da się policzyć z zapisanych migawek (maksymalnie 30 dni). */
 function historyHorizon(){
@@ -4164,10 +4481,545 @@ function wireMarket(){
 }
 
 /* ============================================================
+   18. WIDOK 7 — PRZEPŁYWY: stablecoiny, DeFi i dźwignia
+   Trzy warstwy, których nie widać w cenach:
+   • paliwo — ile gotówki stoi gotowej i na którym łańcuchu,
+   • zaangażowanie — ile kapitału realnie pracuje w protokołach,
+   • dźwignia — czy ruch jest kupowany za gotówkę, czy na kredyt.
+   Dane: DefiLlama (bez klucza) i CoinGecko.
+   ============================================================ */
+const LLAMA_STABLES = 'https://stablecoins.llama.fi/stablecoins?includePrices=true';
+const LLAMA_CHAINS = 'https://api.llama.fi/v2/chains';
+const LLAMA_PROTOCOLS = 'https://api.llama.fi/protocols';
+const LLAMA_FEES = 'https://api.llama.fi/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true';
+const CG_DERIVATIVES = 'https://api.coingecko.com/api/v3/derivatives';
+
+function normalizeFlows(f){
+  f = f || {};
+  const arr = x => Array.isArray(x) ? x : [];
+  return {
+    stables: f.stables ? { updatedAt: f.stables.updatedAt || null, total: num(f.stables.total),
+      prevDay: num(f.stables.prevDay), prevWeek: num(f.stables.prevWeek), prevMonth: num(f.stables.prevMonth),
+      assets: arr(f.stables.assets), chains: arr(f.stables.chains) } : null,
+    defi: f.defi ? { updatedAt: f.defi.updatedAt || null, totalTvl: num(f.defi.totalTvl),
+      chains: arr(f.defi.chains), categories: arr(f.defi.categories), fees: arr(f.defi.fees),
+      fees24h: num(f.defi.fees24h), fees30d: num(f.defi.fees30d) } : null,
+    deriv: f.deriv ? { updatedAt: f.deriv.updatedAt || null, totalOi: num(f.deriv.totalOi),
+      assets: arr(f.deriv.assets) } : null,
+    history: arr(f.history)
+  };
+}
+
+/* ---- stablecoiny: podaż per emitent i per łańcuch ----
+   DefiLlama trzyma wartości pod kluczem typu peg (peggedUSD, peggedEUR…),
+   dlatego każdą liczbę wyciągamy przez pegType danego aktywa. */
+function pegVal(obj, pegType){
+  if (!obj || typeof obj !== 'object') return NaN;
+  const v = obj[pegType || 'peggedUSD'];
+  if (isFinite(v)) return Number(v);
+  const keys = Object.keys(obj);
+  for (let i = 0; i < keys.length; i++){ if (isFinite(obj[keys[i]])) return Number(obj[keys[i]]); }
+  return NaN;
+}
+function parseStables(json){
+  const list = (json && Array.isArray(json.peggedAssets)) ? json.peggedAssets : (Array.isArray(json) ? json : null);
+  if (!list) throw new Error('Brak listy peggedAssets w odpowiedzi DefiLlama.');
+  const assets = [], chainMap = {};
+  let total = 0, prevDay = 0, prevWeek = 0, prevMonth = 0;
+  list.forEach(a => {
+    const peg = a.pegType || 'peggedUSD';
+    const now = pegVal(a.circulating, peg);
+    if (!isFinite(now) || now <= 0) return;
+    const d = pegVal(a.circulatingPrevDay, peg), w = pegVal(a.circulatingPrevWeek, peg), m = pegVal(a.circulatingPrevMonth, peg);
+    assets.push({ symbol: a.symbol || a.name, name: a.name || a.symbol, peg: peg, now: now,
+      prevDay: isFinite(d) ? d : NaN, prevWeek: isFinite(w) ? w : NaN, prevMonth: isFinite(m) ? m : NaN });
+    total += now;
+    prevDay += isFinite(d) ? d : now; prevWeek += isFinite(w) ? w : now; prevMonth += isFinite(m) ? m : now;
+    const cc = a.chainCirculating || {};
+    Object.keys(cc).forEach(chain => {
+      const c = cc[chain] || {};
+      const cn = pegVal(c.current, peg);
+      if (!isFinite(cn) || cn <= 0) return;
+      const e = chainMap[chain] || (chainMap[chain] = { name: chain, now: 0, prevDay: 0, prevWeek: 0, prevMonth: 0 });
+      const cd = pegVal(c.circulatingPrevDay, peg), cw = pegVal(c.circulatingPrevWeek, peg), cm = pegVal(c.circulatingPrevMonth, peg);
+      e.now += cn;
+      e.prevDay += isFinite(cd) ? cd : cn; e.prevWeek += isFinite(cw) ? cw : cn; e.prevMonth += isFinite(cm) ? cm : cn;
+    });
+  });
+  if (!assets.length) throw new Error('Żaden stablecoin nie miał podaży w obiegu.');
+  assets.sort((a, b) => b.now - a.now);
+  const chains = Object.keys(chainMap).map(k => chainMap[k]).sort((a, b) => b.now - a.now);
+  return { updatedAt: new Date().toISOString(), total: total, prevDay: prevDay, prevWeek: prevWeek, prevMonth: prevMonth,
+    assets: assets.slice(0, 20), chains: chains.slice(0, 20) };
+}
+
+/* ---- DeFi: TVL per łańcuch i kategoria + opłaty ---- */
+function parseChains(json){
+  if (!Array.isArray(json)) throw new Error('Oczekiwałem tablicy łańcuchów.');
+  return json.filter(c => isFinite(c.tvl) && c.tvl > 0)
+    .map(c => ({ name: c.name, tvl: Number(c.tvl), geckoId: c.gecko_id || null, symbol: c.tokenSymbol || '' }))
+    .sort((a, b) => b.tvl - a.tvl);
+}
+function parseProtocols(json){
+  if (!Array.isArray(json)) throw new Error('Oczekiwałem tablicy protokołów.');
+  const cats = {};
+  json.forEach(pr => {
+    const tvl = Number(pr.tvl);
+    if (!isFinite(tvl) || tvl <= 0) return;
+    const name = pr.category || 'Bez kategorii';
+    const c = cats[name] || (cats[name] = { name: name, tvl: 0, count: 0, then1d: 0, then7d: 0, then30d: 0 });
+    const back = ch => isFinite(ch) ? tvl / (1 + ch / 100) : tvl;
+    c.tvl += tvl; c.count++;
+    c.then1d += back(pr.change_1d); c.then7d += back(pr.change_7d); c.then30d += back(pr.change_1m);
+  });
+  const list = Object.keys(cats).map(k => {
+    const c = cats[k];
+    const ch = (then) => then > 0 ? (c.tvl / then - 1) * 100 : NaN;
+    return { name: c.name, tvl: c.tvl, count: c.count, chg1d: ch(c.then1d), chg7d: ch(c.then7d), chg30d: ch(c.then30d) };
+  }).sort((a, b) => b.tvl - a.tvl);
+  if (!list.length) throw new Error('Żaden protokół nie miał TVL.');
+  return list;
+}
+function parseFees(json){
+  const list = (json && Array.isArray(json.protocols)) ? json.protocols : (Array.isArray(json) ? json : null);
+  if (!list) throw new Error('Brak listy protokołów w odpowiedzi o opłatach.');
+  const rows = list.map(pr => ({
+    name: pr.name || pr.displayName || '?', category: pr.category || '',
+    d24: Number(pr.total24h), d30: Number(pr.total30d), d7: Number(pr.total7d),
+    geckoId: pr.gecko_id || null, symbol: (pr.symbol || '').toUpperCase()
+  })).filter(r => isFinite(r.d30) && r.d30 > 0).sort((a, b) => b.d30 - a.d30);
+  return { rows: rows.slice(0, 25), total24h: Number(json && json.total24h) || 0, total30d: Number(json && json.total30d) || 0 };
+}
+
+/* ---- dźwignia: otwarte pozycje i finansowanie ----
+   funding_rate z CoinGecko jest w procentach za okres (zwykle 8 godzin);
+   annualizujemy przez trzy okresy dziennie, żeby pokazać realny koszt longa. */
+function parseDerivatives(json){
+  if (!Array.isArray(json)) throw new Error('Oczekiwałem tablicy kontraktów.');
+  const byAsset = {};
+  let totalOi = 0;
+  json.forEach(d => {
+    if (d.contract_type && d.contract_type !== 'perpetual') return;
+    const oi = Number(d.open_interest), vol = Number(d.volume_24h);
+    const idx = (d.index_id || d.symbol || '?').toUpperCase();
+    if (!isFinite(oi) || oi <= 0) return;
+    const a = byAsset[idx] || (byAsset[idx] = { symbol: idx, oi: 0, vol: 0, fundingW: 0, fundingWeight: 0, markets: 0 });
+    a.oi += oi; a.markets++;
+    if (isFinite(vol)) a.vol += vol;
+    const f = Number(d.funding_rate);
+    if (isFinite(f)){ a.fundingW += f * oi; a.fundingWeight += oi; }
+    totalOi += oi;
+  });
+  const assets = Object.keys(byAsset).map(k => {
+    const a = byAsset[k];
+    const funding = a.fundingWeight > 0 ? a.fundingW / a.fundingWeight : NaN;
+    return { symbol: a.symbol, oi: a.oi, vol: a.vol, markets: a.markets, funding: funding,
+      fundingAnnual: isFinite(funding) ? funding * 3 * 365 : NaN };
+  }).sort((a, b) => b.oi - a.oi);
+  if (!assets.length) throw new Error('Żaden kontrakt nie miał otwartych pozycji.');
+  return { updatedAt: new Date().toISOString(), totalOi: totalOi, assets: assets.slice(0, 20) };
+}
+
+/* ---- agregaty i wnioski ---- */
+function flowsDerived(){
+  const F = STATE.flows, out = {};
+  if (F.stables){
+    const s = F.stables;
+    out.stableChg = {
+      d1: s.prevDay > 0 ? (s.total / s.prevDay - 1) * 100 : NaN,
+      d7: s.prevWeek > 0 ? (s.total / s.prevWeek - 1) * 100 : NaN,
+      d30: s.prevMonth > 0 ? (s.total / s.prevMonth - 1) * 100 : NaN
+    };
+    // ile dolarów gotówki przybyło lub ubyło — to jest liczba, która naprawdę mówi o napływie
+    out.stableFlow = { d1: s.total - s.prevDay, d7: s.total - s.prevWeek, d30: s.total - s.prevMonth };
+  }
+  if (F.defi && STATE.market && (STATE.market.coins || []).length){
+    const byGecko = {};
+    STATE.market.coins.forEach(c => { byGecko[c.id] = c; });
+    out.chainRows = (F.defi.chains || []).slice(0, 15).map(ch => {
+      const coin = ch.geckoId ? byGecko[ch.geckoId] : null;
+      return { name: ch.name, tvl: ch.tvl, symbol: ch.symbol, mcap: coin ? coin.mcap : NaN,
+        // ile kapitalizacji tokena przypada na dolara pracującego w sieci
+        mcapPerTvl: coin && ch.tvl > 0 ? coin.mcap / ch.tvl : NaN,
+        chg7d: coin ? coin.chg7d : NaN };
+    });
+  } else if (F.defi){
+    out.chainRows = (F.defi.chains || []).slice(0, 15).map(ch => ({ name: ch.name, tvl: ch.tvl, symbol: ch.symbol, mcap: NaN, mcapPerTvl: NaN, chg7d: NaN }));
+  }
+  if (F.deriv && STATE.market && (STATE.market.coins || []).length){
+    const bySym = {};
+    STATE.market.coins.forEach(c => { bySym[c.symbol] = c; });
+    out.derivRows = F.deriv.assets.map(a => {
+      const coin = bySym[a.symbol];
+      return Object.assign({}, a, {
+        mcap: coin ? coin.mcap : NaN,
+        // dźwignia względem wielkości aktywa: ile otwartych pozycji na dolara kapitalizacji
+        oiToMcap: coin && coin.mcap > 0 ? a.oi / coin.mcap * 100 : NaN,
+        chg7d: coin ? coin.chg7d : NaN
+      });
+    });
+  } else if (F.deriv){
+    out.derivRows = F.deriv.assets.map(a => Object.assign({}, a, { mcap: NaN, oiToMcap: NaN, chg7d: NaN }));
+  }
+  if (F.defi && STATE.market){
+    const agg = (STATE.market.coins || []).length ? marketAggregate() : null;
+    out.tvlToRisk = (agg && agg.riskMcap > 0) ? F.defi.totalTvl / agg.riskMcap * 100 : NaN;
+  }
+  return out;
+}
+
+/* ---- WIDOK PRZEPŁYWÓW: render ---- */
+let flowsHorizon = 'd30';
+
+function renderFlows(){
+  const F = STATE.flows, d = flowsDerived();
+  const parts = [];
+
+  parts.push('<div class="card"><div class="card-head"><div><h2>Przepływy kapitału</h2>' +
+    '<p class="sub">Trzy warstwy, których nie widać w cenach: ile gotówki stoi gotowej (stablecoiny), ile kapitału realnie pracuje (TVL i opłaty) i czy ruch kupowany jest za gotówkę, czy na kredyt (otwarte pozycje i finansowanie).</p></div></div>' +
+    '<div class="row" style="margin-bottom:8px">' +
+      '<button class="btn primary" id="flowsFetchAll">Pobierz wszystko</button>' +
+      '<button class="btn" id="flowsFetchStables">Stablecoiny</button>' +
+      '<button class="btn" id="flowsFetchDefi">DeFi</button>' +
+      '<button class="btn" id="flowsFetchDeriv">Dźwignia</button>' +
+      '<span class="note" id="flowsMsg"></span></div>' +
+    '<p class="src">Źródła: DefiLlama (stablecoiny, TVL, opłaty — bez klucza) i CoinGecko (kontrakty wieczyste). ' +
+    (F.stables ? 'Stablecoiny: ' + fmtDateTime(F.stables.updatedAt) + '. ' : '') +
+    (F.defi ? 'DeFi: ' + fmtDateTime(F.defi.updatedAt) + '. ' : '') +
+    (F.deriv ? 'Dźwignia: ' + fmtDateTime(F.deriv.updatedAt) + '.' : '') + '</p>' +
+    '<details class="datatable"><summary>Albo wklej JSON ręcznie</summary>' +
+      '<label class="field"><span class="lab">Skąd pochodzi wklejony JSON</span><select id="flowsPasteKind">' +
+        '<option value="stables">stablecoins.llama.fi/stablecoins</option>' +
+        '<option value="chains">api.llama.fi/v2/chains</option>' +
+        '<option value="protocols">api.llama.fi/protocols</option>' +
+        '<option value="fees">api.llama.fi/overview/fees</option>' +
+        '<option value="deriv">api.coingecko.com/api/v3/derivatives</option>' +
+      '</select></label>' +
+      '<textarea id="flowsJson" spellcheck="false"></textarea>' +
+      '<button class="btn small" id="flowsLoadJson" style="margin-top:6px">Wczytaj wklejony JSON</button></details></div>');
+
+  /* Bez danych z zakładki Rynek połowa zestawień nie ma z czym się porównać —
+     mówimy o tym wprost, zamiast pokazywać kolumny z kreskami. */
+  if ((F.defi || F.deriv) && !(STATE.market.coins || []).length){
+    parts.push('<div class="banner warn">Brak danych o top 100, więc TVL i otwarte pozycje nie mają się z czym zestawić — kolumny z kapitalizacją tokenów zostaną puste. Wejdź na <b>Rynek</b> i kliknij „Pobierz top 100”, potem wróć tutaj.</div>');
+  }
+
+  /* --- STABLECOINY --- */
+  if (F.stables){
+    const s = F.stables, ch = d.stableChg, fl = d.stableFlow;
+    parts.push('<div class="card"><div class="card-head"><div><h2>Paliwo: stablecoiny</h2>' +
+      '<p class="sub">Podaż stablecoinów to jedyna twarda dana o gotówce w systemie — rośnie, gdy ktoś wpłaca fiat, a nie gdy rosną wyceny. Liczby poniżej są w dolarach faktycznie wyemitowanych, nie w wycenie.</p></div></div>' +
+      '<div class="grid g4">' +
+        kpi('Podaż stablecoinów', usdBig(s.total), 'w ' + s.assets.length + ' emitentach') +
+        kpi('Zmiana 7 dni', (isFinite(ch.d7) ? '<span class="' + (ch.d7 >= 0 ? 'pos' : 'neg') + '">' + pctSigned(ch.d7) + '</span>' : '—'),
+          (fl.d7 >= 0 ? 'przybyło ' : 'ubyło ') + usdBig(Math.abs(fl.d7)) + ' gotówki') +
+        kpi('Zmiana 30 dni', (isFinite(ch.d30) ? '<span class="' + (ch.d30 >= 0 ? 'pos' : 'neg') + '">' + pctSigned(ch.d30) + '</span>' : '—'),
+          (fl.d30 >= 0 ? 'przybyło ' : 'ubyło ') + usdBig(Math.abs(fl.d30)) + ' gotówki') +
+        kpi('Największy emitent', s.assets[0] ? s.assets[0].symbol : '—',
+          s.assets[0] ? pct(s.assets[0].now / s.total * 100) + ' całej gotówki' : '') +
+      '</div>' +
+      '<div class="grid g2" style="margin-top:14px">' +
+        '<div><h4>Emitenci</h4><div class="chart-wrap short"><canvas id="chartStableAssets"></canvas></div></div>' +
+        '<div><h4>Łańcuchy</h4><div class="chart-wrap short"><canvas id="chartStableChains"></canvas></div></div>' +
+      '</div>' +
+      '<div class="table-wrap" style="margin-top:12px">' + stableTable(s) + '</div>' +
+      '<div class="table-wrap" style="margin-top:12px">' + chainStableTable(s) + '</div></div>');
+  }
+
+  /* --- DEFI --- */
+  if (F.defi){
+    const f = F.defi;
+    parts.push('<div class="card"><div class="card-head"><div><h2>Zaangażowanie: DeFi</h2>' +
+      '<p class="sub">TVL to kapitał, który ktoś realnie zaparkował w protokołach. Zestawiony z kapitalizacją tokena łańcucha mówi, czy sieć przyciąga pieniądze, czy tylko została przewartościowana.</p></div></div>' +
+      '<div class="grid g4">' +
+        kpi('TVL w DeFi', usdBig(f.totalTvl), (f.categories || []).length + ' kategorii · ' + (f.chains || []).length + ' łańcuchów') +
+        kpi('Kapitał pracujący', isFinite(d.tvlToRisk) ? pct(d.tvlToRisk) : '—', 'TVL wobec kapitalizacji aktywów ryzykownych z top 100') +
+        kpi('Opłaty 30 dni', usdBig(f.fees30d), 'realny przychód protokołów, nie emisja') +
+        kpi('Opłaty 24 godziny', usdBig(f.fees24h), 'w skali roku ' + usdBig(f.fees24h * 365)) +
+      '</div>' +
+      '<div class="chart-wrap short" style="margin-top:14px"><canvas id="chartTvlChains"></canvas></div>' +
+      '<div class="table-wrap" style="margin-top:12px">' + chainTvlTable(d.chainRows || []) + '</div>' +
+      '<div class="table-wrap" style="margin-top:12px">' + categoryTable(f.categories || []) + '</div>' +
+      ((f.fees || []).length ? '<details class="datatable" style="margin-top:10px"><summary>Protokoły o największych opłatach (30 dni)</summary><div class="table-wrap">' + feesTable(f.fees) + '</div></details>' : '') +
+      '</div>');
+  }
+
+  /* --- DŹWIGNIA --- */
+  if (F.deriv){
+    const rows = d.derivRows || [];
+    const top = rows[0];
+    const wAvg = (function(){
+      let w = 0, s2 = 0;
+      rows.forEach(r => { if (isFinite(r.fundingAnnual)){ w += r.fundingAnnual * r.oi; s2 += r.oi; } });
+      return s2 > 0 ? w / s2 : NaN;
+    })();
+    parts.push('<div class="card"><div class="card-head"><div><h2>Dźwignia: kontrakty wieczyste</h2>' +
+      '<p class="sub">Otwarte pozycje mówią, ile kredytu stoi za ruchem. Cena w górę razem z otwartymi pozycjami to rajd na dźwigni — kruchy. Cena w górę przy spadających pozycjach to kupno za gotówkę. Finansowanie pokazuje, po której stronie zrobił się tłok.</p></div></div>' +
+      '<div class="grid g4">' +
+        kpi('Otwarte pozycje razem', usdBig(F.deriv.totalOi), rows.length + ' aktywów') +
+        kpi('Finansowanie ważone', isFinite(wAvg) ? '<span class="' + (wAvg > 0 ? 'neg' : 'pos') + '">' + pctSigned(wAvg) + ' r/r</span>' : '—',
+          wAvg > 0 ? 'longi płacą shortom — tłok po stronie wzrostów' : 'shorty płacą longom — tłok po stronie spadków') +
+        kpi('Największa pozycja', top ? top.symbol : '—', top ? usdBig(top.oi) + (isFinite(top.oiToMcap) ? ' · ' + pct(top.oiToMcap) + ' kapitalizacji' : '') : '') +
+        kpi('Obrót kontraktami 24h', usdBig(rows.reduce((a, r) => a + num(r.vol), 0)), 'dla porównania: obrót spot z top 100') +
+      '</div>' +
+      '<div class="chart-wrap short" style="margin-top:14px"><canvas id="chartFunding"></canvas></div>' +
+      '<div class="table-wrap" style="margin-top:12px">' + derivTable(rows) + '</div></div>');
+  }
+
+  if (!F.stables && !F.defi && !F.deriv){
+    parts.push('<div class="card"><p class="note">Nie ma jeszcze żadnych danych o przepływach. Kliknij „Pobierz wszystko” — trzy zapytania do DefiLlama i jedno do CoinGecko, bez kluczy API.</p></div>');
+  }
+
+  el('flowsPane').innerHTML = parts.join('');
+  wireFlows();
+  if (F.stables){ renderStableCharts(F.stables); }
+  if (F.defi){ renderTvlChart(d.chainRows || []); }
+  if (F.deriv){ renderFundingChart(d.derivRows || []); }
+}
+
+function chgCell(now, then){
+  if (!(then > 0)) return '—';
+  const v = (now / then - 1) * 100;
+  return '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + pctSigned(v) + '</span>';
+}
+function flowCell(now, then){
+  if (!(then > 0)) return '—';
+  const v = now - then;
+  return '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + (v >= 0 ? '+' : '−') + usdBig(Math.abs(v)) + '</span>';
+}
+function stableTable(s){
+  let h = '<table><thead><tr><th>Emitent</th><th class="num">Podaż</th><th class="num">Udział</th>' +
+    '<th class="num">7 dni</th><th class="num">Δ 7 dni</th><th class="num">30 dni</th><th class="num">Δ 30 dni</th></tr></thead><tbody>';
+  s.assets.forEach(a => {
+    h += '<tr><td><b>' + esc(a.symbol) + '</b> <span class="sub">' + esc(a.name) + '</span></td>' +
+      '<td class="num">' + usdBig(a.now) + '</td><td class="num">' + pct(a.now / s.total * 100) + '</td>' +
+      '<td class="num">' + chgCell(a.now, a.prevWeek) + '</td><td class="num">' + flowCell(a.now, a.prevWeek) + '</td>' +
+      '<td class="num">' + chgCell(a.now, a.prevMonth) + '</td><td class="num">' + flowCell(a.now, a.prevMonth) + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+function chainStableTable(s){
+  let h = '<table><thead><tr><th>Łańcuch</th><th class="num">Gotówka</th><th class="num">Udział</th>' +
+    '<th class="num">7 dni</th><th class="num">Δ 7 dni</th><th class="num">30 dni</th><th class="num">Δ 30 dni</th></tr></thead><tbody>';
+  s.chains.forEach(c => {
+    h += '<tr><td>' + esc(c.name) + '</td><td class="num">' + usdBig(c.now) + '</td><td class="num">' + pct(c.now / s.total * 100) + '</td>' +
+      '<td class="num">' + chgCell(c.now, c.prevWeek) + '</td><td class="num">' + flowCell(c.now, c.prevWeek) + '</td>' +
+      '<td class="num">' + chgCell(c.now, c.prevMonth) + '</td><td class="num">' + flowCell(c.now, c.prevMonth) + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+function chainTvlTable(rows){
+  let h = '<table><thead><tr><th>Łańcuch</th><th class="num">TVL</th><th class="num">Kapitalizacja tokena</th>' +
+    '<th class="num">Kapitalizacja / TVL</th><th class="num">Wycena 7 dni</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    h += '<tr><td>' + esc(r.name) + (r.symbol ? ' <span class="sub">' + esc(r.symbol) + '</span>' : '') + '</td>' +
+      '<td class="num">' + usdBig(r.tvl) + '</td>' +
+      '<td class="num">' + (isFinite(r.mcap) ? usdBig(r.mcap) : '<span class="sub">poza top 100</span>') + '</td>' +
+      '<td class="num">' + (isFinite(r.mcapPerTvl) ? mult(r.mcapPerTvl, 2) : '—') + '</td>' +
+      '<td class="num">' + (isFinite(r.chg7d) ? '<span class="' + (r.chg7d >= 0 ? 'pos' : 'neg') + '">' + pctSigned(r.chg7d) + '</span>' : '—') + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+function categoryTable(cats){
+  let h = '<table><thead><tr><th>Kategoria DeFi</th><th class="num">Protokołów</th><th class="num">TVL</th>' +
+    '<th class="num">1 dzień</th><th class="num">7 dni</th><th class="num">30 dni</th></tr></thead><tbody>';
+  const sgn = v => isFinite(v) ? '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + pctSigned(v) + '</span>' : '—';
+  cats.slice(0, 15).forEach(c => {
+    h += '<tr><td><b>' + esc(c.name) + '</b></td><td class="num">' + c.count + '</td><td class="num">' + usdBig(c.tvl) + '</td>' +
+      '<td class="num">' + sgn(c.chg1d) + '</td><td class="num">' + sgn(c.chg7d) + '</td><td class="num">' + sgn(c.chg30d) + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+function feesTable(rows){
+  let h = '<table><thead><tr><th>Protokół</th><th>Kategoria</th><th class="num">Opłaty 24h</th><th class="num">Opłaty 30 dni</th><th class="num">W skali roku</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    h += '<tr><td><b>' + esc(r.name) + '</b>' + (r.symbol ? ' <span class="sub">' + esc(r.symbol) + '</span>' : '') + '</td>' +
+      '<td class="sub">' + esc(r.category) + '</td><td class="num">' + usdBig(r.d24) + '</td>' +
+      '<td class="num">' + usdBig(r.d30) + '</td><td class="num">' + usdBig(r.d30 * 12.17) + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+function derivTable(rows){
+  let h = '<table><thead><tr><th>Aktywo</th><th class="num">Otwarte pozycje</th><th class="num">Kapitalizacja</th>' +
+    '<th class="num">Pozycje / kapitalizacja</th><th class="num">Finansowanie r/r</th><th class="num">Obrót 24h</th><th class="num">Rynków</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    h += '<tr><td><b>' + esc(r.symbol) + '</b></td><td class="num">' + usdBig(r.oi) + '</td>' +
+      '<td class="num">' + (isFinite(r.mcap) ? usdBig(r.mcap) : '<span class="sub">poza top 100</span>') + '</td>' +
+      '<td class="num">' + (isFinite(r.oiToMcap) ? pct(r.oiToMcap, 2) : '—') + '</td>' +
+      '<td class="num">' + (isFinite(r.fundingAnnual) ? '<span class="' + (r.fundingAnnual > 0 ? 'neg' : 'pos') + '">' + pctSigned(r.fundingAnnual) + '</span>' : '—') + '</td>' +
+      '<td class="num">' + usdBig(r.vol) + '</td><td class="num">' + r.markets + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+
+/* ---- wykresy przepływów ---- */
+function renderStableCharts(s){
+  const top = s.assets.slice(0, 8);
+  makeChart('chartStableAssets', {
+    type: 'bar',
+    data: { labels: top.map(a => a.symbol), datasets: [{
+      label: 'zmiana podaży 30 dni',
+      data: top.map(a => (a.prevMonth > 0 ? a.now - a.prevMonth : 0)),
+      backgroundColor: top.map(a => (a.prevMonth > 0 && a.now >= a.prevMonth) ? cssVar('--s1') : cssVar('--s8')),
+      borderRadius: 4, borderSkipped: false
+    }] },
+    options: baseOptions({
+      indexAxis: 'y',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => {
+        const a = top[ctx.dataIndex];
+        return [(ctx.parsed.x >= 0 ? 'przybyło ' : 'ubyło ') + usdBig(Math.abs(ctx.parsed.x)) + ' w 30 dni',
+                'podaż teraz ' + usdBig(a.now)];
+      } } } },
+      scales: { x: { grid: { color: c => c.tick.value === 0 ? cssVar('--border-strong') : cssVar('--grid') },
+                     ticks: { callback: v => usdBig(v) } }, y: { grid: { display: false } } }
+    })
+  });
+  const tc = s.chains.slice(0, 8);
+  makeChart('chartStableChains', {
+    type: 'bar',
+    data: { labels: tc.map(c => c.name), datasets: [{
+      label: 'zmiana gotówki 30 dni',
+      data: tc.map(c => (c.prevMonth > 0 ? c.now - c.prevMonth : 0)),
+      backgroundColor: tc.map(c => (c.prevMonth > 0 && c.now >= c.prevMonth) ? cssVar('--s1') : cssVar('--s8')),
+      borderRadius: 4, borderSkipped: false
+    }] },
+    options: baseOptions({
+      indexAxis: 'y',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => {
+        const c = tc[ctx.dataIndex];
+        return [(ctx.parsed.x >= 0 ? 'przybyło ' : 'ubyło ') + usdBig(Math.abs(ctx.parsed.x)) + ' w 30 dni',
+                'gotówka na łańcuchu ' + usdBig(c.now)];
+      } } } },
+      scales: { x: { grid: { color: c => c.tick.value === 0 ? cssVar('--border-strong') : cssVar('--grid') },
+                     ticks: { callback: v => usdBig(v) } }, y: { grid: { display: false } } }
+    })
+  });
+}
+function renderTvlChart(rows){
+  const top = rows.slice(0, 12);
+  makeChart('chartTvlChains', {
+    type: 'bar',
+    data: { labels: top.map(r => r.name), datasets: [{
+      label: 'TVL', data: top.map(r => r.tvl),
+      backgroundColor: cssVar('--s3'), borderRadius: 4, borderSkipped: false
+    }] },
+    options: baseOptions({
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => {
+        const r = top[ctx.dataIndex];
+        return ['TVL ' + usdBig(r.tvl)].concat(isFinite(r.mcapPerTvl) ? ['kapitalizacja tokena ' + mult(r.mcapPerTvl, 2) + ' TVL'] : []);
+      } } } },
+      scales: { y: { ticks: { callback: v => usdBig(v) } }, x: { ticks: { font: { size: 10 } } } }
+    })
+  });
+}
+function renderFundingChart(rows){
+  const top = rows.filter(r => isFinite(r.fundingAnnual)).slice(0, 12);
+  if (!top.length){ makeChart('chartFunding', null, 'Brak stawek finansowania w odpowiedzi.'); return; }
+  makeChart('chartFunding', {
+    type: 'bar',
+    data: { labels: top.map(r => r.symbol), datasets: [{
+      label: 'finansowanie w skali roku',
+      data: top.map(r => r.fundingAnnual),
+      backgroundColor: top.map(r => r.fundingAnnual >= 0 ? cssVar('--s8') : cssVar('--s1')),
+      borderRadius: 4, borderSkipped: false
+    }] },
+    options: baseOptions({
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => {
+        const r = top[ctx.dataIndex];
+        return [(ctx.parsed.y >= 0 ? 'longi płacą ' : 'shorty płacą ') + pct(Math.abs(ctx.parsed.y)) + ' rocznie',
+                'otwarte pozycje ' + usdBig(r.oi)];
+      } } } },
+      scales: { y: { grid: { color: c => c.tick.value === 0 ? cssVar('--border-strong') : cssVar('--grid') },
+                     ticks: { callback: v => pctSigned(v, 0) } } }
+    })
+  });
+}
+
+/* ---- pobieranie ---- */
+function flowsSet(kind, value){
+  if (kind === 'stables') STATE.flows.stables = value;
+  else if (kind === 'deriv') STATE.flows.deriv = value;
+  else {
+    const d = STATE.flows.defi || { updatedAt: null, totalTvl: 0, chains: [], categories: [], fees: [], fees24h: 0, fees30d: 0 };
+    if (kind === 'chains'){ d.chains = value; d.totalTvl = value.reduce((a, c) => a + c.tvl, 0); }
+    if (kind === 'protocols') d.categories = value;
+    if (kind === 'fees'){ d.fees = value.rows; d.fees24h = value.total24h; d.fees30d = value.total30d; }
+    d.updatedAt = new Date().toISOString();
+    STATE.flows.defi = d;
+  }
+}
+const FLOW_SOURCES = {
+  stables:   { url: LLAMA_STABLES,   parse: parseStables,      label: 'stablecoiny' },
+  chains:    { url: LLAMA_CHAINS,    parse: parseChains,       label: 'TVL łańcuchów' },
+  protocols: { url: LLAMA_PROTOCOLS, parse: parseProtocols,    label: 'kategorie DeFi' },
+  fees:      { url: LLAMA_FEES,      parse: parseFees,         label: 'opłaty' },
+  deriv:     { url: CG_DERIVATIVES,  parse: parseDerivatives,  label: 'kontrakty wieczyste' }
+};
+function fetchFlow(kind){
+  const src = FLOW_SOURCES[kind];
+  return fetch(src.url).then(res => {
+    if (res.status === 429) throw new Error('limit zapytań — odczekaj minutę');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }).then(j => { flowsSet(kind, src.parse(j)); return src.label; });
+}
+function runFlowFetch(kinds){
+  const msg = el('flowsMsg');
+  msg.style.color = ''; msg.textContent = 'Pobieram…';
+  const lines = [];
+  sequence(kinds, fetchFlow, (kind, ok, val) => {
+    lines.push((ok ? '✓ ' : '✗ ') + FLOW_SOURCES[kind].label + (ok ? '' : ': ' + val.message));
+    msg.textContent = lines.join(' · ');
+  }).then(res => {
+    saveFlowsSnapshot();
+    saveState();
+    const bad = res.filter(r => !r.ok).length;
+    renderFlows();
+    const m2 = el('flowsMsg');
+    if (m2){
+      m2.style.color = bad ? 'var(--warn)' : 'var(--good)';
+      m2.innerHTML = lines.map(esc).join('<br>') +
+        (bad && IN_FRAME ? '<br><span class="sub">W ramce podglądu zapytania na zewnątrz są blokowane — otwórz adres w karcie i wklej JSON.</span>' : '');
+    }
+  });
+}
+function saveFlowsSnapshot(){
+  const F = STATE.flows;
+  if (!F.stables && !F.defi && !F.deriv) return;
+  const e = { date: todayISO(),
+    stablesTotal: F.stables ? F.stables.total : NaN,
+    defiTvl: F.defi ? F.defi.totalTvl : NaN,
+    oi: F.deriv ? F.deriv.totalOi : NaN };
+  const prev = F.history.filter(x => x.date === e.date)[0];
+  if (prev) Object.assign(prev, e); else F.history.push(e);
+  F.history.sort((a, b) => a.date.localeCompare(b.date));
+  if (F.history.length > 400) F.history = F.history.slice(-400);
+}
+function wireFlows(){
+  const on = (id, fn) => { const b = el(id); if (b) b.addEventListener('click', fn); };
+  on('flowsFetchAll', () => runFlowFetch(['stables', 'chains', 'protocols', 'fees', 'deriv']));
+  on('flowsFetchStables', () => runFlowFetch(['stables']));
+  on('flowsFetchDefi', () => runFlowFetch(['chains', 'protocols', 'fees']));
+  on('flowsFetchDeriv', () => runFlowFetch(['deriv']));
+  on('flowsLoadJson', () => {
+    const kind = el('flowsPasteKind').value, msg = el('flowsMsg');
+    let data;
+    try { data = JSON.parse(el('flowsJson').value); }
+    catch (e){ msg.style.color = 'var(--critical)'; msg.textContent = 'To nie jest poprawny JSON: ' + e.message; return; }
+    try {
+      flowsSet(kind, FLOW_SOURCES[kind].parse(data));
+      saveFlowsSnapshot(); saveState(); renderFlows();
+      const m2 = el('flowsMsg');
+      if (m2){ m2.style.color = 'var(--good)'; m2.textContent = 'Wczytano: ' + FLOW_SOURCES[kind].label + '.'; }
+    } catch (e){ msg.style.color = 'var(--critical)'; msg.textContent = e.message; }
+  });
+}
+
+/* ============================================================
    16. NAWIGACJA, BANERY, START
    ============================================================ */
 let currentView = 'dashboard';
-const VIEWS = ['dashboard', 'token', 'edit', 'daily', 'compare', 'market', 'data', 'tests'];
+const VIEWS = ['dashboard', 'token', 'edit', 'daily', 'compare', 'market', 'flows', 'data', 'tests'];
 
 function showView(name){
   if (VIEWS.indexOf(name) < 0) name = 'dashboard';
@@ -4191,6 +5043,7 @@ function renderCurrentView(){
     case 'daily': renderDaily(); break;
     case 'compare': renderCompare(); break;
     case 'market': renderMarket(); break;
+    case 'flows': renderFlows(); break;
     case 'data': renderData(); break;
     case 'tests': renderTests(); break;
   }

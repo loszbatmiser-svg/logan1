@@ -174,6 +174,60 @@ w duchu reszty aplikacji. Stąd:
 Opakowane aktywa i derywaty (WBTC, stETH, WETH…) mają własny sektor i są domyślnie **wyłączone z sum**,
 bo dublują kapitalizację aktywa bazowego. Przełącznik jest nad tabelą.
 
+## Historia i płynność prosto z API
+
+W „Codziennej aktualizacji” są dwa przyciski obok każdego tokena i dwa zbiorcze:
+
+* **Historia 365 dni** — `/coins/{id}/market_chart` daje ceny i kapitalizacje dzień po dniu, a podaż
+  w obiegu wyliczamy jako kapitalizacja ÷ cena. Dokładnie tej liczby potrzebuje sygnał odbudowy, żeby
+  odróżnić wzrost wyceny od przyrostu podaży. Dane demonstracyjne są zastępowane w całości, własne
+  odczyty zostają nietknięte.
+* **Płynność z giełd** — `/coins/{id}/tickers?depth=true` zwraca `cost_to_move_up_usd`, czyli koszt
+  przesunięcia ceny o 2%. To jest ta głębokość księgi, którą wcześniej wpisywało się ręcznie. Liczymy
+  ją z rynków o zaufaniu „green”, a spread jako średnią ważoną wolumenem. Spread powyżej 1% zapala flagę.
+
+Zapytania idą po kolei z przerwą 1,4 s, bo darmowe API CoinGecko szybko odcina.
+
+## Zakładka „Przepływy”
+
+Trzy warstwy, których nie widać w cenach. Źródła: **DefiLlama** (bez klucza) i CoinGecko.
+
+### Paliwo — stablecoiny
+
+`stablecoins.llama.fi/stablecoins` daje podaż każdego emitenta osobno i w rozbiciu na łańcuchy, razem
+z wartościami sprzed doby, tygodnia i miesiąca — czyli zmiany bez czekania na własne migawki. Wartości
+czytamy przez `pegType` danego aktywa, więc stablecoiny spoza dolara też są liczone (jest na to test).
+
+Najważniejsza kolumna to nie procent, tylko **Δ w dolarach**: ile gotówki realnie przybyło albo ubyło.
+Rozbicie na łańcuchy pokazuje, dokąd się przeprowadziła — rosnąca podaż USDC na Solanie przy kurczącej
+się na Ethereum to przeprowadzka kapitału, widoczna zanim ruszą ceny.
+
+### Zaangażowanie — DeFi
+
+TVL per łańcuch (`api.llama.fi/v2/chains`) łączony po `gecko_id` z kapitalizacją z top 100 daje
+**kapitalizację na dolara TVL**: sieć wyceniona na ×15 swojego TVL została przewartościowana wobec
+sieci wycenionej na ×3, przy tej samej dynamice. TVL kategorii (`/protocols`, agregowane lokalnie po
+`category`) pokazuje, czy kapitał idzie w lending, staking płynny czy RWA. Opłaty (`/overview/fees`)
+to realny przychód protokołów — ta sama miara, której warstwa fundamentalna używa do liczenia P/S.
+
+### Dźwignia — kontrakty wieczyste
+
+`api/v3/derivatives` agregowane po `index_id`. Kontrakty z datą wygaśnięcia są pomijane, bo nie mają
+finansowania. Stawka jest za okres ośmiogodzinny, więc annualizujemy przez trzy okresy i 365 dni —
+dodatnie finansowanie znaczy, że longi płacą shortom, czyli po stronie wzrostów zrobił się tłok.
+**Otwarte pozycje wobec kapitalizacji** mówią, ile kredytu stoi za aktywem: cena rosnąca razem z tym
+wskaźnikiem to rajd na dźwigni, kruchy; cena rosnąca przy jego spadku to kupno za gotówkę.
+
+Bez danych z zakładki Rynek połowa tych zestawień nie ma z czym się porównać — aplikacja mówi o tym
+banerem, zamiast pokazywać kolumny z kreskami.
+
+## Szerokość rynku
+
+W zakładce Rynek, liczona z danych, które i tak są pobrane — bez ani jednego zapytania więcej. Mediana
+zwrotu ponad zwrot ważony kapitalizacją znaczy, że rośnie cały rynek i małe pozycje mają paliwo; poniżej
+— ciągną tylko molochy, a reszta stoi mimo zielonych indeksów. Do tego odsetek monet bijących BTC
+i odsetek na plusie, dla 7 i 30 dni.
+
 ## Wersja artefaktowa
 
 `build-artifact.py` robi z `index.html` plik do opublikowania jako artefakt na claude.ai.
