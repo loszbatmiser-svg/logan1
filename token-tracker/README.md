@@ -133,6 +133,47 @@ Efekt uboczny, który wyszedł dopiero na testach i jest teraz osobnym ostrzeże
 dzisiejszym kursie 3,71, musisz dojść do ceny o ~12% wyższej niż średnia cena zakupu w USD, żeby
 w ogóle wyjść na zero w PLN.
 
+## Zakładka „Rynek”: przepływ kapitału między sektorami
+
+Jedno zapytanie do `/api/v3/coins/markets` (top 100, `price_change_percentage=24h,7d,30d`) wystarcza,
+żeby policzyć wszystko poniżej. Sektory sumowane są lokalnie z klasyfikacji zaszytej w pliku —
+**to moja propozycja, nie oficjalna taksonomia**: każda moneta ma jeden sektor, ten, który najlepiej
+opisuje, po co ta sieć istnieje. Każde przypisanie zmienia się w tabeli i zapisuje w danych.
+
+### Czy do rynku napływa gotówka
+
+Ceny same tego nie powiedzą — ta sama gotówka potrafi podnieść wyceny. Jedynym widocznym śladem
+świeżego pieniądza jest **kapitalizacja stablecoinów**: rośnie, gdy ktoś wpłaca fiat i dostaje token.
+Obie strony liczone są tą samą miarą (kapitalizacją), stąd cztery stany:
+
+| kapitał w gotówce | kapitał w ryzyku | sygnał |
+|---|---|---|
+| rośnie | rośnie | **napływa nowa gotówka** — to nowy pieniądz, nie przetasowanie |
+| maleje | rośnie | **gotówka wchodzi w ryzyko** — kupuje kapitał, który już tu był; paliwo się zużywa |
+| rośnie | maleje | **ucieczka do gotówki** — pieniądze czekają, ale zostają w systemie |
+| maleje | maleje | **kapitał wychodzi z krypto** |
+
+Okno to 24 godziny (tyle daje API) i rozszerza się do 30 dni, gdy uzbierają się migawki — zapisują się
+same przy każdym pobraniu danych.
+
+### Który sektor prowadzi, a który jest w tyle
+
+Kapitalizację sprzed 7 i 30 dni odtwarzamy z procentowej zmiany **ceny**: `mcap_wtedy = mcap_dziś / (1 + zmiana)`.
+To daje wycenę przy dzisiejszej podaży — czysty ruch wyceny, bez domieszki nowych tokenów, dokładnie
+w duchu reszty aplikacji. Stąd:
+
+* **siła wobec rynku** = `(1 + zmiana sektora) / (1 + zmiana rynku) − 1`
+* **mapa rotacji** — bąbelki w układzie: siła 30-dniowa na poziomej, 7-dniowa na pionowej, wielkość to
+  udział w kapitalizacji. Prawy górny róg prowadzi i przyspiesza, lewy górny właśnie się odwraca,
+  prawy dolny traci rozpęd, lewy dolny jest w tyle.
+* **zmiana udziału w punktach procentowych** — gra o sumie zerowej, więc widać wprost, kto komu zabrał.
+  Aplikacja to sprawdza w testach: suma udziałów 100%, suma zmian 0 pp.
+* **FDV / kapitalizacja sektora** — nawis rozwodnienia całego sektora, czyli ile razy więcej kapitału
+  będzie potrzebne, gdy wejdzie cała jego podaż. Tego nie pokazuje żaden agregator.
+
+Opakowane aktywa i derywaty (WBTC, stETH, WETH…) mają własny sektor i są domyślnie **wyłączone z sum**,
+bo dublują kapitalizację aktywa bazowego. Przełącznik jest nad tabelą.
+
 ## Wersja artefaktowa
 
 `build-artifact.py` robi z `index.html` plik do opublikowania jako artefakt na claude.ai.

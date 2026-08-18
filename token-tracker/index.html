@@ -222,6 +222,7 @@ ul.tight{margin:.3em 0; padding-left:1.15em} ul.tight li{margin-bottom:.25em; fo
     <button data-view="edit">Dodaj / edytuj</button>
     <button data-view="daily">Codzienna aktualizacja</button>
     <button data-view="compare">Porównanie</button>
+    <button data-view="market">Rynek</button>
     <button data-view="data">Dane i ustawienia</button>
     <button data-view="tests">Testy</button>
   </nav>
@@ -304,6 +305,9 @@ ul.tight{margin:.3em 0; padding-left:1.15em} ul.tight li{margin-bottom:.25em; fo
 
   <!-- ============ WIDOK 5: PORÓWNANIE ============ -->
   <section id="view-compare" class="view hidden"><div id="comparePane"></div></section>
+
+  <!-- ============ WIDOK 6: RYNEK ============ -->
+  <section id="view-market" class="view hidden"><div id="marketPane"></div></section>
 
   <!-- ============ DANE I USTAWIENIA ============ -->
   <section id="view-data" class="view hidden"><div id="dataPane"></div></section>
@@ -627,6 +631,7 @@ function defaultState(){
     },
     tokens: seedTokens(),
     benchmark: seedBenchmark(),
+    market: { updatedAt: null, coins: [], sectorOverrides: {}, history: [], excludeWrapped: true },
     meta: { savedAt: null, seededAt: new Date().toISOString() }
   };
 }
@@ -671,6 +676,7 @@ function normalizeState(s){
     version: 1,
     settings: Object.assign({}, d.settings, s.settings || {}),
     tokens: Array.isArray(s.tokens) ? s.tokens.map(normalizeToken) : d.tokens,
+    market: normalizeMarket(s.market),
     benchmark: {
       label: bench.label || 'Kapitalizacja rynku krypto',
       isDemo: !!bench.isDemo,
@@ -3372,6 +3378,52 @@ function runTests(){
     isFinite(bch) ? pctSigned(bch * 100) + ' w 30 dni' : 'brak historii benchmarku',
     (STATE.benchmark && STATE.benchmark.isDemo) ? 'Historia benchmarku jest startowa/demonstracyjna — nadpisz ją własnymi odczytami.' : '');
 
+  // rynek: parsowanie odpowiedzi CoinGecko i niezmienniki agregacji
+  try {
+    const raw = [
+      { id: 'bitcoin', symbol: 'btc', name: 'Bitcoin', current_price: 100000, market_cap: 2e12, total_supply: 21e6,
+        fully_diluted_valuation: 2.1e12, total_volume: 5e10, circulating_supply: 20e6, market_cap_rank: 1,
+        price_change_percentage_24h_in_currency: 1, price_change_percentage_7d_in_currency: 10,
+        price_change_percentage_30d_in_currency: 20, market_cap_change_percentage_24h: 1.1 },
+      // brak fully_diluted_valuation → FDV ma się policzyć z ceny i podaży docelowej
+      { id: 'peaq-2', symbol: 'peaq', name: 'peaq', current_price: 0.02, market_cap: 4e7, total_supply: 5e9,
+        fully_diluted_valuation: null, total_volume: 3e6, circulating_supply: 2e9, market_cap_rank: 2,
+        price_change_percentage_24h_in_currency: 2, price_change_percentage_7d_in_currency: 25,
+        price_change_percentage_30d_in_currency: 60, market_cap_change_percentage_24h: 2.4 },
+      { id: 'tether', symbol: 'usdt', name: 'Tether', current_price: 1, market_cap: 1.5e11, total_supply: 1.5e11,
+        fully_diluted_valuation: 1.5e11, total_volume: 6e10, circulating_supply: 1.5e11, market_cap_rank: 3,
+        price_change_percentage_24h_in_currency: 0, price_change_percentage_7d_in_currency: 0,
+        price_change_percentage_30d_in_currency: 0, market_cap_change_percentage_24h: 0.8 }
+    ];
+    const parsed = parseMarkets(raw);
+    const peaqRow = parsed.filter(c => c.id === 'peaq-2')[0];
+    add('Rynek: brak FDV w odpowiedzi liczy się z podaży docelowej', Math.abs(peaqRow.fdv - 1e8) < 1,
+      '0,02 $ × 5 mld = 100 mln $', usdBig(peaqRow.fdv), 'CoinGecko zwraca puste fully_diluted_valuation dla części monet.');
+
+    const saved = STATE.market;
+    STATE.market = { updatedAt: null, coins: parsed, sectorOverrides: {}, history: [], excludeWrapped: true };
+    const g = marketAggregate();
+    const shareSum = g.sectors.reduce((a, x) => a + x.share, 0);
+    const deltaSum = g.sectors.reduce((a, x) => a + (isFinite(x.shareDelta.d30) ? x.shareDelta.d30 : 0), 0);
+    add('Rynek: udziały sumują się do 100%, a ich zmiany do zera',
+      Math.abs(shareSum - 100) < 1e-9 && Math.abs(deltaSum) < 1e-9,
+      '100% i 0 pp', fmt(shareSum, 4) + '% · ' + fmt(deltaSum, 6) + ' pp',
+      'Zmiana udziału to gra o sumie zerowej — jeden sektor bierze dokładnie tyle, ile oddają pozostałe.');
+
+    const flowRot = cashFlowSignal(g, {});
+    add('Rynek: gotówka rośnie razem z ryzykiem → napływ', flowRot.key === 'inflow', 'inflow', flowRot.key,
+      'Stablecoiny +' + fmt(g.stableChg24, 2) + '%, kapitał w ryzyku +' + fmt(g.riskMcapChg24, 2) + '%.');
+    const flip = JSON.parse(JSON.stringify(parsed));
+    flip.filter(c => c.id === 'tether')[0].mcapChg24 = -1.5;
+    STATE.market.coins = flip;
+    add('Rynek: ryzyko rośnie, gotówki ubywa → rotacja', cashFlowSignal(marketAggregate(), {}).key === 'rotation',
+      'rotation', cashFlowSignal(marketAggregate(), {}).key,
+      'Ten sam kapitał przechodzi z gotówki w aktywa — nie przybyło pieniędzy, ubyło paliwa.');
+    STATE.market = saved;
+  } catch (e){
+    add('Rynek: parsowanie i agregacja', false, 'brak błędu', e.message, '');
+  }
+
   // 9. środowisko
   add('Autozapis do localStorage', storageOk, 'dostępny', storageOk ? 'dostępny' : 'zablokowany — używaj eksportu JSON', '');
   add('Chart.js z CDN', chartAvailable(), 'załadowany', chartAvailable() ? 'załadowany' : 'brak — aplikacja działa, wykresy zastąpione tabelami', '');
@@ -3395,10 +3447,727 @@ function renderTests(){
   el('rerunTests').addEventListener('click', renderTests);
 }
 /* ============================================================
+   17. WIDOK 6 — RYNEK: top 100 i przepływ kapitału między sektorami
+   ============================================================ */
+
+/* Klasyfikacja sektorowa. To MOJA propozycja, nie oficjalna taksonomia CoinGecko:
+   wiele monet należy do kilku sektorów naraz, tu każda ma jeden — ten, który
+   najlepiej opisuje, po co ta sieć istnieje. Każde przypisanie można zmienić
+   w tabeli i zmiana zapisuje się w danych. */
+const SECTOR_MAP = {
+  // Warstwa 1
+  'bitcoin': 'Warstwa 1', 'ethereum': 'Warstwa 1', 'solana': 'Warstwa 1', 'cardano': 'Warstwa 1',
+  'avalanche-2': 'Warstwa 1', 'polkadot': 'Warstwa 1', 'near': 'Warstwa 1', 'aptos': 'Warstwa 1',
+  'sui': 'Warstwa 1', 'tron': 'Warstwa 1', 'the-open-network': 'Warstwa 1', 'cosmos': 'Warstwa 1',
+  'algorand': 'Warstwa 1', 'hedera-hashgraph': 'Warstwa 1', 'internet-computer': 'Warstwa 1',
+  'sei-network': 'Warstwa 1', 'kaspa': 'Warstwa 1', 'tezos': 'Warstwa 1', 'elrond-erd-2': 'Warstwa 1',
+  'flow': 'Warstwa 1', 'celestia': 'Warstwa 1', 'aptos-2': 'Warstwa 1', 'berachain-bera': 'Warstwa 1',
+  'monad': 'Warstwa 1', 'eos': 'Warstwa 1', 'ethereum-classic': 'Warstwa 1', 'stacks': 'Warstwa 1',
+  'kaia': 'Warstwa 1', 'sonic-3': 'Warstwa 1', 'story-2': 'Warstwa 1',
+  // Warstwa 2 i skalowanie
+  'matic-network': 'Warstwa 2', 'polygon-ecosystem-token': 'Warstwa 2', 'arbitrum': 'Warstwa 2',
+  'optimism': 'Warstwa 2', 'mantle': 'Warstwa 2', 'immutable-x': 'Warstwa 2', 'starknet': 'Warstwa 2',
+  'blast': 'Warstwa 2', 'metis-token': 'Warstwa 2', 'zksync': 'Warstwa 2', 'scroll': 'Warstwa 2',
+  // Stablecoiny
+  'tether': 'Stablecoiny', 'usd-coin': 'Stablecoiny', 'dai': 'Stablecoiny', 'ethena-usde': 'Stablecoiny',
+  'first-digital-usd': 'Stablecoiny', 'usds': 'Stablecoiny', 'paypal-usd': 'Stablecoiny',
+  'true-usd': 'Stablecoiny', 'binance-usd': 'Stablecoiny', 'frax': 'Stablecoiny', 'susds': 'Stablecoiny',
+  'blackrock-usd-institutional-digital-liquidity-fund': 'Stablecoiny', 'ripple-usd': 'Stablecoiny',
+  'usd1-wlfi': 'Stablecoiny', 'sky-dollar': 'Stablecoiny',
+  // Opakowane i derywaty — dublują kapitalizację aktywa bazowego
+  'staked-ether': 'Opakowane / derywaty', 'wrapped-bitcoin': 'Opakowane / derywaty',
+  'weth': 'Opakowane / derywaty', 'wrapped-steth': 'Opakowane / derywaty',
+  'coinbase-wrapped-btc': 'Opakowane / derywaty', 'binance-peg-weth': 'Opakowane / derywaty',
+  'wrapped-eeth': 'Opakowane / derywaty', 'jito-staked-sol': 'Opakowane / derywaty',
+  'binance-staked-sol': 'Opakowane / derywaty', 'lombard-staked-btc': 'Opakowane / derywaty',
+  'wbnb': 'Opakowane / derywaty', 'solv-btc': 'Opakowane / derywaty', 'msol': 'Opakowane / derywaty',
+  'rocket-pool-eth': 'Opakowane / derywaty', 'mantle-staked-ether': 'Opakowane / derywaty',
+  'bitcoin-avalanche-bridged-btc-b': 'Opakowane / derywaty', 'usdt0': 'Opakowane / derywaty',
+  // DeFi
+  'uniswap': 'DeFi', 'aave': 'DeFi', 'sky': 'DeFi', 'maker': 'DeFi', 'curve-dao-token': 'DeFi',
+  'pancakeswap-token': 'DeFi', 'ethena': 'DeFi', 'jupiter-exchange-solana': 'DeFi', 'raydium': 'DeFi',
+  'compound-governance-token': 'DeFi', 'dydx-chain': 'DeFi', 'hyperliquid': 'DeFi', 'gmx': 'DeFi',
+  'synthetix-network-token': 'DeFi', 'morpho': 'DeFi', 'pendle': 'DeFi', 'aerodrome-finance': 'DeFi',
+  'lido-dao': 'DeFi', 'rocket-pool': 'DeFi', 'ether-fi': 'DeFi', 'jito-governance-token': 'DeFi',
+  'usual': 'DeFi', 'spark': 'DeFi', 'aave-2': 'DeFi',
+  // DePIN
+  'helium': 'DePIN', 'filecoin': 'DePIN', 'render-token': 'DePIN', 'iotex': 'DePIN',
+  'akash-network': 'DePIN', 'arweave': 'DePIN', 'theta-token': 'DePIN', 'peaq-2': 'DePIN',
+  'peaq': 'DePIN', 'hivemapper': 'DePIN', 'io-net': 'DePIN', 'grass': 'DePIN', 'aethir': 'DePIN',
+  'storj': 'DePIN', 'bittorrent': 'DePIN', 'auki-network': 'DePIN', 'geodnet': 'DePIN',
+  'render': 'DePIN', 'livepeer': 'DePIN',
+  // Sztuczna inteligencja
+  'bittensor': 'AI', 'artificial-superintelligence-alliance': 'AI', 'fetch-ai': 'AI',
+  'worldcoin-wld': 'AI', 'virtual-protocol': 'AI', 'ai16z': 'AI', 'nosana': 'AI',
+  'singularitynet': 'AI', 'ocean-protocol': 'AI', 'kaito': 'AI',
+  // Aktywa realne
+  'ondo-finance': 'RWA', 'mantra-dao': 'RWA', 'polymesh': 'RWA', 'centrifuge': 'RWA',
+  'plume': 'RWA', 'chintai': 'RWA',
+  // Oracle i infrastruktura danych
+  'chainlink': 'Oracle / dane', 'the-graph': 'Oracle / dane', 'pyth-network': 'Oracle / dane',
+  'band-protocol': 'Oracle / dane', 'api3': 'Oracle / dane',
+  // Memecoiny
+  'dogecoin': 'Memecoiny', 'shiba-inu': 'Memecoiny', 'pepe': 'Memecoiny', 'bonk': 'Memecoiny',
+  'dogwifcoin': 'Memecoiny', 'floki': 'Memecoiny', 'spx6900': 'Memecoiny', 'brett': 'Memecoiny',
+  'mog-coin': 'Memecoiny', 'popcat': 'Memecoiny', 'fartcoin': 'Memecoiny', 'official-trump': 'Memecoiny',
+  'pudgy-penguins': 'Memecoiny', 'book-of-meme': 'Memecoiny', 'notcoin': 'Memecoiny',
+  // Giełdy scentralizowane
+  'binancecoin': 'Giełdy (CEX)', 'okb': 'Giełdy (CEX)', 'crypto-com-chain': 'Giełdy (CEX)',
+  'kucoin-shares': 'Giełdy (CEX)', 'bitget-token': 'Giełdy (CEX)', 'leo-token': 'Giełdy (CEX)',
+  'gatechain-token': 'Giełdy (CEX)', 'whitebit': 'Giełdy (CEX)', 'bgb': 'Giełdy (CEX)',
+  // Gaming i metaverse
+  'the-sandbox': 'Gaming / metaverse', 'decentraland': 'Gaming / metaverse', 'gala': 'Gaming / metaverse',
+  'axie-infinity': 'Gaming / metaverse', 'beam-2': 'Gaming / metaverse', 'ronin': 'Gaming / metaverse',
+  'apecoin': 'Gaming / metaverse', 'enjincoin': 'Gaming / metaverse',
+  // Płatności
+  'ripple': 'Płatności', 'stellar': 'Płatności', 'litecoin': 'Płatności', 'bitcoin-cash': 'Płatności',
+  'ecash': 'Płatności', 'nano': 'Płatności',
+  // Prywatność
+  'monero': 'Prywatność', 'zcash': 'Prywatność', 'dash': 'Prywatność',
+  // Interoperacyjność
+  'wormhole': 'Interoperacyjność', 'axelar': 'Interoperacyjność', 'quant-network': 'Interoperacyjność',
+  'thorchain': 'Interoperacyjność', 'stargate-finance': 'Interoperacyjność', 'chia': 'Interoperacyjność'
+};
+const SECTOR_UNASSIGNED = 'Nieprzypisane';
+const SECTOR_WRAPPED = 'Opakowane / derywaty';
+const SECTOR_STABLE = 'Stablecoiny';
+function allSectors(){
+  const set = {};
+  Object.keys(SECTOR_MAP).forEach(k => { set[SECTOR_MAP[k]] = true; });
+  set[SECTOR_UNASSIGNED] = true;
+  return Object.keys(set).sort();
+}
+function sectorOf(coin){
+  const ov = (STATE.market.sectorOverrides || {})[coin.id];
+  return ov || SECTOR_MAP[coin.id] || SECTOR_UNASSIGNED;
+}
+
+function normalizeMarket(m){
+  m = m || {};
+  return {
+    updatedAt: m.updatedAt || null,
+    coins: Array.isArray(m.coins) ? m.coins.map(c => ({
+      id: c.id, symbol: c.symbol || '', name: c.name || c.id, rank: num(c.rank),
+      price: num(c.price), mcap: num(c.mcap), fdv: num(c.fdv), vol: num(c.vol),
+      circ: num(c.circ), total: num(c.total),
+      chg24: isFinite(c.chg24) ? c.chg24 : NaN, chg7d: isFinite(c.chg7d) ? c.chg7d : NaN,
+      chg30d: isFinite(c.chg30d) ? c.chg30d : NaN, mcapChg24: isFinite(c.mcapChg24) ? c.mcapChg24 : NaN
+    })).filter(c => c.id) : [],
+    sectorOverrides: m.sectorOverrides && typeof m.sectorOverrides === 'object' ? m.sectorOverrides : {},
+    history: Array.isArray(m.history) ? m.history.filter(h => h && h.date) : [],
+    excludeWrapped: m.excludeWrapped === false ? false : true
+  };
+}
+
+/* Wczytanie odpowiedzi z /api/v3/coins/markets. Pola czytamy defensywnie —
+   CoinGecko zwraca zmienny zestaw kluczy zależnie od parametrów zapytania,
+   a fully_diluted_valuation bywa puste dla monet bez podaży maksymalnej. */
+function parseMarkets(arr){
+  if (!Array.isArray(arr)) throw new Error('Oczekiwałem tablicy monet, dostałem ' + (typeof arr) + '.');
+  const pick = (o, keys) => { for (let i = 0; i < keys.length; i++){ const v = o[keys[i]]; if (v !== null && v !== undefined && isFinite(Number(v))) return Number(v); } return NaN; };
+  const out = arr.map((c, i) => {
+    const price = pick(c, ['current_price']);
+    const total = pick(c, ['total_supply', 'max_supply']);
+    let fdv = pick(c, ['fully_diluted_valuation']);
+    const mcap = pick(c, ['market_cap']);
+    // brak FDV w odpowiedzi → licz z podaży docelowej; brak i tego → zostaje kapitalizacja
+    if (!isFinite(fdv) || fdv <= 0) fdv = (isFinite(price) && isFinite(total) && total > 0) ? price * total : mcap;
+    return {
+      id: c.id, symbol: (c.symbol || '').toUpperCase(), name: c.name || c.id,
+      rank: pick(c, ['market_cap_rank']) || (i + 1),
+      price: price, mcap: mcap, fdv: fdv, vol: pick(c, ['total_volume']),
+      circ: pick(c, ['circulating_supply']), total: total,
+      chg24: pick(c, ['price_change_percentage_24h_in_currency', 'price_change_percentage_24h']),
+      chg7d: pick(c, ['price_change_percentage_7d_in_currency', 'price_change_percentage_7d']),
+      chg30d: pick(c, ['price_change_percentage_30d_in_currency', 'price_change_percentage_30d']),
+      mcapChg24: pick(c, ['market_cap_change_percentage_24h'])
+    };
+  }).filter(c => c.id && isFinite(c.mcap) && c.mcap > 0);
+  if (!out.length) throw new Error('Żaden wpis nie miał kapitalizacji — czy to na pewno odpowiedź z /coins/markets?');
+  return out;
+}
+
+/* ---- AGREGACJA SEKTOROWA ----
+   Kluczowa sztuczka: kapitalizację sprzed 7/30 dni odtwarzamy z procentowej
+   zmiany CENY, czyli mcap_wtedy = mcap_dziś / (1 + zmiana). To daje wycenę przy
+   DZISIEJSZEJ podaży — czysty ruch wyceny, bez domieszki nowych tokenów. Dokładnie
+   ta sama logika, co FDV w reszcie aplikacji. Zmianę samej kapitalizacji (już ze
+   wzrostem podaży) mamy osobno, ale tylko dla 24h — tyle daje API. */
+function marketAggregate(){
+  const M = STATE.market;
+  const coins = M.coins || [];
+  const excl = M.excludeWrapped;
+  const used = coins.filter(c => !(excl && sectorOf(c) === SECTOR_WRAPPED));
+  const sectors = {};
+  const totals = { mcap: 0, fdv: 0, vol: 0, then7: 0, then30: 0, then24: 0, count: used.length };
+
+  used.forEach(c => {
+    const name = sectorOf(c);
+    const s = sectors[name] || (sectors[name] = { name: name, mcap: 0, fdv: 0, vol: 0, then24: 0, then7: 0, then30: 0, count: 0, coins: [] });
+    const back = (chg) => isFinite(chg) ? c.mcap / (1 + chg / 100) : c.mcap;
+    s.mcap += c.mcap; s.fdv += c.fdv; s.vol += c.vol; s.count++;
+    s.then24 += back(c.chg24); s.then7 += back(c.chg7d); s.then30 += back(c.chg30d);
+    s.coins.push(c);
+    totals.mcap += c.mcap; totals.fdv += c.fdv; totals.vol += c.vol;
+    totals.then24 += back(c.chg24); totals.then7 += back(c.chg7d); totals.then30 += back(c.chg30d);
+  });
+
+  const mChg = (now, then) => then > 0 ? (now / then - 1) * 100 : NaN;
+  const marketChg = { d1: mChg(totals.mcap, totals.then24), d7: mChg(totals.mcap, totals.then7), d30: mChg(totals.mcap, totals.then30) };
+
+  const list = Object.keys(sectors).map(k => {
+    const s = sectors[k];
+    const chg = { d1: mChg(s.mcap, s.then24), d7: mChg(s.mcap, s.then7), d30: mChg(s.mcap, s.then30) };
+    const rel = {};
+    ['d1', 'd7', 'd30'].forEach(k2 => {
+      rel[k2] = (isFinite(chg[k2]) && isFinite(marketChg[k2])) ? ((1 + chg[k2] / 100) / (1 + marketChg[k2] / 100) - 1) * 100 : NaN;
+    });
+    const share = totals.mcap > 0 ? s.mcap / totals.mcap * 100 : 0;
+    const shareThen = { d1: totals.then24 > 0 ? s.then24 / totals.then24 * 100 : NaN,
+                        d7: totals.then7 > 0 ? s.then7 / totals.then7 * 100 : NaN,
+                        d30: totals.then30 > 0 ? s.then30 / totals.then30 * 100 : NaN };
+    return {
+      name: s.name, count: s.count, mcap: s.mcap, fdv: s.fdv, vol: s.vol, coins: s.coins,
+      share: share, chg: chg, rel: rel,
+      shareDelta: { d1: share - shareThen.d1, d7: share - shareThen.d7, d30: share - shareThen.d30 },
+      // nawis rozwodnienia sektora: ile razy więcej kapitału potrzeba przy pełnej podaży
+      fdvOverhang: s.mcap > 0 ? s.fdv / s.mcap : NaN,
+      turnover: s.mcap > 0 ? s.vol / s.mcap * 100 : NaN
+    };
+  }).sort((a, b) => b.mcap - a.mcap);
+
+  // stablecoiny liczymy zawsze, także gdy siedzą poza agregatem
+  const stables = coins.filter(c => sectorOf(c) === SECTOR_STABLE);
+  const stableMcap = stables.reduce((a, c) => a + c.mcap, 0);
+  const stableThen24 = stables.reduce((a, c) => a + (isFinite(c.mcapChg24) ? c.mcap / (1 + c.mcapChg24 / 100) : c.mcap), 0);
+  const riskMcap = totals.mcap - stableMcap;
+
+  /* Po stronie ryzyka też liczymy KAPITALIZACJĘ, nie ruch ceny — inaczej
+     porównywalibyśmy dwie różne miary i sygnał przepływu nie miałby sensu.
+     Rozróżnienie „wycena kontra kapitalizacja” żyje w tabeli sektorów. */
+  const riskCoins = used.filter(c => sectorOf(c) !== SECTOR_STABLE);
+  let riskThen24 = 0, riskOk = false;
+  riskCoins.forEach(c => {
+    if (isFinite(c.mcapChg24)){ riskThen24 += c.mcap / (1 + c.mcapChg24 / 100); riskOk = true; }
+    else riskThen24 += c.mcap;
+  });
+
+  const btc = coins.filter(c => c.id === 'bitcoin')[0];
+  const eth = coins.filter(c => c.id === 'ethereum')[0];
+
+  return {
+    sectors: list, totals: totals, marketChg: marketChg,
+    stableMcap: stableMcap, stableShare: totals.mcap > 0 ? stableMcap / totals.mcap * 100 : NaN,
+    stableChg24: stableThen24 > 0 ? (stableMcap / stableThen24 - 1) * 100 : NaN,
+    riskMcap: riskMcap,
+    riskMcapChg24: (riskOk && riskThen24 > 0) ? (riskCoins.reduce((a, c) => a + c.mcap, 0) / riskThen24 - 1) * 100 : NaN,
+    btcDom: (btc && totals.mcap > 0) ? btc.mcap / totals.mcap * 100 : NaN,
+    ethDom: (eth && totals.mcap > 0) ? eth.mcap / totals.mcap * 100 : NaN,
+    // zmiana kapitalizacji całego koszyka w 24h liczona z market_cap_change_percentage_24h
+    totalMcapChg24: (function(){
+      let then = 0, ok = false;
+      used.forEach(c => { if (isFinite(c.mcapChg24)){ then += c.mcap / (1 + c.mcapChg24 / 100); ok = true; } else then += c.mcap; });
+      return ok && then > 0 ? (totals.mcap / then - 1) * 100 : NaN;
+    })(),
+    unassigned: used.filter(c => sectorOf(c) === SECTOR_UNASSIGNED).length
+  };
+}
+
+/* ---- SYGNAŁ PRZEPŁYWU GOTÓWKI ----
+   Ceny same z siebie nie mówią, czy do krypto weszły nowe pieniądze — rosnąć może
+   wycena tego samego kapitału. Jedynym widocznym śladem świeżej gotówki jest
+   kapitalizacja stablecoinów: rośnie, gdy ktoś wpłaca fiat i dostaje token.
+   Stąd cztery stany. */
+function cashFlowSignal(agg, horizon){
+  const st = agg.stableChg24, rk = agg.riskMcapChg24;
+  const h = horizon || {};
+  const stChg = isFinite(h.stable) ? h.stable : st;
+  const riskChg = isFinite(h.risk) ? h.risk : rk;
+  const eps = 0.3;
+  if (!isFinite(stChg) || !isFinite(riskChg)) return { key: 'unknown' };
+  if (stChg > eps && riskChg > 0) return { key: 'inflow', stChg: stChg, riskChg: riskChg };
+  if (stChg > eps && riskChg <= 0) return { key: 'toCash', stChg: stChg, riskChg: riskChg };
+  if (stChg < -eps && riskChg > 0) return { key: 'rotation', stChg: stChg, riskChg: riskChg };
+  if (stChg < -eps && riskChg <= 0) return { key: 'outflow', stChg: stChg, riskChg: riskChg };
+  return { key: 'flat', stChg: stChg, riskChg: riskChg };
+}
+const CASH_META = {
+  inflow:   { label: 'NAPŁYWA NOWA GOTÓWKA', cls: 'sig-good', ico: '▲', why: 'Rośnie i kapitał w gotówce, i kapitał w ryzyku. Ktoś wpłaca fiat i od razu go rozdysponowuje — to jest nowy pieniądz, nie przetasowanie.' },
+  rotation: { label: 'GOTÓWKA WCHODZI W RYZYKO', cls: 'sig-warn', ico: '◆', why: 'Kapitał w ryzyku rośnie, a stablecoinów ubywa. To nie są nowe pieniądze, tylko gotówka, która już leżała w krypto i właśnie kupuje. Paliwo się zużywa.' },
+  toCash:   { label: 'UCIECZKA DO GOTÓWKI', cls: 'sig-warn', ico: '◆', why: 'Stablecoinów przybywa, a kapitał w ryzyku maleje — pieniądze wychodzą z aktywów i czekają. Paliwo zostaje w systemie.' },
+  outflow:  { label: 'KAPITAŁ WYCHODZI Z KRYPTO', cls: 'sig-bad', ico: '▼', why: 'Kurczy się i ryzyko, i gotówka. Pieniądze opuszczają rynek, a nie przechodzą między sektorami.' },
+  flat:     { label: 'BEZ WYRAŹNEGO PRZEPŁYWU', cls: 'sig-none', ico: '≈', why: 'Kapitał w gotówce stoi w miejscu. Ruchy wycen to przetasowanie tego samego pieniądza.' },
+  unknown:  { label: 'BRAK DANYCH', cls: 'sig-none', ico: '·', why: 'Pobierz notowania top 100, żeby policzyć przepływ.' }
+};
+
+/* ---- WIDOK RYNKU: render ---- */
+let mktSort = { key: 'mcap', dir: 'desc' };
+let coinSort = { key: 'rank', dir: 'asc' };
+let coinFilter = '';
+let mktHorizon = 'd7';          // horyzont pokazywany na wykresach rotacji
+
+const MKT_COLS = [
+  { key: 'name', label: 'Sektor', num: false },
+  { key: 'count', label: 'Monet', num: true },
+  { key: 'mcap', label: 'Kapitalizacja', num: true },
+  { key: 'share', label: 'Udział', num: true },
+  { key: 'shareD7', label: 'Δ udziału 7d', num: true },
+  { key: 'shareD30', label: 'Δ udziału 30d', num: true },
+  { key: 'chg7', label: 'Wycena 7d', num: true },
+  { key: 'chg30', label: 'Wycena 30d', num: true },
+  { key: 'rel7', label: 'Siła vs rynek 7d', num: true },
+  { key: 'rel30', label: 'Siła vs rynek 30d', num: true },
+  { key: 'overhang', label: 'FDV / kapitalizacja', num: true },
+  { key: 'turnover', label: 'Obrót / kapitalizacja', num: true }
+];
+function mktSortValue(s, key){
+  switch (key){
+    case 'name': return s.name;
+    case 'count': return s.count; case 'mcap': return s.mcap; case 'share': return s.share;
+    case 'shareD7': return s.shareDelta.d7; case 'shareD30': return s.shareDelta.d30;
+    case 'chg7': return s.chg.d7; case 'chg30': return s.chg.d30;
+    case 'rel7': return s.rel.d7; case 'rel30': return s.rel.d30;
+    case 'overhang': return s.fdvOverhang; case 'turnover': return s.turnover;
+  }
+  return 0;
+}
+
+function renderMarket(){
+  const M = STATE.market;
+  const has = (M.coins || []).length > 0;
+  const parts = [];
+
+  /* --- pobieranie danych --- */
+  parts.push('<div class="card"><div class="card-head"><div><h2>Rynek: top 100 i sektory</h2>' +
+    '<p class="sub">Jedno zapytanie do CoinGecko daje sto największych monet z kapitalizacją, FDV i zmianami ceny za 24 godziny, 7 i 30 dni. Sektory sumujemy lokalnie.</p></div>' +
+    '<p class="src">' + (M.updatedAt ? 'Dane z ' + fmtDateTime(M.updatedAt) : 'Brak danych') + '</p></div>' +
+    '<div class="row" style="margin-bottom:10px">' +
+      '<button class="btn primary" id="mktFetch">Pobierz top 100</button>' +
+      '<label class="row" style="gap:5px; font-size:.78rem"><input type="checkbox" id="mktExclWrapped" ' + (M.excludeWrapped ? 'checked' : '') + ' style="width:auto">pomiń opakowane i derywaty</label>' +
+      '<span class="note" id="mktMsg"></span></div>' +
+    '<details class="datatable"><summary>Albo wklej odpowiedź JSON ręcznie (gdy przeglądarka blokuje zapytanie)</summary>' +
+      '<p class="note">Otwórz <span class="mono">api.coingecko.com/api/v3/coins/markets?vs_currency=usd&amp;order=market_cap_desc&amp;per_page=100&amp;page=1&amp;price_change_percentage=24h,7d,30d</span> w osobnej karcie i wklej całą odpowiedź.</p>' +
+      '<textarea id="mktJson" spellcheck="false" placeholder="[ { &quot;id&quot;: &quot;bitcoin&quot;, ... } ]"></textarea>' +
+      '<button class="btn small" id="mktLoadJson" style="margin-top:6px">Wczytaj wklejony JSON</button></details>' +
+    '</div>');
+
+  if (!has){
+    el('marketPane').innerHTML = parts.join('') +
+      '<div class="card"><p class="note">Nie ma jeszcze danych rynkowych. Pobierz top 100 albo wklej JSON — dopiero wtedy policzę sektory i przepływy.</p></div>';
+    wireMarket();
+    return;
+  }
+
+  const agg = marketAggregate();
+  const flow = cashFlowSignal(agg, historyHorizon());
+  const meta = CASH_META[flow.key];
+
+  /* --- sygnał przepływu gotówki --- */
+  const hist = historyHorizon();
+  parts.push('<div class="signal ' + meta.cls + '" style="margin-bottom:14px">' +
+    '<div class="ico" aria-hidden="true">' + meta.ico + '</div><div style="flex:1 1 320px">' +
+    '<p class="sub" style="margin-bottom:2px">Przepływ gotówki na rynku' + (hist.days ? ' · ' + hist.days + ' dni z Twoich migawek' : ' · 24 godziny') + '</p>' +
+    '<div class="headline">' + meta.label + '</div><div class="why">' + meta.why + '</div>' +
+    '<div class="metrics">' +
+      '<div>kapitał w gotówce' + (hist.days ? ' ' + hist.days + 'd' : ' 24h') + '<b class="' + (flow.stChg > 0 ? 'pos' : 'neg') + '">' + (isFinite(flow.stChg) ? pctSigned(flow.stChg) : '—') + '</b></div>' +
+      '<div>kapitał w ryzyku' + (hist.days ? ' ' + hist.days + 'd' : ' 24h') + '<b class="' + (flow.riskChg > 0 ? 'pos' : 'neg') + '">' + (isFinite(flow.riskChg) ? pctSigned(flow.riskChg) : '—') + '</b></div>' +
+      '<div>wyceny (stała podaż) ' + (hist.days ? '30d' : '24h') + '<b class="' + (agg.marketChg[hist.days ? 'd30' : 'd1'] > 0 ? 'pos' : 'neg') + '">' + pctSigned(agg.marketChg[hist.days ? 'd30' : 'd1']) + '</b></div>' +
+      '<div>kapitalizacja stablecoinów<b>' + usdBig(agg.stableMcap) + '</b></div>' +
+      '<div>ich udział w rynku<b>' + pct(agg.stableShare) + '</b></div>' +
+    '</div>' +
+    '<p class="sub" style="margin-top:10px">Obie strony liczone są tak samo: jako kapitalizacja, czyli realny kapitał ulokowany w gotówce (stablecoiny) i w ryzyku (reszta). Ceny same nie mówią, czy przyszły nowe pieniądze — ta sama gotówka potrafi podnieść wyceny. Jedyny widoczny ślad świeżego kapitału to kapitalizacja stablecoinów: rośnie, gdy ktoś wpłaca fiat. Trzecia liczba to zmiana samych wycen przy stałej podaży — różnica między nią a kapitalizacją ryzyka to nowe tokeny. ' +
+    (hist.days ? 'Liczone z Twoich migawek sprzed ' + hist.days + ' dni.' : 'Na razie liczone z 24 godzin — API daje tylko tyle. Zapisuj migawki, a policzę to na dłuższych oknach.') + '</p>' +
+    '</div></div>');
+
+  /* --- kafelki --- */
+  parts.push('<div class="grid g4" style="margin-bottom:14px">' +
+    kpi('Kapitalizacja koszyka', usdBig(agg.totals.mcap), agg.totals.count + ' monet · zmiana wyceny 7d ' + pctSigned(agg.marketChg.d7)) +
+    kpi('Kapitał w ryzyku', usdBig(agg.riskMcap), 'bez stablecoinów · ' + pct(100 - agg.stableShare) + ' rynku') +
+    kpi('Dominacja BTC / ETH', pct(agg.btcDom) + ' / ' + pct(agg.ethDom), 'im wyżej BTC, tym bardziej defensywny rynek') +
+    kpi('Nawis rozwodnienia rynku', mult(agg.totals.mcap > 0 ? agg.totals.fdv / agg.totals.mcap : NaN, 2),
+      'FDV ' + usdBig(agg.totals.fdv) + ' wobec kapitalizacji ' + usdBig(agg.totals.mcap)) +
+  '</div>');
+
+  if (agg.unassigned){
+    parts.push('<div class="banner warn">' + agg.unassigned + ' monet nie ma przypisanego sektora i wpada do „' + SECTOR_UNASSIGNED +
+      '”. Przypisz je w tabeli poniżej — dopóki tam siedzą, zaniżają sektory, do których należą.</div>');
+  }
+
+  /* --- rotacja: wykres kwadrantowy --- */
+  parts.push('<div class="card"><div class="card-head"><div><h2>Rotacja kapitału między sektorami</h2>' +
+    '<p class="sub">Oś pozioma: siła sektora wobec rynku przez 30 dni. Oś pionowa: to samo przez 7 dni. Prawy górny róg to sektory, które prowadzą i dalej przyspieszają; lewy górny — te, które właśnie się odwracają.</p></div></div>' +
+    '<div class="chart-wrap tall"><canvas id="chartRotation"></canvas></div>' +
+    '<div class="legend-list" id="rotationLegend"></div></div>');
+
+  /* --- zmiana udziału --- */
+  parts.push('<div class="card"><div class="card-head"><div><h2>Kto zyskuje, a kto oddaje udział w rynku</h2>' +
+    '<p class="sub">Zmiana udziału w kapitalizacji koszyka, w punktach procentowych. Suma słupków to zero — to jest przetasowanie, nie wzrost.</p></div>' +
+    '<div class="seg" id="mktHorizonSeg">' +
+      '<button data-h="d1" aria-pressed="' + (mktHorizon === 'd1') + '">24 godziny</button>' +
+      '<button data-h="d7" aria-pressed="' + (mktHorizon === 'd7') + '">7 dni</button>' +
+      '<button data-h="d30" aria-pressed="' + (mktHorizon === 'd30') + '">30 dni</button>' +
+    '</div></div>' +
+    '<div class="chart-wrap"><canvas id="chartShareDelta"></canvas></div></div>');
+
+  /* --- udziały w czasie --- */
+  parts.push('<div class="card"><div class="card-head"><div><h2>Udziały sektorów w czasie</h2>' +
+    '<p class="sub">Buduje się z migawek zapisywanych przy każdym pobraniu danych. Zapisano: ' + (M.history || []).length + '.</p></div></div>' +
+    '<div class="chart-wrap"><canvas id="chartSectorShares"></canvas></div></div>');
+
+  /* --- tabela sektorów --- */
+  const sorted = agg.sectors.slice().sort((a, b) => {
+    const dir = mktSort.dir === 'asc' ? 1 : -1;
+    const av = mktSortValue(a, mktSort.key), bv = mktSortValue(b, mktSort.key);
+    if (typeof av === 'string') return dir * String(av).localeCompare(String(bv));
+    return dir * ((isFinite(av) ? av : -Infinity) - (isFinite(bv) ? bv : -Infinity));
+  });
+  let th = '<div class="card"><div class="card-head"><div><h2>Sektory</h2>' +
+    '<p class="sub">„Wycena” to zmiana ważona kapitalizacją przy dzisiejszej podaży — czysty ruch wyceny, bez domieszki nowych tokenów. „FDV / kapitalizacja” mówi, ile razy więcej kapitału potrzeba, gdy wejdzie cała podaż sektora.</p></div></div>' +
+    '<div class="table-wrap"><table><thead><tr>' +
+    MKT_COLS.map(c => '<th class="sortable ' + (c.num ? 'num' : '') + '" data-mk="' + c.key + '">' + esc(c.label) +
+      (mktSort.key === c.key ? (mktSort.dir === 'asc' ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr></thead><tbody>';
+  sorted.forEach(s => {
+    const sgn = v => isFinite(v) ? '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + pctSigned(v) + '</span>' : '—';
+    const pp = v => {
+      if (!isFinite(v)) return '—';
+      if (Math.abs(v) < 0.005) return '<span class="sub">0,00 pp</span>';
+      return '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + (v > 0 ? '+' : '') + fmt(v, 2) + ' pp</span>';
+    };
+    th += '<tr><td><b>' + esc(s.name) + '</b></td>' +
+      '<td class="num">' + s.count + '</td>' +
+      '<td class="num">' + usdBig(s.mcap) + '</td>' +
+      '<td class="num">' + pct(s.share, s.share < 1 ? 2 : 1) + '</td>' +
+      '<td class="num">' + pp(s.shareDelta.d7) + '</td>' +
+      '<td class="num">' + pp(s.shareDelta.d30) + '</td>' +
+      '<td class="num">' + sgn(s.chg.d7) + '</td>' +
+      '<td class="num">' + sgn(s.chg.d30) + '</td>' +
+      '<td class="num">' + sgn(s.rel.d7) + '</td>' +
+      '<td class="num">' + sgn(s.rel.d30) + '</td>' +
+      '<td class="num">' + mult(s.fdvOverhang, 2) + '</td>' +
+      '<td class="num">' + pct(s.turnover, 1) + '</td></tr>';
+  });
+  th += '</tbody><tfoot><tr><td>Razem</td><td class="num">' + agg.totals.count + '</td><td class="num">' + usdBig(agg.totals.mcap) +
+    '</td><td class="num">100,0%</td><td class="num">—</td><td class="num">—</td>' +
+    '<td class="num">' + pctSigned(agg.marketChg.d7) + '</td><td class="num">' + pctSigned(agg.marketChg.d30) + '</td>' +
+    '<td class="num">—</td><td class="num">—</td><td class="num">' + mult(agg.totals.fdv / agg.totals.mcap, 2) + '</td>' +
+    '<td class="num">' + pct(agg.totals.vol / agg.totals.mcap * 100, 1) + '</td></tr></tfoot></table></div></div>';
+  parts.push(th);
+
+  /* --- tabela monet --- */
+  parts.push(coinTableHtml(agg));
+
+  el('marketPane').innerHTML = parts.join('');
+  wireMarket();
+  renderRotationChart(agg);
+  renderShareDeltaChart(agg);
+  renderSectorSharesChart();
+}
+
+function coinTableHtml(agg){
+  const M = STATE.market;
+  const sectors = allSectors();
+  let coins = M.coins.slice();
+  if (coinFilter) coins = coins.filter(c => sectorOf(c) === coinFilter);
+  const key = coinSort.key, dir = coinSort.dir === 'asc' ? 1 : -1;
+  coins.sort((a, b) => {
+    if (key === 'name') return dir * String(a.name).localeCompare(String(b.name));
+    if (key === 'sector') return dir * String(sectorOf(a)).localeCompare(String(sectorOf(b)));
+    const av = num(a[key], -Infinity), bv = num(b[key], -Infinity);
+    return dir * (av - bv);
+  });
+  const cols = [['rank', '#', true], ['name', 'Moneta', false], ['sector', 'Sektor', false], ['mcap', 'Kapitalizacja', true],
+    ['fdv', 'FDV', true], ['over', 'FDV / MC', true], ['chg7d', 'Wycena 7d', true], ['chg30d', 'Wycena 30d', true], ['vol', 'Obrót 24h', true]];
+  let h = '<div class="card"><div class="card-head"><div><h2>Sto największych</h2>' +
+    '<p class="sub">Sektor możesz zmienić w każdym wierszu — zapisuje się w Twoich danych i nadpisuje moją klasyfikację.</p></div>' +
+    '<label class="field" style="margin:0; min-width:200px"><span class="lab">Pokaż sektor</span><select id="coinFilter">' +
+    '<option value="">wszystkie</option>' + sectors.map(x => '<option value="' + esc(x) + '"' + (coinFilter === x ? ' selected' : '') + '>' + esc(x) + '</option>').join('') +
+    '</select></label></div><div class="table-wrap"><table><thead><tr>' +
+    cols.map(c => '<th class="sortable ' + (c[2] ? 'num' : '') + '" data-ck="' + c[0] + '">' + esc(c[1]) +
+      (coinSort.key === c[0] ? (coinSort.dir === 'asc' ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr></thead><tbody>';
+  coins.forEach(c => {
+    const over = c.mcap > 0 ? c.fdv / c.mcap : NaN;
+    const sgn = v => isFinite(v) ? '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + pctSigned(v) + '</span>' : '—';
+    h += '<tr><td class="num">' + fmt(c.rank, 0) + '</td>' +
+      '<td><b>' + esc(c.symbol) + '</b> <span class="sub">' + esc(c.name) + '</span></td>' +
+      '<td><select data-cs="' + esc(c.id) + '" style="font-size:.76rem; padding:2px 4px">' +
+        sectors.map(x => '<option value="' + esc(x) + '"' + (sectorOf(c) === x ? ' selected' : '') + '>' + esc(x) + '</option>').join('') +
+      '</select></td>' +
+      '<td class="num">' + usdBig(c.mcap) + '</td>' +
+      '<td class="num">' + usdBig(c.fdv) + '</td>' +
+      '<td class="num">' + (isFinite(over) ? mult(over, 2) : '—') + (over > 1.5 ? ' <span class="badge warn">nawis</span>' : '') + '</td>' +
+      '<td class="num">' + sgn(c.chg7d) + '</td>' +
+      '<td class="num">' + sgn(c.chg30d) + '</td>' +
+      '<td class="num">' + usdBig(c.vol) + '</td></tr>';
+  });
+  return h + '</tbody></table></div></div>';
+}
+
+/* ---- migawki rynku: to z nich powstaje historia udziałów ---- */
+function saveMarketSnapshot(agg){
+  const M = STATE.market;
+  const entry = {
+    date: todayISO(),
+    totalMcap: agg.totals.mcap, totalFdv: agg.totals.fdv, totalVol: agg.totals.vol,
+    stableMcap: agg.stableMcap, riskMcap: agg.riskMcap,
+    btcDom: agg.btcDom, ethDom: agg.ethDom,
+    sectors: {}
+  };
+  agg.sectors.forEach(s => { entry.sectors[s.name] = { mcap: s.mcap, fdv: s.fdv, vol: s.vol, count: s.count }; });
+  const prev = (M.history || []).filter(h => h.date === entry.date)[0];
+  if (prev) Object.assign(prev, entry);
+  else M.history.push(entry);
+  M.history.sort((a, b) => a.date.localeCompare(b.date));
+  if (M.history.length > 400) M.history = M.history.slice(-400);
+}
+/* Najdłuższe okno, jakie da się policzyć z zapisanych migawek (maksymalnie 30 dni). */
+function historyHorizon(){
+  const h = (STATE.market.history || []);
+  if (h.length < 2) return {};
+  const now = h[h.length - 1];
+  const targetISO = isoOf(addDays(new Date(), -30));
+  let then = h[0];
+  for (let i = 0; i < h.length - 1; i++){ if (h[i].date <= targetISO) then = h[i]; }
+  const days = daysBetween(parseISO(then.date), parseISO(now.date));
+  if (days < 2) return {};
+  return {
+    days: days,
+    stable: then.stableMcap > 0 ? (now.stableMcap / then.stableMcap - 1) * 100 : NaN,
+    risk: then.riskMcap > 0 ? (now.riskMcap / then.riskMcap - 1) * 100 : NaN
+  };
+}
+
+/* Podpisy przy punktach — własny mini-plugin, bo etykiet w Chart.js nie ma. */
+const bubbleLabelPlugin = {
+  id: 'bubbleLabels',
+  afterDatasetsDraw(chart, args, opts){
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.font = '11px system-ui'; ctx.fillStyle = opts.color || '#888'; ctx.textBaseline = 'middle';
+    const placed = [];
+    chart.getDatasetMeta(0).data.map((pt, i) => ({ pt: pt, label: (chart.data.datasets[0].data[i] || {}).label }))
+      .filter(x => x.label)
+      .sort((a, b) => a.pt.y - b.pt.y)
+      .forEach(x => {
+        const r = x.pt.options.radius || 6;
+        let y = x.pt.y;
+        const x0 = x.pt.x + r + 5, w = ctx.measureText(x.label).width;
+        // 13 px to wysokość wiersza tekstu — tyle musi dzielić etykiety, które zachodzą na siebie w poziomie
+        for (let g = 0; g < 12; g++){
+          const hit = placed.some(q => Math.abs(q.y - y) < 13 && x0 < q.x + q.w + 6 && q.x < x0 + w + 6);
+          if (!hit) break;
+          y += 13;
+        }
+        placed.push({ x: x0, y: y, w: w });
+        if (Math.abs(y - x.pt.y) > 2){
+          ctx.save(); ctx.globalAlpha = 0.45; ctx.beginPath();
+          ctx.moveTo(x.pt.x + r, x.pt.y); ctx.lineTo(x0 - 2, y); ctx.strokeStyle = opts.color || '#888'; ctx.stroke(); ctx.restore();
+        }
+        ctx.fillText(x.label, x0, y);
+      });
+    ctx.restore();
+  }
+};
+
+function quadrantOf(s, hz){
+  const short = s.rel.d7, long = s.rel[hz === 'd1' ? 'd7' : 'd30'];
+  if (!isFinite(short) || !isFinite(long)) return null;
+  if (short >= 0 && long >= 0) return 'lider';
+  if (short >= 0 && long < 0) return 'odwrot';
+  if (short < 0 && long >= 0) return 'slabnie';
+  return 'maruder';
+}
+const QUAD_META = {
+  lider:   { label: 'prowadzi i przyspiesza', color: 'good' },
+  odwrot:  { label: 'odwraca się w górę', color: 'warning' },
+  slabnie: { label: 'traci rozpęd', color: 'serious' },
+  maruder: { label: 'w tyle', color: 'critical' }
+};
+function statusColor(name){
+  return { good: cssVar('--good'), warning: cssVar('--warn'), serious: cssVar('--serious'), critical: cssVar('--critical') }[name];
+}
+
+function renderRotationChart(agg){
+  // stablecoiny pomijamy — ich „siła” to tylko odbicie ruchu reszty rynku
+  const pts = agg.sectors.filter(s => s.name !== SECTOR_STABLE && s.name !== SECTOR_WRAPPED &&
+    isFinite(s.rel.d7) && isFinite(s.rel.d30) && s.count > 0);
+  if (pts.length < 2){ makeChart('chartRotation', null, 'Za mało sektorów z pełnymi danymi, żeby narysować rotację.'); el('rotationLegend').innerHTML = ''; return; }
+  const maxShare = Math.max.apply(null, pts.map(p => p.share));
+  const data = pts.map(p => ({
+    x: p.rel.d30, y: p.rel.d7, label: p.name,
+    r: 6 + 16 * Math.sqrt(Math.max(0, p.share) / Math.max(1e-9, maxShare)),
+    quad: quadrantOf(p, 'd30'), share: p.share, mcap: p.mcap
+  }));
+  makeChart('chartRotation', {
+    type: 'bubble',
+    plugins: [bubbleLabelPlugin],
+    data: { datasets: [{
+      data: data,
+      backgroundColor: data.map(d => statusColor(QUAD_META[d.quad].color) + '55'),
+      borderColor: data.map(d => statusColor(QUAD_META[d.quad].color)),
+      borderWidth: 2
+    }] },
+    options: baseOptions({
+      interaction: { mode: 'nearest', intersect: true },
+      plugins: {
+        legend: { display: false },
+        bubbleLabels: { color: cssVar('--text-2') },
+        tooltip: { callbacks: { label: ctx => {
+          const d = ctx.raw;
+          return [d.label + ' · ' + usdBig(d.mcap) + ' (' + pct(d.share) + ' rynku)',
+                  'siła vs rynek 30d: ' + pctSigned(d.x), 'siła vs rynek 7d: ' + pctSigned(d.y),
+                  QUAD_META[d.quad].label];
+        } } }
+      },
+      scales: {
+        x: { title: { display: true, text: 'siła wobec rynku, 30 dni', color: cssVar('--muted'), font: { size: 10 } },
+             grid: { color: c => c.tick.value === 0 ? cssVar('--border-strong') : cssVar('--grid') },
+             ticks: { callback: v => pctSigned(v, 0) } },
+        y: { title: { display: true, text: 'siła wobec rynku, 7 dni', color: cssVar('--muted'), font: { size: 10 } },
+             grid: { color: c => c.tick.value === 0 ? cssVar('--border-strong') : cssVar('--grid') },
+             ticks: { callback: v => pctSigned(v, 0) } }
+      }
+    })
+  });
+  el('rotationLegend').innerHTML = Object.keys(QUAD_META).map(k =>
+    '<div><span class="sw" style="background:' + statusColor(QUAD_META[k].color) + '"></span>' + QUAD_META[k].label + '</div>').join('') +
+    '<div class="sub">Wielkość bąbla to udział sektora w kapitalizacji. Stablecoiny pominięte — ich cena z definicji stoi.</div>';
+}
+
+function renderShareDeltaChart(agg){
+  const key = mktHorizon;
+  const pts = agg.sectors.filter(s => isFinite(s.shareDelta[key]) && s.name !== SECTOR_WRAPPED)
+    .slice().sort((a, b) => b.shareDelta[key] - a.shareDelta[key]);
+  if (!pts.length){ makeChart('chartShareDelta', null, 'Brak danych do policzenia zmiany udziałów.'); return; }
+  const pos = cssVar('--s1'), neg = cssVar('--s8');
+  makeChart('chartShareDelta', {
+    type: 'bar',
+    data: { labels: pts.map(p => p.name), datasets: [{
+      label: 'zmiana udziału (pp)',
+      data: pts.map(p => p.shareDelta[key]),
+      backgroundColor: pts.map(p => p.shareDelta[key] >= 0 ? pos : neg),
+      borderRadius: 4, borderSkipped: false
+    }] },
+    options: baseOptions({
+      indexAxis: 'y',
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: ctx => {
+          const p = pts[ctx.dataIndex];
+          return [(ctx.parsed.x >= 0 ? '+' : '') + fmt(ctx.parsed.x, 2) + ' pp udziału',
+                  'udział teraz ' + pct(p.share) + ' · kapitalizacja ' + usdBig(p.mcap)];
+        } } } },
+      scales: {
+        x: { grid: { color: c => c.tick.value === 0 ? cssVar('--border-strong') : cssVar('--grid') },
+             ticks: { callback: v => (v > 0 ? '+' : '') + fmt(v, 1) + ' pp' } },
+        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+      }
+    })
+  });
+}
+
+function renderSectorSharesChart(){
+  const h = (STATE.market.history || []);
+  if (h.length < 2){ makeChart('chartSectorShares', null, 'Historia udziałów buduje się z migawek. Zapisana jest ' + h.length + ' — wróć tu po kolejnym pobraniu danych.'); return; }
+  const last = h[h.length - 1];
+  const names = Object.keys(last.sectors).sort((a, b) => last.sectors[b].mcap - last.sectors[a].mcap).slice(0, 8);
+  const dates = h.map(x => x.date);
+  const series = names.map((n, i) => ({
+    label: n,
+    data: h.map(x => {
+      const tot = x.totalMcap;
+      const s = x.sectors[n];
+      return (tot > 0 && s) ? s.mcap / tot * 100 : null;
+    }),
+    borderColor: seriesColor(i), backgroundColor: seriesColor(i), pointRadius: 0, fill: false, spanGaps: true
+  }));
+  makeChart('chartSectorShares', {
+    type: 'line',
+    data: { labels: dates, datasets: series },
+    options: baseOptions({
+      scales: { y: { ticks: { callback: v => pct(v, 0) } }, x: { ticks: { callback: (v, i) => shortDate(dates[i]) } } },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + pct(ctx.parsed.y) } } }
+    })
+  });
+}
+
+/* ---- pobieranie danych ---- */
+const CG_MARKETS = 'https://api.coingecko.com/api/v3/coins/markets';
+function marketUrl(){
+  return CG_MARKETS + '?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=24h,7d,30d';
+}
+function applyMarketData(arr, source){
+  const coins = parseMarkets(arr);
+  STATE.market.coins = coins;
+  STATE.market.updatedAt = new Date().toISOString();
+  saveMarketSnapshot(marketAggregate());
+  saveState();
+  renderMarket();
+  const msg = el('mktMsg');
+  if (msg){ msg.style.color = 'var(--good)'; msg.textContent = 'Wczytano ' + coins.length + ' monet' + (source ? ' (' + source + ')' : '') + '.'; }
+}
+function fetchMarket(){
+  const msg = el('mktMsg');
+  msg.style.color = ''; msg.textContent = 'Pobieram…';
+  fetch(marketUrl())
+    .then(res => {
+      if (res.status === 429) throw new Error('CoinGecko chwilowo blokuje zapytania (limit darmowego API). Spróbuj za minutę.');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(data => applyMarketData(data, 'CoinGecko'))
+    .catch(e => {
+      msg.style.color = 'var(--critical)';
+      msg.textContent = 'Nie udało się pobrać: ' + e.message + '. ' +
+        (IN_FRAME ? 'W ramce podglądu zapytania na zewnątrz są blokowane — otwórz adres w osobnej karcie i wklej JSON poniżej.'
+                  : 'Możesz otworzyć adres w osobnej karcie i wkleić JSON poniżej.');
+    });
+}
+
+function wireMarket(){
+  const f = el('mktFetch');
+  if (f) f.addEventListener('click', fetchMarket);
+  const lj = el('mktLoadJson');
+  if (lj) lj.addEventListener('click', () => {
+    const msg = el('mktMsg');
+    let data;
+    try { data = JSON.parse(el('mktJson').value); }
+    catch (e){ msg.style.color = 'var(--critical)'; msg.textContent = 'To nie jest poprawny JSON: ' + e.message; return; }
+    try { applyMarketData(data, 'wklejone'); }
+    catch (e){ msg.style.color = 'var(--critical)'; msg.textContent = e.message; }
+  });
+  const ex = el('mktExclWrapped');
+  if (ex) ex.addEventListener('change', () => { STATE.market.excludeWrapped = ex.checked; saveState(); renderMarket(); });
+  const seg = el('mktHorizonSeg');
+  if (seg) seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    mktHorizon = b.getAttribute('data-h');
+    seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    renderShareDeltaChart(marketAggregate());
+  }));
+  document.querySelectorAll('th[data-mk]').forEach(th => th.addEventListener('click', () => {
+    const k = th.getAttribute('data-mk');
+    if (mktSort.key === k) mktSort.dir = mktSort.dir === 'asc' ? 'desc' : 'asc';
+    else { mktSort.key = k; mktSort.dir = k === 'name' ? 'asc' : 'desc'; }
+    renderMarket();
+  }));
+  document.querySelectorAll('th[data-ck]').forEach(th => th.addEventListener('click', () => {
+    const k = th.getAttribute('data-ck');
+    if (coinSort.key === k) coinSort.dir = coinSort.dir === 'asc' ? 'desc' : 'asc';
+    else { coinSort.key = k; coinSort.dir = (k === 'name' || k === 'sector' || k === 'rank') ? 'asc' : 'desc'; }
+    renderMarket();
+  }));
+  const cf = el('coinFilter');
+  if (cf) cf.addEventListener('change', () => { coinFilter = cf.value; renderMarket(); });
+  document.querySelectorAll('select[data-cs]').forEach(sel => sel.addEventListener('change', () => {
+    STATE.market.sectorOverrides[sel.getAttribute('data-cs')] = sel.value;
+    saveState();
+    renderMarket();
+  }));
+}
+
+/* ============================================================
    16. NAWIGACJA, BANERY, START
    ============================================================ */
 let currentView = 'dashboard';
-const VIEWS = ['dashboard', 'token', 'edit', 'daily', 'compare', 'data', 'tests'];
+const VIEWS = ['dashboard', 'token', 'edit', 'daily', 'compare', 'market', 'data', 'tests'];
 
 function showView(name){
   if (VIEWS.indexOf(name) < 0) name = 'dashboard';
@@ -3421,6 +4190,7 @@ function renderCurrentView(){
     case 'edit': renderEditView(); break;
     case 'daily': renderDaily(); break;
     case 'compare': renderCompare(); break;
+    case 'market': renderMarket(); break;
     case 'data': renderData(); break;
     case 'tests': renderTests(); break;
   }
