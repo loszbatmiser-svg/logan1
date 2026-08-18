@@ -3133,9 +3133,42 @@ function renderData(){
     saveState(); renderAll();
   });
 }
+/* Czy strona ma do dyspozycji zapis pliku przez gospodarza (artefakt claude.ai).
+   Tam link z atrybutem download nic nie robi, ale jest osobne API, które pyta
+   oglądającego o zgodę i zapisuje plik naprawdę. */
+const HOST_SAVE = !!(window.claude && typeof window.claude.use === 'function');
+
 function exportJson(){
   const data = JSON.stringify(STATE, null, 2);
   const msg = el('dataMsg');
+  const filename = 'fdv-tracker-' + todayISO() + '.json';
+
+  if (HOST_SAVE){
+    msg.style.color = ''; msg.textContent = 'Czekam na potwierdzenie zapisu…';
+    window.claude.use('downloads').then(dl => {
+      if (!dl) return Promise.reject({ code: 'unavailable' });
+      return dl.save({ filename: filename, data: data });
+    }).then(() => {
+      msg.style.color = 'var(--good)';
+      msg.textContent = 'Zapisano ' + filename + '.';
+    }).catch(err => {
+      const code = err && err.code;
+      if (code === 'declined'){
+        msg.style.color = 'var(--muted)';
+        msg.textContent = 'Zapis anulowany. Gdybyś jednak chciał kopię — JSON jest poniżej.';
+        showJsonForCopy(data);
+      } else if (code === 'rate_limited'){
+        msg.style.color = 'var(--warn)';
+        msg.textContent = 'Okienko zapisu jest już otwarte albo za dużo prób pod rząd. Poczekaj chwilę i kliknij ponownie.';
+      } else {
+        msg.style.color = 'var(--warn)';
+        msg.textContent = 'Zapis pliku niedostępny w tym widoku' + (code ? ' (' + code + ')' : '') + ' — skopiuj JSON z pola poniżej.';
+        showJsonForCopy(data);
+      }
+    });
+    return;
+  }
+
   if (IN_FRAME){
     // w ramce klik w link z atrybutem download nic nie robi — od razu dajemy tekst do skopiowania
     showJsonForCopy(data);
@@ -3147,11 +3180,11 @@ function exportJson(){
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'fdv-tracker-' + todayISO() + '.json';
+    a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
     msg.style.color = 'var(--good)';
-    msg.textContent = 'Pobrano plik fdv-tracker-' + todayISO() + '.json';
+    msg.textContent = 'Pobrano plik ' + filename;
   } catch (e){
     showJsonForCopy(data);
     msg.style.color = 'var(--warn)';
@@ -3409,7 +3442,12 @@ function renderBanners(){
     out.push('<div class="banner warn">Ostatni odczyt rynkowy sprzed <b>' + info.days + ' dni</b> (' + fmtDate(info.date) + '). Sygnał odbudowy liczy się z historii — przy przerwach dłuższych niż kilka dni robi się nieostry. <button class="btn small" data-dismiss="stale">Ukryj</button></div>');
   }
   if (IN_FRAME && !bannerDismissed.frame){
-    out.push('<div class="banner info">Strona działa w ramce podglądu. Zapis pliku i pobieranie cen z CoinGecko są tu zablokowane przez przeglądarkę, a autozapis może nie działać — <b>kopiuj JSON</b> z zakładki „Dane i ustawienia”, żeby nic nie stracić. Otwarta z dysku ma pełną funkcjonalność. <button class="btn small" data-dismiss="frame">Ukryj</button></div>');
+    out.push('<div class="banner info">Strona działa w ramce podglądu. ' +
+      (HOST_SAVE
+        ? 'Zapis danych do pliku działa — po kliknięciu „Pobierz dane” pojawi się prośba o potwierdzenie. '
+        : 'Zapis pliku jest tu zablokowany przez przeglądarkę, więc „Pobierz dane” podstawia JSON do skopiowania. ') +
+      'Pobieranie cen z CoinGecko jest zablokowane w obie strony — ceny wpisujesz ręcznie. Autozapis może nie działać, więc rób kopię JSON. ' +
+      'Plik otwarty z dysku ma pełną funkcjonalność. <button class="btn small" data-dismiss="frame">Ukryj</button></div>');
   }
   const demo = STATE.tokens.filter(t => t.historyIsDemo).length;
   if (demo && !bannerDismissed.demo){

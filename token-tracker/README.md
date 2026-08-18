@@ -146,10 +146,13 @@ mkdir vendor && cp node_modules/chart.js/dist/chart.umd.js node_modules/pdfjs-di
 python3 build-artifact.py vendor artifact.html
 ```
 
-Czego w wersji artefaktowej nie ma i mieć nie może: pobierania cen z CoinGecko i zapisu pliku
-JSON — przeglądarka blokuje jedno i drugie w ramce podglądu. Aplikacja to wykrywa i mówi wprost:
-zamiast cichego przycisku „Pobierz dane” podstawia JSON do skopiowania, a przy cenach kieruje do
-pól ręcznych. Wykresy, parser PDF i cała reszta działają, bo biblioteki siedzą w pliku.
+Zapis danych do pliku działa — artefakt deklaruje uprawnienie `downloads`, więc „Pobierz dane”
+prosi oglądającego o potwierdzenie i naprawdę zapisuje JSON. Odmowa i brak uprawnienia mają
+osobne komunikaty i podstawiają JSON do skopiowania.
+
+Czego w artefakcie nie ma i mieć nie może: pobierania cen z CoinGecko — zapytania do zewnętrznych
+hostów są blokowane, więc ceny wpisujesz ręcznie. Wykresy, parser PDF i cała reszta działają,
+bo biblioteki siedzą w pliku.
 
 Motyw ma trzy stany: „jak w systemie” (domyślny, bez stempla — podąża za `prefers-color-scheme`
 albo za motywem strony, w której ramce siedzi), jasny i ciemny. Przycisk w nagłówku przechodzi
