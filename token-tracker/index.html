@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pl" data-theme="dark">
+<html lang="pl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FDV Tracker — portfel świadomy rozwodnienia</title>
+<title>FDV Tracker</title>
 <style>
 /* ============================================================
    MOTYW — ciemny domyślnie, jasny opcjonalnie.
@@ -21,6 +21,22 @@
   --good-bg:rgba(12,163,12,.14); --warn-bg:rgba(250,178,25,.14);
   --serious-bg:rgba(236,131,90,.14); --critical-bg:rgba(208,59,59,.16);
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+}
+/* Motyw jasny w dwóch sytuacjach: gdy użytkownik go wybierze (stempel
+   data-theme="light") i gdy nic nie wybrał, a system prosi o jasny.
+   Stempel data-theme="dark" wyłącza wariant systemowy w drugą stronę. */
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f1ee; --surface-3:#e8e7e2;
+    --border:rgba(11,11,11,.12); --border-strong:rgba(11,11,11,.22);
+    --text:#0b0b0b; --text-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+    --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+    --good-bg:rgba(12,163,12,.12); --warn-bg:rgba(250,178,25,.18);
+    --serious-bg:rgba(236,131,90,.16); --critical-bg:rgba(208,59,59,.12);
+    --shadow:0 1px 2px rgba(11,11,11,.06), 0 8px 24px rgba(11,11,11,.08);
+  }
 }
 html[data-theme="light"]{
   --bg:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f1ee; --surface-3:#e8e7e2;
@@ -607,7 +623,7 @@ function defaultState(){
       discountRatePct: 10,     // koszt kapitału — do wartości bieżącej i IRR
       targetPS: 30,            // mnożnik P/S, przy którym oceniamy wymagany przychód
       taxRatePct: 19,          // podatek od zysku (PL: 19% od dochodu)
-      theme: 'dark'
+      theme: 'auto'            // 'auto' | 'light' | 'dark'
     },
     tokens: seedTokens(),
     benchmark: seedBenchmark(),
@@ -719,6 +735,11 @@ function normalizeToken(t){
     })).filter(x => x.date && x.tokens > 0).sort((a, b) => a.date.localeCompare(b.date)) : []
   };
 }
+/* Strona bywa otwierana w ramce (podgląd artefaktu). Tam przeglądarka blokuje
+   pobieranie plików i zapytania do zewnętrznych API, a localStorage bywa wyłączony.
+   Wykrywamy to raz i mówimy o tym wprost, zamiast dawać przyciski, które milczą. */
+const IN_FRAME = (function(){ try { return window.self !== window.top; } catch (e){ return true; } })();
+
 function updateSaveInfo(){
   const s = el('saveInfo');
   if (!s) return;
@@ -2715,7 +2736,8 @@ function renderParseConfirm(){
 
 /* ---- ładowanie bibliotek z CDN na żądanie ---- */
 const loadedScripts = {};
-function loadScript(url){
+function loadScript(url, isReady){
+  if (typeof isReady === 'function' && isReady()) return Promise.resolve(true);
   if (loadedScripts[url]) return loadedScripts[url];
   loadedScripts[url] = new Promise((res, rej) => {
     const s = document.createElement('script');
@@ -2727,6 +2749,17 @@ function loadScript(url){
 }
 const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
 const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+/* Jeśli plik ma wbudowane źródło workera (wersja offline/artefakt), robimy z niego
+   blob i pracujemy w osobnym wątku. Bez tego zostaje adres z CDN, a gdy i on
+   zawiedzie, PDF.js sam przechodzi na parsowanie w wątku głównym. */
+function pdfWorkerSrc(){
+  const holder = document.getElementById('pdfWorkerSource');
+  if (holder && holder.textContent.length > 1000){
+    try { return URL.createObjectURL(new Blob([holder.textContent], { type: 'application/javascript' })); }
+    catch (e){ /* CSP może zablokować bloby — lecimy dalej */ }
+  }
+  return PDFJS_WORKER;
+}
 
 function renderPdfPane(){
   el('editPanePdf').innerHTML =
@@ -2740,10 +2773,10 @@ function doParsePdf(){
   const msg = el('pdfMsg'), f = el('pdfFile').files[0];
   if (!f){ msg.textContent = 'Wybierz plik PDF.'; msg.style.color = 'var(--critical)'; return; }
   msg.style.color = ''; msg.textContent = 'Ładowanie biblioteki…';
-  loadScript(PDFJS_URL).then(() => {
+  loadScript(PDFJS_URL, () => !!window.pdfjsLib).then(() => {
     const lib = window.pdfjsLib;
     if (!lib) throw new Error('PDF.js nie wystartował.');
-    try { lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; } catch (e){ /* fallback: praca w głównym wątku */ }
+    try { lib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc(); } catch (e){ /* fallback: praca w głównym wątku */ }
     msg.textContent = 'Czytanie pliku…';
     return f.arrayBuffer();
   }).then(buf => {
@@ -2907,7 +2940,9 @@ function fetchPrices(){
     })
     .catch(e => {
       msg.style.color = 'var(--critical)';
-      msg.textContent = 'Nie udało się pobrać: ' + e.message + ' Wpisz ceny ręcznie w polach obok.';
+      msg.textContent = 'Nie udało się pobrać: ' + e.message + '. ' +
+        (IN_FRAME ? 'W ramce podglądu zapytania do CoinGecko są blokowane — wpisz ceny ręcznie w polach obok albo otwórz plik z dysku.'
+                  : 'Wpisz ceny ręcznie w polach obok.');
     });
 }
 function saveReading(){
@@ -3101,6 +3136,13 @@ function renderData(){
 function exportJson(){
   const data = JSON.stringify(STATE, null, 2);
   const msg = el('dataMsg');
+  if (IN_FRAME){
+    // w ramce klik w link z atrybutem download nic nie robi — od razu dajemy tekst do skopiowania
+    showJsonForCopy(data);
+    msg.style.color = 'var(--warn)';
+    msg.textContent = 'Strona działa w ramce, więc przeglądarka nie pozwoli zapisać pliku. JSON jest poniżej — zaznaczony, wystarczy skopiować (Ctrl+C) i wkleić do pliku .json.';
+    return;
+  }
   try {
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3111,10 +3153,19 @@ function exportJson(){
     msg.style.color = 'var(--good)';
     msg.textContent = 'Pobrano plik fdv-tracker-' + todayISO() + '.json';
   } catch (e){
-    el('jsonBox').value = data;
+    showJsonForCopy(data);
     msg.style.color = 'var(--warn)';
     msg.textContent = 'Pobieranie zablokowane przez przeglądarkę — JSON jest w polu tekstowym poniżej, skopiuj go ręcznie.';
   }
+}
+function showJsonForCopy(data){
+  const box = el('jsonBox');
+  if (!box) return;
+  const det = box.closest('details');
+  if (det) det.open = true;
+  box.value = data;
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  try { box.focus(); box.select(); } catch (e){}
 }
 function importJsonFile(){
   const f = el('importFile').files[0], msg = el('dataMsg');
@@ -3357,6 +3408,9 @@ function renderBanners(){
   if (info.days !== null && info.days > 3 && !bannerDismissed.stale){
     out.push('<div class="banner warn">Ostatni odczyt rynkowy sprzed <b>' + info.days + ' dni</b> (' + fmtDate(info.date) + '). Sygnał odbudowy liczy się z historii — przy przerwach dłuższych niż kilka dni robi się nieostry. <button class="btn small" data-dismiss="stale">Ukryj</button></div>');
   }
+  if (IN_FRAME && !bannerDismissed.frame){
+    out.push('<div class="banner info">Strona działa w ramce podglądu. Zapis pliku i pobieranie cen z CoinGecko są tu zablokowane przez przeglądarkę, a autozapis może nie działać — <b>kopiuj JSON</b> z zakładki „Dane i ustawienia”, żeby nic nie stracić. Otwarta z dysku ma pełną funkcjonalność. <button class="btn small" data-dismiss="frame">Ukryj</button></div>');
+  }
   const demo = STATE.tokens.filter(t => t.historyIsDemo).length;
   if (demo && !bannerDismissed.demo){
     out.push('<div class="banner info">Historia ' + demo + ' tokenów pochodzi z <b>danych startowych wygenerowanych demonstracyjnie</b> — pokazuje, jak działa sygnał odbudowy, ale to nie są prawdziwe notowania. Ceny, podaże i harmonogramy odblokowań w danych startowych też wymagają weryfikacji. <button class="btn small" data-dismiss="demo">Ukryj</button></div>');
@@ -3368,8 +3422,17 @@ function renderBanners(){
   }));
 }
 
+/* 'auto' nie stempluje nic — wtedy decyduje ustawienie systemu albo motyw
+   strony, w której ramce siedzimy. Wybór użytkownika stempluje i wygrywa. */
+const THEME_CYCLE = { auto: 'light', light: 'dark', dark: 'auto' };
+const THEME_LABEL = { auto: '◐', light: '☀', dark: '☾' };
+const THEME_TITLE = { auto: 'Motyw: jak w systemie', light: 'Motyw: jasny', dark: 'Motyw: ciemny' };
 function applyTheme(theme){
-  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark') root.setAttribute('data-theme', theme);
+  else root.removeAttribute('data-theme');
+  const btn = el('themeBtn');
+  if (btn){ btn.textContent = THEME_LABEL[theme] || THEME_LABEL.auto; btn.title = THEME_TITLE[theme] || THEME_TITLE.auto; }
 }
 
 function init(){
@@ -3378,7 +3441,7 @@ function init(){
 
   el('nav').querySelectorAll('button').forEach(b => b.addEventListener('click', () => showView(b.getAttribute('data-view'))));
   el('themeBtn').addEventListener('click', () => {
-    STATE.settings.theme = STATE.settings.theme === 'light' ? 'dark' : 'light';
+    STATE.settings.theme = THEME_CYCLE[STATE.settings.theme] || 'light';
     applyTheme(STATE.settings.theme);
     saveState();
     renderCurrentView();     // wykresy muszą przerysować się w nowych kolorach

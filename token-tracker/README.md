@@ -133,6 +133,28 @@ Efekt uboczny, który wyszedł dopiero na testach i jest teraz osobnym ostrzeże
 dzisiejszym kursie 3,71, musisz dojść do ceny o ~12% wyższej niż średnia cena zakupu w USD, żeby
 w ogóle wyjść na zero w PLN.
 
+## Wersja artefaktowa
+
+`build-artifact.py` robi z `index.html` plik do opublikowania jako artefakt na claude.ai.
+Artefakty mają ostre CSP — żaden skrypt z zewnętrznego hosta się nie załaduje — więc skrypt
+wkleja Chart.js i PDF.js prosto do pliku (razem ~1,7 MB) i zdejmuje ramkę
+`<!DOCTYPE>/<html>/<head>/<body>`, bo platforma dokłada własną.
+
+```
+npm i chart.js@4.4.1 pdfjs-dist@3.11.174
+mkdir vendor && cp node_modules/chart.js/dist/chart.umd.js node_modules/pdfjs-dist/build/pdf.min.js node_modules/pdfjs-dist/build/pdf.worker.min.js vendor/
+python3 build-artifact.py vendor artifact.html
+```
+
+Czego w wersji artefaktowej nie ma i mieć nie może: pobierania cen z CoinGecko i zapisu pliku
+JSON — przeglądarka blokuje jedno i drugie w ramce podglądu. Aplikacja to wykrywa i mówi wprost:
+zamiast cichego przycisku „Pobierz dane” podstawia JSON do skopiowania, a przy cenach kieruje do
+pól ręcznych. Wykresy, parser PDF i cała reszta działają, bo biblioteki siedzą w pliku.
+
+Motyw ma trzy stany: „jak w systemie” (domyślny, bez stempla — podąża za `prefers-color-scheme`
+albo za motywem strony, w której ramce siedzi), jasny i ciemny. Przycisk w nagłówku przechodzi
+po kolei.
+
 ## Czego to narzędzie nie robi
 
 Nie prognozuje cen, nie daje sygnałów kupna/sprzedaży, nie liczy wskaźników technicznych.
