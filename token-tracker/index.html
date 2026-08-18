@@ -577,6 +577,26 @@ function seedTokens(){
   return [peaq, auki, eth, gmac];
 }
 
+/* Benchmark rynkowy — bez niego nie da się odróżnić siły projektu od bety całego rynku.
+   Historia startowa jest, jak reszta danych startowych, wygenerowana demonstracyjnie. */
+function seedBenchmark(){
+  const anchors = [
+    { d: 120, v: 2.62e12 }, { d: 90, v: 2.74e12 }, { d: 60, v: 2.86e12 },
+    { d: 30, v: 2.95e12 }, { d: 0, v: 3.08e12 }
+  ];
+  const hist = [];
+  const now = new Date();
+  for (let d = 120; d >= 0; d--){
+    let hi = anchors[0], lo = anchors[anchors.length - 1];
+    for (let i = 0; i < anchors.length - 1; i++){
+      if (anchors[i].d >= d && anchors[i + 1].d <= d){ hi = anchors[i]; lo = anchors[i + 1]; break; }
+    }
+    const span = hi.d - lo.d, tt = span === 0 ? 0 : (hi.d - d) / span;
+    hist.push({ date: isoOf(addDays(now, -d)), value: hi.v + (lo.v - hi.v) * tt });
+  }
+  return { label: 'Kapitalizacja rynku krypto', isDemo: true, history: hist };
+}
+
 function defaultState(){
   return {
     version: 1,
@@ -584,9 +604,13 @@ function defaultState(){
       usdPln: 3.7137,          // kurs edytowalny w ustawieniach (domyślnie 3,71)
       horizonYears: 10,        // horyzont inwestycyjny — używany w scoringu vestingu
       networkGrowthPct: 30,    // założony wzrost wyceny sieci r/r w projekcji
+      discountRatePct: 10,     // koszt kapitału — do wartości bieżącej i IRR
+      targetPS: 30,            // mnożnik P/S, przy którym oceniamy wymagany przychód
+      taxRatePct: 19,          // podatek od zysku (PL: 19% od dochodu)
       theme: 'dark'
     },
     tokens: seedTokens(),
+    benchmark: seedBenchmark(),
     meta: { savedAt: null, seededAt: new Date().toISOString() }
   };
 }
@@ -626,10 +650,17 @@ function loadState(){
 function normalizeState(s){
   const d = defaultState();
   if (!s || typeof s !== 'object') return d;
+  const bench = s.benchmark && Array.isArray(s.benchmark.history) ? s.benchmark : d.benchmark;
   const out = {
     version: 1,
     settings: Object.assign({}, d.settings, s.settings || {}),
     tokens: Array.isArray(s.tokens) ? s.tokens.map(normalizeToken) : d.tokens,
+    benchmark: {
+      label: bench.label || 'Kapitalizacja rynku krypto',
+      isDemo: !!bench.isDemo,
+      history: bench.history.map(h => ({ date: h.date, value: num(h.value) }))
+        .filter(h => h.date && h.value > 0).sort((a, b) => a.date.localeCompare(b.date))
+    },
     meta: Object.assign({}, d.meta, s.meta || {})
   };
   return out;
@@ -661,7 +692,31 @@ function normalizeToken(t){
     })).filter(h => h.date).sort((a, b) => a.date.localeCompare(b.date)) : [],
     athPrice: num(t.athPrice), athDate: t.athDate || '', athMarketCap: num(t.athMarketCap),
     notes: t.notes || '',
-    historyIsDemo: !!t.historyIsDemo
+    historyIsDemo: !!t.historyIsDemo,
+
+    /* --- podaż niehandlowa: staking, skarbiec, saldo giełd, głębokość księgi --- */
+    stakedSupply: num(t.stakedSupply), treasurySupply: num(t.treasurySupply),
+    exchangeBalance: num(t.exchangeBalance), depth2PctUsd: num(t.depth2PctUsd),
+
+    /* --- fundamenty sieci: przychód, value capture, subsydium z emisji, węzły --- */
+    fundamentals: {
+      revenueAnnualUsd: num((t.fundamentals || {}).revenueAnnualUsd),
+      revenueToTokenPct: num((t.fundamentals || {}).revenueToTokenPct),
+      subsidyAnnualUsd: num((t.fundamentals || {}).subsidyAnnualUsd),
+      nodes: num((t.fundamentals || {}).nodes),
+      updatedAt: (t.fundamentals || {}).updatedAt || '',
+      source: (t.fundamentals || {}).source || ''
+    },
+    fundamentalsHistory: Array.isArray(t.fundamentalsHistory) ? t.fundamentalsHistory.map(h => ({
+      date: h.date, revenueAnnualUsd: num(h.revenueAnnualUsd), nodes: num(h.nodes)
+    })).filter(h => h.date).sort((a, b) => a.date.localeCompare(b.date)) : [],
+
+    /* --- księga transakcji; gdy niepusta, ma pierwszeństwo nad ręczną pozycją --- */
+    transactions: Array.isArray(t.transactions) ? t.transactions.map(x => ({
+      date: x.date || '', type: x.type === 'sell' ? 'sell' : 'buy',
+      tokens: num(x.tokens), priceUsd: num(x.priceUsd), usdPln: num(x.usdPln), feeUsd: num(x.feeUsd),
+      note: x.note || ''
+    })).filter(x => x.date && x.tokens > 0).sort((a, b) => a.date.localeCompare(b.date)) : []
   };
 }
 function updateSaveInfo(){
@@ -676,6 +731,50 @@ function updateSaveInfo(){
    Wszystkie wzory rozwodnienia są tu policzone dosłownie tak,
    jak w specyfikacji. Komentarze opisują, co która liczba znaczy.
    ============================================================ */
+/* ============================================================
+   4a. KSIĘGA TRANSAKCJI
+   Gdy token ma wpisane transakcje, pozycja liczy się z nich, a nie z pól
+   „ile sztuk / średnia cena”. Koszt liczymy metodą średniej ważonej; sprzedaż
+   zdejmuje koszt proporcjonalnie i zamyka zysk zrealizowany.
+   Wkład w PLN liczymy kursem Z DNIA ZAKUPU — inaczej złotówkowy wynik jest
+   przeliczany dzisiejszym kursem i miesza zmianę ceny tokena ze zmianą kursu.
+   ============================================================ */
+function ledger(t){
+  const tx = (t.transactions || []);
+  if (!tx.length) return null;
+  const fallbackRate = num(STATE.settings.usdPln);
+  let qty = 0, costUsd = 0, costPln = 0, realizedUsd = 0, realizedPln = 0;
+  let weightSum = 0, weightedTime = 0, feesUsd = 0;
+  tx.forEach(x => {
+    const tokens = num(x.tokens), price = num(x.priceUsd), fee = num(x.feeUsd);
+    const rate = num(x.usdPln) > 0 ? num(x.usdPln) : fallbackRate;
+    const when = parseISO(x.date);
+    feesUsd += fee;
+    if (x.type === 'sell'){
+      const avgU = qty > 0 ? costUsd / qty : 0;
+      const avgP = qty > 0 ? costPln / qty : 0;
+      const sold = Math.min(tokens, qty);
+      realizedUsd += sold * price - sold * avgU - fee;
+      realizedPln += sold * price * rate - sold * avgP - fee * rate;
+      costUsd -= sold * avgU; costPln -= sold * avgP; qty -= sold;
+    } else {
+      const c = tokens * price + fee;
+      costUsd += c; costPln += (tokens * price) * rate + fee * rate; qty += tokens;
+      if (when){ weightSum += c; weightedTime += c * when.getTime(); }
+    }
+  });
+  const avgEntryDate = weightSum > 0 ? new Date(weightedTime / weightSum) : null;
+  return {
+    holdings: qty,
+    avgEntryPrice: qty > 0 ? costUsd / qty : 0,
+    investedUsd: costUsd, investedPln: costPln,
+    realizedUsd: realizedUsd, realizedPln: realizedPln,
+    feesUsd: feesUsd, avgEntryDate: avgEntryDate,
+    holdingYears: avgEntryDate ? (new Date() - avgEntryDate) / (365.25 * DAY) : null,
+    count: tx.length
+  };
+}
+
 function metrics(t, settings){
   const st = settings || STATE.settings;
   const price = num(t.price);
@@ -697,11 +796,14 @@ function metrics(t, settings){
      supplyShare jest STAŁY: ani moje sztuki, ani podaż docelowa się nie zmieniają.
      Stąd positionValue = supplyShare × fdv — wartość pozycji jest wprost
      proporcjonalna do FDV, a cena to tylko FDV podzielone przez stałą. */
-  const positionValue = num(t.holdings) * price;
-  const invested = num(t.holdings) * num(t.avgEntryPrice);
+  const led = ledger(t);
+  const holdings = led ? led.holdings : num(t.holdings);
+  const avgEntry = led ? led.avgEntryPrice : num(t.avgEntryPrice);
+  const positionValue = holdings * price;
+  const invested = holdings * avgEntry;
   const pnl = positionValue - invested;
   const pnlPct = invested > 0 ? (pnl / invested) * 100 : NaN;
-  const supplyShare = total > 0 ? num(t.holdings) / total : 0;
+  const supplyShare = total > 0 ? holdings / total : 0;
   const positionFromFdv = supplyShare * fdv;   // kontrola tożsamości — musi równać się positionValue
 
   /* --- PROGI OPŁACALNOŚCI ---
@@ -709,10 +811,14 @@ function metrics(t, settings){
      żeby moja średnia cena zakupu została odzyskana.
      marketCapMultiple > priceMultiple dokładnie o stosunek total/circ — to jest
      ta różnica, której nie widać na wykresie ceny. */
-  const breakEvenPrice = num(t.avgEntryPrice);
-  const breakEvenFDV = num(t.avgEntryPrice) * total;
-  const breakEvenMCifNoDilution = num(t.avgEntryPrice) * circ;
-  const priceMultiple = price > 0 ? num(t.avgEntryPrice) / price : Infinity;
+  const breakEvenPrice = avgEntry;
+  /* Próg w złotówkach to inna liczba niż próg w dolarach, jeśli kurs się ruszył:
+     koszt uzyskania masz w PLN z dni zakupu, więc odzyskanie dolarów nie znaczy
+     jeszcze odzyskania złotówek. Liczymy cenę w USD, przy której wychodzisz na zero
+     w PLN po dzisiejszym kursie. */
+  const breakEvenFDV = avgEntry * total;
+  const breakEvenMCifNoDilution = avgEntry * circ;
+  const priceMultiple = price > 0 ? avgEntry / price : Infinity;
   const fdvMultiple = fdv > 0 ? breakEvenFDV / fdv : Infinity;
   const marketCapMultiple = marketCap > 0 ? breakEvenFDV / marketCap : Infinity;
   const progressToBreakEven = breakEvenFDV > 0 ? fdv / breakEvenFDV : 0;
@@ -721,22 +827,67 @@ function metrics(t, settings){
      1) cena wraca do ATH — naiwny, ignoruje że podaż urosła
      2) wycena wraca do ATH przy DZISIEJSZEJ podaży
      3) wycena wraca do ATH przy PEŁNEJ podaży — realistyczny dla 10 lat */
-  const value_athPrice = num(t.holdings) * num(t.athPrice);
+  const value_athPrice = holdings * num(t.athPrice);
   const price_athMC_now = circ > 0 ? num(t.athMarketCap) / circ : NaN;
-  const value_athMC_now = num(t.holdings) * price_athMC_now;
+  const value_athMC_now = holdings * price_athMC_now;
   const price_athMC_full = total > 0 ? num(t.athMarketCap) / total : NaN;
-  const value_athMC_full = num(t.holdings) * price_athMC_full;
+  const value_athMC_full = holdings * price_athMC_full;
   // ile musi być warta cała podaż, żeby CENA wróciła do ATH
   const mcNeededForAthPrice = num(t.athPrice) * total;
   const athPriceDifficulty = num(t.athMarketCap) > 0 ? mcNeededForAthPrice / num(t.athMarketCap) : NaN;
 
   const volToMc = marketCap > 0 ? num(t.volume24h) / marketCap : 0;
 
+  /* --- EFEKTYWNY FLOAT ---
+     Nie każdy token w obiegu jest na sprzedaż: część jest zastakowana, część leży
+     w skarbcu projektu. Podaż płynna to reszta — i to względem niej naprawdę mierzy
+     się płynność. Uwaga: staking można odwinąć, więc to sufit, nie gwarancja. */
+  const locked = Math.min(circ, num(t.stakedSupply) + num(t.treasurySupply));
+  const liquidSupply = Math.max(0, circ - locked);
+  const hasLockData = locked > 0;
+  const effectiveFloat = total > 0 ? liquidSupply / total : 0;
+  const liquidMarketCap = price * liquidSupply;
+  const volToLiquidMc = liquidMarketCap > 0 ? num(t.volume24h) / liquidMarketCap : 0;
+  // ile razy musi urosnąć kapitał ulokowany w dzisiaj handlowalnej podaży
+  const marketCapMultipleLiquid = liquidMarketCap > 0 ? breakEvenFDV / liquidMarketCap : Infinity;
+
+  /* --- FUNDAMENTY ---
+     P/S to jedyny mnożnik porównywalny między sieciami. subsidyRatio < 1 znaczy,
+     że sieć płaci dostawcom emisją więcej, niż zbiera od klientów. */
+  const f = t.fundamentals || {};
+  const revenue = num(f.revenueAnnualUsd);
+  const captured = revenue * num(f.revenueToTokenPct) / 100;
+  const subsidy = num(f.subsidyAnnualUsd);
+  const targetPS = num(st.targetPS, 30);
+  const fund = {
+    hasData: revenue > 0 || subsidy > 0 || num(f.nodes) > 0,
+    revenue: revenue, captured: captured, subsidy: subsidy, nodes: num(f.nodes),
+    ps: revenue > 0 ? fdv / revenue : NaN,
+    psMarketCap: revenue > 0 ? marketCap / revenue : NaN,
+    psCaptured: captured > 0 ? fdv / captured : NaN,
+    subsidyRatio: subsidy > 0 ? revenue / subsidy : NaN,
+    revenuePerNode: num(f.nodes) > 0 ? revenue / num(f.nodes) : NaN,
+    fdvPerNode: num(f.nodes) > 0 ? fdv / num(f.nodes) : NaN,
+    // ile przychodu rocznie musi robić sieć, żeby przy zadanym P/S uzasadnić próg opłacalności
+    revenueNeededForBreakEven: targetPS > 0 ? breakEvenFDV / targetPS : NaN,
+    revenueNeededMultiple: (revenue > 0 && targetPS > 0) ? (breakEvenFDV / targetPS) / revenue : NaN,
+    targetPS: targetPS
+  };
+
   return {
     price, circ, total, marketCap, fdv, float: float_, remainingDilution,
+    holdings, avgEntry, ledger: led,
+    locked, liquidSupply, hasLockData, effectiveFloat, liquidMarketCap, volToLiquidMc, marketCapMultipleLiquid,
+    fund,
     positionValue, invested, pnl, pnlPct, supplyShare, positionFromFdv,
-    positionValuePln: positionValue * num(st.usdPln), investedPln: invested * num(st.usdPln), pnlPln: pnl * num(st.usdPln),
+    positionValuePln: positionValue * num(st.usdPln),
+    // wkład w PLN: z księgi po kursach z dni zakupu, a bez księgi po kursie bieżącym
+    investedPln: led ? led.investedPln : invested * num(st.usdPln),
+    investedPlnAtToday: invested * num(st.usdPln),
+    pnlPln: positionValue * num(st.usdPln) - (led ? led.investedPln : invested * num(st.usdPln)),
     breakEvenPrice, breakEvenFDV, breakEvenMCifNoDilution,
+    breakEvenPricePln: (led && holdings > 0 && num(st.usdPln) > 0) ? led.investedPln / (holdings * num(st.usdPln)) : avgEntry,
+    breakEvenFdvPln: (led && holdings > 0 && num(st.usdPln) > 0) ? (led.investedPln / (holdings * num(st.usdPln))) * total : avgEntry * total,
     priceMultiple, fdvMultiple, marketCapMultiple, progressToBreakEven,
     value_athPrice, price_athMC_now, value_athMC_now, price_athMC_full, value_athMC_full,
     mcNeededForAthPrice, athPriceDifficulty, volToMc
@@ -786,6 +937,10 @@ function recovery(t){
     out.supplyGrowth90d = num(h90.circulatingSupply) > 0 ? (nowC / num(h90.circulatingSupply)) - 1 : NaN;
   }
   out.status = recoveryStatus(out);
+  out.benchChange30d = benchChange(30);
+  out.benchChange90d = benchChange(90);
+  out.rel30d = relativeStrength(out.fdvChange30d, 30);
+  out.rel90d = relativeStrength(out.fdvChange90d, 90);
   return out;
 }
 /* Kolejność sprawdzania ma znaczenie: „pozorny wzrost” jest sprawdzany PRZED
@@ -805,6 +960,32 @@ const RECOVERY_META = {
   unknown:  { label: 'ZA MAŁO DANYCH',  cls: 'sig-none', ico: '·', why: 'Potrzeba historii sięgającej 90 dni wstecz. Zapisuj odczyt w widoku „Codzienna aktualizacja”.' }
 };
 
+/* ---- BENCHMARK RYNKOWY ----
+   Bez punktu odniesienia „realna odbudowa” myli siłę projektu ze zwykłą betą rynku.
+   Siła względna = ile FDV urosło ponad to, co urósł cały rynek w tym samym czasie. */
+function benchAt(daysBack){
+  const h = (STATE.benchmark && STATE.benchmark.history) || [];
+  if (!h.length) return null;
+  const targetISO = isoOf(addDays(new Date(), -daysBack));
+  let best = null;
+  for (let i = 0; i < h.length; i++){ if (h[i].date <= targetISO) best = h[i]; }
+  return best;
+}
+function benchNow(){
+  const h = (STATE.benchmark && STATE.benchmark.history) || [];
+  return h.length ? h[h.length - 1] : null;
+}
+function benchChange(daysBack){
+  const a = benchAt(daysBack), b = benchNow();
+  if (!a || !b || !(a.value > 0)) return NaN;
+  return (b.value / a.value) - 1;
+}
+function relativeStrength(fdvChange, daysBack){
+  const bc = benchChange(daysBack);
+  if (!isFinite(fdvChange) || !isFinite(bc)) return NaN;
+  return (1 + fdvChange) / (1 + bc) - 1;
+}
+
 /* ---- SYGNAŁ NA POZIOMIE PORTFELA ----
    Zmiana FDV portfela = zmiana sumy wartości pozycji, bo udział w podaży każdego
    tokena jest stały (positionValue = supplyShare × fdv).
@@ -817,10 +998,11 @@ function portfolioRecovery(tokens){
     const total = num(t.totalSupply) > 0 ? num(t.totalSupply) : num(t.circulatingSupply);
     if (total <= 0) return;
     const h30 = histAt(t.priceHistory, 30), h90 = histAt(t.priceHistory, 90);
-    const pv = num(t.holdings) * num(t.price);
+    const hold = metrics(t).holdings;   // z księgi transakcji, jeśli jest wypełniona
+    const pv = hold * num(t.price);
     posNow += pv;
-    if (h30){ any30 = true; pos30 += num(t.holdings) * num(h30.price); }
-    if (h90){ any90 = true; pos90 += num(t.holdings) * num(h90.price); }
+    if (h30){ any30 = true; pos30 += hold * num(h30.price); }
+    if (h90){ any90 = true; pos90 += hold * num(h90.price); }
     const r = recovery(t);
     if (isFinite(r.mcChange30d)){ mcw += r.mcChange30d * pv; wsum += pv; }
     if (isFinite(r.supplyGrowth30d)) supw += r.supplyGrowth30d * pv;
@@ -833,6 +1015,10 @@ function portfolioRecovery(tokens){
     supplyGrowth30d: wsum > 0 ? supw / wsum : NaN
   };
   out.status = recoveryStatus(out);
+  out.benchChange30d = benchChange(30);
+  out.benchChange90d = benchChange(90);
+  out.rel30d = relativeStrength(out.fdvChange30d, 30);
+  out.rel90d = relativeStrength(out.fdvChange90d, 90);
   return out;
 }
 
@@ -880,15 +1066,19 @@ function riskScore(t, settings){
       : 'W najbliższych 90 dniach nie ma zapisanych odblokowań (sprawdź, czy harmonogram jest kompletny).'
   });
 
-  // 3. PŁYNNOŚĆ (waga 20) — czy da się wyjść z pozycji
-  const vm = m.volToMc * 100;
+  // 3. PŁYNNOŚĆ (waga 20) — czy da się wyjść z pozycji.
+  //    Gdy znamy podaż zablokowaną, mierzymy obrót względem podaży PŁYNNEJ —
+  //    bo tokeny w stakingu i w skarbcu nie stoją po drugiej stronie księgi.
+  const vm = (m.hasLockData ? m.volToLiquidMc : m.volToMc) * 100;
   comps.push({
     key: 'liquidity', label: 'Płynność', weight: 20,
     points: (function(){
       if (vm > 10) return 0; if (vm >= 3) return 7; if (vm >= 1) return 14; return 20;
     })(),
-    value: pct(vm, 2) + ' kapitalizacji dziennie',
-    desc: 'Dzienny obrót to ' + usdBig(num(t.volume24h)) + ', czyli ' + pct(vm, 2) + ' kapitalizacji. Twoja pozycja to ' + usdBig(m.positionValue) + '.'
+    value: pct(vm, 2) + (m.hasLockData ? ' podaży płynnej dziennie' : ' kapitalizacji dziennie'),
+    desc: 'Dzienny obrót to ' + usdBig(num(t.volume24h)) + ', czyli ' + pct(vm, 2) + ' ' +
+      (m.hasLockData ? 'kapitału w podaży płynnej (' + usdBig(m.liquidMarketCap) + ', po odjęciu stakingu i skarbca)' : 'kapitalizacji') +
+      '. Twoja pozycja to ' + usdBig(m.positionValue) + '.'
   });
 
   // 4. ALOKACJA INSIDERÓW (waga 15)
@@ -946,6 +1136,18 @@ function warningFlags(t){
       out.push({ level: 'bad', text: 'Cliff ' + fmtDate(u.date) + ': ' + tokAmount(u.tokens) + ' szt. to ' + pct(num(u.tokens) / num(t.circulatingSupply) * 100) + ' podaży w obiegu — spodziewaj się presji.' });
     }
   });
+  if (m.hasLockData && num(t.exchangeBalance) > 0.2 * m.liquidSupply){
+    out.push({ level: 'warn', text: 'Na giełdach leży ' + tokAmount(num(t.exchangeBalance)) + ' szt. — ' +
+      pct(num(t.exchangeBalance) / m.liquidSupply * 100) + ' podaży płynnej gotowej do sprzedania w każdej chwili.' });
+  }
+  if (num(t.depth2PctUsd) > 0 && m.positionValue > num(t.depth2PctUsd)){
+    out.push({ level: 'bad', text: 'Twoja pozycja (' + usdBig(m.positionValue) + ') jest większa niż głębokość księgi w paśmie 2% (' +
+      usdBig(num(t.depth2PctUsd)) + ') — wyjście jednym zleceniem ruszy cenę.' });
+  }
+  if (isFinite(m.fund.subsidyRatio) && m.fund.subsidyRatio < 1){
+    out.push({ level: 'bad', text: 'Sieć dopłaca do siebie emisją: przychód od klientów ' + usdBig(m.fund.revenue) +
+      ' rocznie wobec ' + usdBig(m.fund.subsidy) + ' rozdanych dostawcom w tokenach (pokrycie ' + pct(m.fund.subsidyRatio * 100) + ').' });
+  }
   if (isFinite(m.athPriceDifficulty) && m.athPriceDifficulty > 3){
     out.push({ level: 'warn', text: 'Powrót CENY do ATH wymaga wyceny ' + mult(m.athPriceDifficulty) + ' większej niż w szczycie (' + usdBig(m.mcNeededForAthPrice) + ' vs ' + usdBig(num(t.athMarketCap)) + ').' });
   }
@@ -1001,7 +1203,7 @@ function projection(t, growthPct, years){
     rows.push({
       year: nowY + y, date: date, supply: supply, unlocked: unlocked, emission: cumEmission,
       inflRate: inflRate, assumedMC: assumedMC, price: price, fdv: fdv,
-      position: num(t.holdings) * price
+      position: m.holdings * price
     });
   }
   return rows;
@@ -1011,7 +1213,7 @@ function projection(t, growthPct, years){
 function scenario(t, targetFDV){
   const m = metrics(t);
   const impliedPrice = m.total > 0 ? targetFDV / m.total : 0;
-  const impliedPosition = num(t.holdings) * impliedPrice;
+  const impliedPosition = m.holdings * impliedPrice;
   return {
     targetFDV: targetFDV, impliedPrice: impliedPrice, impliedPosition: impliedPosition,
     impliedPositionPln: impliedPosition * num(STATE.settings.usdPln),
@@ -1062,8 +1264,12 @@ function supplyAtDate(t, dateISO){
      od daty zależy kapitał, który musi wtedy siedzieć w tokenie (cena × podaż w obiegu).
    • 'mc'  — zadaję kapitał realnie ulokowany w tokenie. Wtedy cena = kapitał / podaż
      w obiegu w dniu T, więc im więcej tokenów zdąży wejść, tym niższa cena. */
-function scenarioTimed(t, targetValue, basis, supply){
+function scenarioTimed(t, targetValue, basis, supply, years){
   const m = metrics(t);
+  const st = STATE.settings;
+  const yrs = Math.max(0, num(years));
+  const r = num(st.discountRatePct) / 100;
+  const taxRate = num(st.taxRatePct) / 100;
   let impliedPrice, targetFDV, targetMC;
   if (basis === 'mc'){
     targetMC = targetValue;
@@ -1074,7 +1280,7 @@ function scenarioTimed(t, targetValue, basis, supply){
     impliedPrice = m.total > 0 ? targetValue / m.total : 0;
     targetMC = impliedPrice * supply;
   }
-  const impliedPosition = num(t.holdings) * impliedPrice;
+  const impliedPosition = m.holdings * impliedPrice;
   return {
     targetValue: targetValue, targetFDV: targetFDV, targetMC: targetMC, impliedPrice: impliedPrice,
     impliedPosition: impliedPosition,
@@ -1086,7 +1292,38 @@ function scenarioTimed(t, targetValue, basis, supply){
     // ile kapitału musi dojść wyłącznie po to, żeby wchłonąć nowo uwolnione tokeny po tej cenie
     absorbCost: impliedPrice * Math.max(0, supply - m.circ),
     // cena, gdyby kapitał w tokenie nie urósł ani o dolara, a podaż urosła zgodnie z założeniem
-    priceIfCapitalFlat: supply > 0 ? m.marketCap / supply : 0
+    priceIfCapitalFlat: supply > 0 ? m.marketCap / supply : 0,
+
+    /* --- CZAS I PIENIĄDZ ---
+       Nominał za 10 lat to nie to samo, co nominał dziś. Wartość bieżąca dyskontuje
+       przyszłą pozycję kosztem kapitału; IRR mówi, ile ten scenariusz daje rocznie.
+       Podatek nie rusza progu opłacalności (19% od zysku znika po obu stronach
+       równania) — zjada tylko górkę powyżej wkładu. */
+    years: yrs,
+    presentValue: yrs > 0 ? impliedPosition / Math.pow(1 + r, yrs) : impliedPosition,
+    presentValuePln: (yrs > 0 ? impliedPosition / Math.pow(1 + r, yrs) : impliedPosition) * num(st.usdPln),
+    discountedFdv: yrs > 0 ? targetFDV / Math.pow(1 + r, yrs) : targetFDV,
+    // IRR licząc od dziś: z dzisiejszej wartości pozycji do wartości w scenariuszu
+    irrForward: (yrs > 0 && m.positionValue > 0) ? Math.pow(impliedPosition / m.positionValue, 1 / yrs) - 1 : NaN,
+    // IRR całej inwestycji: od wkładu, przez okres trzymania do tej pory plus czas do scenariusza
+    irrFromEntry: (function(){
+      const held = m.ledger && m.ledger.holdingYears > 0 ? m.ledger.holdingYears : 0;
+      const totalYears = held + yrs;
+      if (!(totalYears > 0) || !(m.invested > 0)) return NaN;
+      return Math.pow(impliedPosition / m.invested, 1 / totalYears) - 1;
+    })(),
+    heldYears: m.ledger && m.ledger.holdingYears > 0 ? m.ledger.holdingYears : 0,
+    // wynik po podatku od zysku, liczony w PLN względem realnego wkładu w PLN
+    taxDuePln: (function(){
+      const posPln = impliedPosition * num(st.usdPln);
+      return Math.max(0, posPln - m.investedPln) * taxRate;
+    })(),
+    netAfterTaxPln: (function(){
+      const posPln = impliedPosition * num(st.usdPln);
+      return posPln - Math.max(0, posPln - m.investedPln) * taxRate;
+    })(),
+    // przychód roczny, jakiego wymagałaby ta wycena przy zadanym mnożniku P/S
+    revenueNeeded: num(st.targetPS) > 0 ? targetFDV / num(st.targetPS) : NaN
   };
 }
 
@@ -1217,6 +1454,7 @@ function buildPortfolioSeries(mode){
   });
   const cursors = toks.map(() => 0);
   const lastPrice = toks.map(t => num(t.priceHistory[0].price));
+  const holds = toks.map(t => metrics(t).holdings);   // raz na token, nie raz na dzień
   dates.forEach(d => {
     let v = 0;
     toks.forEach((t, i) => {
@@ -1226,7 +1464,7 @@ function buildPortfolioSeries(mode){
       // FDV = cena × podaż docelowa; wersja „ważona” mnoży to przez stały udział w podaży,
       // co daje dokładnie wartość pozycji (positionValue = supplyShare × fdv)
       v += (mode === 'raw') ? lastPrice[i] * total
-                            : lastPrice[i] * num(t.holdings);
+                            : lastPrice[i] * holds[i];
     });
     values.push(v); beLine.push(be);
   });
@@ -1275,6 +1513,15 @@ function signalTileHtml(r, title, extra){
   mrow.push('<div>zmiana FDV 90 dni<b class="' + (r.fdvChange90d > 0 ? 'pos' : 'neg') + '">' + (isFinite(r.fdvChange90d) ? pctSigned(r.fdvChange90d * 100) : '—') + '</b></div>');
   mrow.push('<div>zmiana kapitalizacji 30 dni<b class="' + (r.mcChange30d > 0 ? 'pos' : 'neg') + '">' + (isFinite(r.mcChange30d) ? pctSigned(r.mcChange30d * 100) : '—') + '</b></div>');
   mrow.push('<div>przyrost podaży 30 dni<b>' + (isFinite(r.supplyGrowth30d) ? pctSigned(r.supplyGrowth30d * 100) : '—') + '</b></div>');
+  if (isFinite(r.rel30d)){
+    mrow.push('<div>względem rynku 30 dni<b class="' + (r.rel30d > 0 ? 'pos' : 'neg') + '">' + pctSigned(r.rel30d * 100) + '</b></div>');
+  }
+  const relBadge = isFinite(r.rel30d)
+    ? '<div style="margin-top:8px"><span class="badge ' + (r.rel30d > 0 ? 'good' : 'critical') + '">' +
+      (r.rel30d > 0 ? '▲ mocniejszy niż rynek' : '▼ słabszy niż rynek') + '</span> ' +
+      '<span class="sub">rynek w 30 dni ' + pctSigned(r.benchChange30d * 100) + ', w 90 dni ' + (isFinite(r.benchChange90d) ? pctSigned(r.benchChange90d * 100) : '—') +
+      '. Wzrost razem z całym rynkiem to beta, nie siła projektu.</span></div>'
+    : '';
   return '<div class="signal ' + meta.cls + '">' +
     '<div class="ico" aria-hidden="true">' + meta.ico + '</div>' +
     '<div style="flex:1 1 320px">' +
@@ -1282,6 +1529,7 @@ function signalTileHtml(r, title, extra){
       '<div class="headline">' + meta.label + '</div>' +
       '<div class="why">' + meta.why + '</div>' +
       '<div class="metrics">' + mrow.join('') + '</div>' +
+      relBadge +
       (extra || '') +
     '</div></div>';
 }
@@ -1480,7 +1728,9 @@ function renderTokenView(){
     '<div class="grid g4">' +
       kpi('Cena', usd(m.price), 'wolumen 24h ' + usdBig(num(t.volume24h))) +
       kpi('FDV', usdBig(m.fdv), 'kapitalizacja ' + usdBig(m.marketCap)) +
-      kpi('Float', pct(m.float * 100), 'do wejścia jeszcze ' + pct(m.remainingDilution * 100) + ' podaży') +
+      kpi('Float', pct(m.float * 100), m.hasLockData
+        ? 'efektywny (bez stakingu i skarbca) ' + pct(m.effectiveFloat * 100) + ' · do wejścia jeszcze ' + pct(m.remainingDilution * 100)
+        : 'do wejścia jeszcze ' + pct(m.remainingDilution * 100) + ' podaży') +
       kpi('Wartość pozycji', pln(m.positionValuePln), usdBig(m.positionValue) + ' · wynik ' + '<span class="' + (m.pnl >= 0 ? 'pos' : 'neg') + '">' + pctSigned(m.pnlPct) + '</span>') +
     '</div>' +
     (t.notes ? '<p class="note" style="margin-top:10px">' + esc(t.notes) + '</p>' : '') +
@@ -1494,13 +1744,25 @@ function renderTokenView(){
   parts.push('<div class="card"><h2>Dlaczego liczy się FDV, a nie cena</h2>' +
     '<div class="identity"><p style="margin-bottom:6px"><code>wartość pozycji = udział w podaży × FDV</code></p>' +
     '<p class="mono" style="margin:0">' + pln(m.positionValuePln) + ' &nbsp;=&nbsp; ' + fmt(m.supplyShare * 100, 6) + '% &nbsp;×&nbsp; ' + usdBig(m.fdv) + '</p>' +
-    '<p class="sub" style="margin-top:8px">Trzymasz ' + fmt(num(t.holdings), 2) + ' szt. z docelowych ' + tokAmount(m.total) + '. Ten udział nigdy się nie zmienia — więc wartość Twojej pozycji jest wprost proporcjonalna do wyceny całej sieci. Cena to tylko FDV podzielone przez stałą liczbę.</p></div>' +
+    '<p class="sub" style="margin-top:8px">Trzymasz ' + fmt(m.holdings, 2) + ' szt. z docelowych ' + tokAmount(m.total) + '. Ten udział nigdy się nie zmienia — więc wartość Twojej pozycji jest wprost proporcjonalna do wyceny całej sieci. Cena to tylko FDV podzielone przez stałą liczbę.</p></div>' +
     '<div class="grid g2" style="margin-top:12px">' +
       '<div class="kpi"><div class="label">Cena musi</div><div class="value">' + mult(m.priceMultiple) + '</div>' +
         '<div class="note">Tyle musi urosnąć notowanie: z ' + usd(m.price) + ' do ' + usd(m.breakEvenPrice) + '. To jedyna liczba, którą widzisz na wykresie.</div></div>' +
       '<div class="kpi"><div class="label">Kapitał w tokenie musi</div><div class="value">' + mult(m.marketCapMultiple) + '</div>' +
         '<div class="note">Tyle realnych pieniędzy musi w nim usiąść: z ' + usdBig(m.marketCap) + ' do ' + usdBig(m.breakEvenFDV) + '. Różnica bierze się stąd, że nowe tokeny też potrzebują nabywców.</div></div>' +
     '</div>' +
+    (m.hasLockData ? '<p class="note" style="margin-top:10px">Handlowalna jest dziś tylko część podaży: ' + tokAmount(m.liquidSupply) +
+      ' szt. (' + pct(m.effectiveFloat * 100) + ' docelowej), reszta siedzi w stakingu i skarbcu. Względem kapitału w tej płynnej części próg to <b>' +
+      mult(m.marketCapMultipleLiquid) + '</b> — ale staking można odwinąć, więc traktuj to jako sufit, nie gwarancję.</p>' : '') +
+    (m.ledger && Math.abs(m.breakEvenPricePln / m.breakEvenPrice - 1) > 0.005
+      ? '<div class="banner warn" style="margin-top:10px">Próg w złotówkach to nie to samo, co próg w dolarach. Kupowałeś przy innym kursie, więc żeby wyjść na zero <b>w PLN</b>, cena musi sięgnąć <b>' +
+        usd(m.breakEvenPricePln) + '</b> (FDV ' + usdBig(m.breakEvenFdvPln) + '), a nie ' + usd(m.breakEvenPrice) + '. Różnica ' +
+        pctSigned((m.breakEvenPricePln / m.breakEvenPrice - 1) * 100) + ' to sam ruch kursu USD/PLN.</div>'
+      : '') +
+    (m.ledger ? '<p class="note" style="margin-top:8px">Pozycja liczona z <b>' + m.ledger.count + ' transakcji</b>: ' +
+      fmt(m.holdings, 4) + ' szt., średnia cena ' + usd(m.avgEntry) + ', wkład ' + pln(m.investedPln) + ' po kursach z dni zakupu' +
+      ' (dzisiejszym kursem byłoby ' + pln(m.investedPlnAtToday) + ')' +
+      (m.ledger.realizedPln !== 0 ? ' · zysk zrealizowany ' + pln(m.ledger.realizedPln) : '') + '.</p>' : '') +
     '<p class="sub" style="margin-top:10px">Próg opłacalności w dolarach jest stały: <b>' + usdBig(m.breakEvenFDV) + '</b> (średnia cena zakupu × podaż docelowa). Gdyby podaż nigdy nie urosła, wystarczyłaby kapitalizacja ' + usdBig(m.breakEvenMCifNoDilution) + '. Postęp: ' + pct(m.progressToBreakEven * 100) + '.</p>' +
     '<div class="bar ' + (m.progressToBreakEven >= 1 ? 'b-good' : m.progressToBreakEven >= 0.5 ? 'b-warn' : 'b-serious') + '" style="margin-top:6px"><span style="width:' + Math.max(0, Math.min(100, m.progressToBreakEven * 100)).toFixed(1) + '%"></span></div>' +
     '</div>');
@@ -1538,6 +1800,9 @@ function renderTokenView(){
     '<p class="sub">Insiderzy (zespół, fundusze, rundy prywatne) wyróżnieni czerwoną rodziną kolorów i etykietą.</p></div></div>' +
     '<div class="grid g2"><div><div class="chart-wrap"><canvas id="chartAlloc"></canvas></div></div>' +
     '<div id="allocLegend"></div></div></div>');
+
+  /* --- fundamenty sieci --- */
+  parts.push(fundamentalsCardHtml(t, m));
 
   /* --- scoring --- */
   parts.push(riskCardHtml(t, rs));
@@ -1578,8 +1843,9 @@ function scenarioContext(t){
   // Suwak ma skok ~0,3% i zakres 10 mln – 10 mld $; wpisana ręcznie kwota ma pierwszeństwo,
   // dzięki czemu da się ustawić też wycenę spoza tego zakresu.
   const target = (scenarioValue === null) ? posToFdv(scenarioPos) : scenarioValue;
-  const sc = scenarioTimed(t, target, scenarioBasis, supply);
-  return { m: m, auto: auto, autoReleased: autoReleased, released: released, supply: supply, sc: sc };
+  const years = Math.max(0, (parseISO(scenarioDate) - new Date()) / (365.25 * DAY));
+  const sc = scenarioTimed(t, target, scenarioBasis, supply, years);
+  return { m: m, auto: auto, autoReleased: autoReleased, released: released, supply: supply, sc: sc, years: years };
 }
 function scenarioMarks(t, ctx){
   return scenarioBasis === 'mc'
@@ -1653,6 +1919,8 @@ function scenarioCardHtml(t){
     '<div class="scale-marks" id="scMarks"></div>' +
     '<p class="note" id="scRangeNote" style="margin-top:4px"></p>' +
     '<div class="grid g4" id="scOut" style="margin-top:8px"></div>' +
+    '<h4 style="margin:16px 0 6px">Czas, koszt kapitału i podatek</h4>' +
+    '<div class="grid g4" id="scOut2"></div>' +
     '<p class="note" id="scExplain" style="margin-top:10px"></p></div>';
 }
 /* Przelicza i podmienia tylko wyniki — pola formularza zostają nietknięte,
@@ -1697,10 +1965,28 @@ function updateScenario(t){
       kpi('Podaż w obiegu', tokAmount(ctx.supply), 'float ' + pct(ctx.supply / m.total * 100) + ' · przyrost ' + pctSigned((ctx.supply / m.circ - 1) * 100), true) +
       kpi('Kapitał na same nowe tokeny', usdBig(sc.absorbCost), 'tyle musi dojść wyłącznie po to, żeby rynek wchłonął ' + tokAmount(ctx.supply - m.circ) + ' szt. po tej cenie', true) +
       kpi('Cena przy dzisiejszym kapitale', usd(sc.priceIfCapitalFlat), 'gdyby kapitał nie urósł ani o dolara: ' + pctSigned(priceDrop), true) +
+      kpi('Przychód przy tym FDV', isFinite(sc.revenueNeeded) ? usdBig(sc.revenueNeeded) : '—',
+        'tyle sieć musiałaby robić rocznie, żeby ta wycena znaczyła P/S ' + fmt(num(STATE.settings.targetPS), 0) +
+        (m.fund.revenue > 0 ? ' · dziś ' + usdBig(m.fund.revenue) + ' (' + mult(sc.revenueNeeded / m.fund.revenue) + ')' : ' · brak danych o przychodzie'), true) +
       kpi('Do progu opłacalności', mult(scenarioBasis === 'mc' ? (m.breakEvenPrice * ctx.supply) / Math.max(1, sc.targetMC) : m.breakEvenFDV / Math.max(1, sc.targetFDV)),
         scenarioBasis === 'mc'
           ? 'próg w tym dniu to kapitał ' + usdBig(m.breakEvenPrice * ctx.supply)
           : 'próg to FDV ' + usdBig(m.breakEvenFDV), true);
+  }
+  const out2 = el('scOut2');
+  if (out2){
+    const st = STATE.settings;
+    const irrCls = v => isFinite(v) ? (v >= 0 ? 'pos' : 'neg') : '';
+    out2.innerHTML =
+      kpi('Wartość dzisiejsza pozycji', pln(sc.presentValuePln),
+        'zdyskontowane ' + pct(num(st.discountRatePct)) + ' r/r przez ' + fmt(sc.years, 1) + ' lat · nominalnie ' + pln(sc.impliedPositionPln), true) +
+      kpi('IRR od dziś', '<span class="' + irrCls(sc.irrForward) + '">' + (isFinite(sc.irrForward) ? pctSigned(sc.irrForward * 100) + ' r/r' : '—') + '</span>',
+        'z dzisiejszej wartości ' + usdBig(m.positionValue) + ' do ' + usdBig(sc.impliedPosition), true) +
+      kpi('IRR całej inwestycji', '<span class="' + irrCls(sc.irrFromEntry) + '">' + (isFinite(sc.irrFromEntry) ? pctSigned(sc.irrFromEntry * 100) + ' r/r' : '—') + '</span>',
+        sc.heldYears > 0 ? 'od wkładu, ' + fmt(sc.heldYears, 1) + ' lat za nami + ' + fmt(sc.years, 1) + ' przed nami'
+                         : 'od wkładu; wpisz transakcje, żeby uwzględnić czas już przetrzymany', true) +
+      kpi('Na rękę po podatku', pln(sc.netAfterTaxPln),
+        'podatek ' + pct(num(st.taxRatePct), 0) + ' od zysku = ' + pln(sc.taxDuePln) + ' · wkład ' + pln(m.investedPln), true);
   }
   const outOfRange = sc.targetValue < SC_MIN || sc.targetValue > SC_MAX;
   const rangeNote = el('scRangeNote');
@@ -1713,6 +1999,51 @@ function updateScenario(t){
       ? 'Zadajesz kapitał, więc cena = kapitał ÷ podaż w obiegu w tym dniu. Im więcej tokenów zdąży wejść do obiegu, tym niższa cena przy tym samym kapitale — i tym mniejsza wartość Twojej pozycji. To jest koszt czasu przy emisji.'
       : 'Przy zadanym FDV wartość pozycji <b>nie zależy od daty</b> — Twój udział w podaży jest stały. Od daty zależy co innego: ile realnego kapitału musi wtedy siedzieć w tokenie, żeby ta cena się utrzymała (' + usdBig(sc.targetMC) + ', czyli ' + mult(sc.vsTodayMc) + ' dzisiejszej kapitalizacji). Przełącz na „Zadaję kapitał w tokenie”, żeby zobaczyć, jak ta sama kwota rozkłada się na coraz większą podaż.';
   }
+}
+
+/* Fundamenty: jedyna część, która mówi, DLACZEGO sieć miałaby być coś warta.
+   Bez przychodu FDV jest liczbą bez kotwicy — dlatego przy braku danych mówimy
+   to wprost, zamiast pokazywać zero. */
+function fundamentalsCardHtml(t, m){
+  const f = m.fund, st = STATE.settings;
+  const src = (t.fundamentals || {}).source, upd = (t.fundamentals || {}).updatedAt;
+  let h = '<div class="card"><div class="card-head"><div><h2>Fundamenty sieci</h2>' +
+    '<p class="sub">Wycena wymaga kotwicy w przychodach. P/S = FDV ÷ roczny przychód to jedyny mnożnik porównywalny między sieciami.</p></div>' +
+    (src || upd ? '<p class="src">' + esc(src || 'brak źródła') + (upd ? ' · ' + fmtDate(upd) : '') + '</p>' : '') + '</div>';
+  if (!f.hasData){
+    h += '<div class="banner warn"><b>Brak danych fundamentalnych.</b> Bez nich tracker mówi tylko, <i>ile</i> musi się stać, ' +
+      'a nie <i>dlaczego</i> miałoby. Uzupełnij w „Dodaj / edytuj”: roczny przychód sieci, jaka jego część trafia do tokena, ' +
+      'wartość emisji rozdanej dostawcom i liczbę węzłów. Zero w tych polach znaczy „nie wiem”, nie „zero”.</div>';
+  } else {
+    h += '<div class="grid g4">' +
+      kpi('P/S (FDV / przychód)', isFinite(f.ps) ? mult(f.ps, 1).replace('×', '') + '×' : '—',
+        'przychód ' + usdBig(f.revenue) + ' rocznie · po kapitalizacji ' + (isFinite(f.psMarketCap) ? fmt(f.psMarketCap, 1) + '×' : '—')) +
+      kpi('P/S po value capture', isFinite(f.psCaptured) ? fmt(f.psCaptured, 1) + '×' : '—',
+        'do tokena trafia ' + pct(num((t.fundamentals || {}).revenueToTokenPct)) + ' przychodu = ' + usdBig(f.captured)) +
+      kpi('Pokrycie subsydium', isFinite(f.subsidyRatio) ? pct(f.subsidyRatio * 100) : '—',
+        isFinite(f.subsidyRatio)
+          ? (f.subsidyRatio < 1 ? 'sieć dopłaca emisją — klienci pokrywają mniej niż połowa wartości rozdanej dostawcom' : 'przychód pokrywa emisję rozdaną dostawcom')
+          : 'wpisz wartość emisji rozdanej dostawcom') +
+      kpi('Węzły / urządzenia', f.nodes > 0 ? fmt(f.nodes, 0) : '—',
+        f.nodes > 0 ? 'przychód na węzeł ' + usdBig(f.revenuePerNode) + ' · FDV na węzeł ' + usdBig(f.fdvPerNode) : 'wpisz liczbę węzłów') +
+    '</div>' +
+    '<div class="identity" style="margin-top:12px"><p style="margin-bottom:4px"><b>Ile przychodu potrzeba, żeby uzasadnić próg opłacalności</b></p>' +
+    '<p class="mono" style="margin:0">' + usdBig(f.revenueNeededForBreakEven) + ' rocznie &nbsp;=&nbsp; próg FDV ' + usdBig(m.breakEvenFDV) + ' ÷ P/S ' + fmt(num(st.targetPS), 0) + '</p>' +
+    '<p class="sub" style="margin-top:6px">Dziś sieć robi ' + usdBig(f.revenue) + '. To znaczy, że przychód musi wzrosnąć <b>' +
+    (isFinite(f.revenueNeededMultiple) ? mult(f.revenueNeededMultiple) : '—') + '</b> — przy tym samym mnożniku wyceny. ' +
+    'Mnożnik docelowy zmienisz w ustawieniach.</p></div>';
+    const fh = t.fundamentalsHistory || [];
+    if (fh.length > 1){
+      const first = fh[0], last = fh[fh.length - 1];
+      const yrs = Math.max(0.08, (parseISO(last.date) - parseISO(first.date)) / (365.25 * DAY));
+      const rg = first.revenueAnnualUsd > 0 ? Math.pow(last.revenueAnnualUsd / first.revenueAnnualUsd, 1 / yrs) - 1 : NaN;
+      const ng = first.nodes > 0 ? Math.pow(last.nodes / first.nodes, 1 / yrs) - 1 : NaN;
+      h += '<p class="note" style="margin-top:10px">Zmiana od ' + fmtDate(first.date) + ': przychód ' +
+        (isFinite(rg) ? pctSigned(rg * 100) + ' r/r' : '—') + ', węzły ' + (isFinite(ng) ? pctSigned(ng * 100) + ' r/r' : '—') +
+        '. Tempo wzrostu przychodu jest tym, co uzasadnia wysoki mnożnik — albo go nie uzasadnia.</p>';
+    }
+  }
+  return h + '</div>';
 }
 
 function riskCardHtml(t, rs){
@@ -1973,13 +2304,23 @@ function syncDraft(){
     editDraft = newDraft();
   }
 }
+function getPath(o, key){
+  return key.indexOf('.') < 0 ? o[key] : key.split('.').reduce((a, k) => (a || {})[k], o);
+}
+function setPath(o, key, val){
+  if (key.indexOf('.') < 0){ o[key] = val; return; }
+  const parts = key.split('.');
+  let cur = o;
+  for (let i = 0; i < parts.length - 1; i++){ if (!cur[parts[i]]) cur[parts[i]] = {}; cur = cur[parts[i]]; }
+  cur[parts[parts.length - 1]] = val;
+}
 function fieldText(label, key, hint, type){
-  const v = editDraft[key];
+  const v = getPath(editDraft, key);
   return '<label class="field"><span class="lab">' + esc(label) + (hint ? ' <span class="sub">· ' + esc(hint) + '</span>' : '') + '</span>' +
     '<input type="' + (type || 'text') + '" data-k="' + key + '" data-t="' + (type === 'date' ? 'date' : 'text') + '" value="' + esc(v === null || v === undefined ? '' : v) + '"></label>';
 }
 function fieldNum(label, key, hint, dec){
-  const v = num(editDraft[key]);
+  const v = num(getPath(editDraft, key));
   const shown = v === 0 ? '' : NF(0, dec === undefined ? 10 : dec).format(v);
   return '<label class="field"><span class="lab">' + esc(label) + (hint ? ' <span class="sub">· ' + esc(hint) + '</span>' : '') + '</span>' +
     '<input type="text" inputmode="decimal" data-k="' + key + '" data-t="num" value="' + esc(shown) + '"></label>';
@@ -2037,11 +2378,28 @@ function renderManualPane(){
         fieldText('Data ATH', 'athDate', 'RRRR-MM-DD', 'date') +
         fieldNum('Kapitalizacja w momencie ATH (USD)', 'athMarketCap', 'kluczowe dla scenariuszy') +
       '</div>' +
+      '<div><h3>Podaż niehandlowa i płynność</h3>' +
+        fieldNum('W stakingu / zablokowane', 'stakedSupply', 'szt. — nie stoją po drugiej stronie księgi') +
+        fieldNum('W skarbcu projektu', 'treasurySupply', 'szt.') +
+        fieldNum('Saldo na giełdach', 'exchangeBalance', 'szt. — podaż gotowa do sprzedania') +
+        fieldNum('Głębokość księgi ±2% (USD)', 'depth2PctUsd', 'uczciwsze niż wolumen 24h') +
+      '</div>' +
+      '<div><h3>Fundamenty sieci</h3>' +
+        fieldNum('Roczny przychód sieci (USD)', 'fundamentals.revenueAnnualUsd', 'ile realnie płacą klienci') +
+        fieldNum('Trafia do tokena (%)', 'fundamentals.revenueToTokenPct', 'spalanie, staking, skup') +
+        fieldNum('Emisja rozdana dostawcom rocznie (USD)', 'fundamentals.subsidyAnnualUsd', 'subsydium podaży') +
+        fieldNum('Węzły / urządzenia', 'fundamentals.nodes') +
+        fieldText('Źródło danych fundamentalnych', 'fundamentals.source') +
+        fieldText('Data danych fundamentalnych', 'fundamentals.updatedAt', 'RRRR-MM-DD', 'date') +
+      '</div>' +
     '</div>' +
     '<div class="grid g2" style="margin-top:6px">' +
       '<div><div class="card-head"><h3>Alokacje podaży</h3><button class="btn small" id="addAlloc">+ Dodaj wiersz</button></div><div id="allocRows"></div></div>' +
       '<div><div class="card-head"><h3>Harmonogram odblokowań</h3><button class="btn small" id="addUnlock">+ Dodaj wiersz</button></div><div id="unlockRows"></div></div>' +
     '</div>' +
+    '<div style="margin-top:6px"><div class="card-head"><div><h3>Transakcje</h3>' +
+      '<p class="sub">Gdy tu coś jest, pozycja i wkład liczą się z transakcji, a pola „ile sztuk” i „średnia cena” przestają być używane. Kurs USD/PLN zapisujemy z dnia zakupu — inaczej złotówkowy wynik miesza ruch tokena z ruchem kursu.</p></div>' +
+      '<button class="btn small" id="addTx">+ Dodaj transakcję</button></div><div id="txRows"></div></div>' +
     '<div class="row" style="margin-top:14px">' +
       '<button class="btn primary" id="saveToken">' + (editTokenId ? 'Zapisz zmiany' : 'Dodaj token') + '</button>' +
       '<button class="btn" id="resetToken">Wyczyść formularz</button>' +
@@ -2057,13 +2415,17 @@ function renderManualPane(){
   host.querySelectorAll('input[data-k]').forEach(inp => {
     inp.addEventListener('input', () => {
       const k = inp.getAttribute('data-k'), t = inp.getAttribute('data-t');
-      if (t === 'num'){ const v = parseLocaleNumber(inp.value); editDraft[k] = isFinite(v) ? v : 0; }
-      else editDraft[k] = inp.value;
+      if (t === 'num'){ const v = parseLocaleNumber(inp.value); setPath(editDraft, k, isFinite(v) ? v : 0); }
+      else setPath(editDraft, k, inp.value);
     });
   });
-  renderAllocRows(); renderUnlockRows();
+  renderAllocRows(); renderUnlockRows(); renderTxRows();
   el('addAlloc').addEventListener('click', () => { editDraft.allocations.push({ name: '', pct: 0, isInsider: false }); renderAllocRows(); });
   el('addUnlock').addEventListener('click', () => { editDraft.unlocks.push({ date: todayISO(), tokens: 0, label: '' }); renderUnlockRows(); });
+  el('addTx').addEventListener('click', () => {
+    editDraft.transactions.push({ date: todayISO(), type: 'buy', tokens: 0, priceUsd: 0, usdPln: num(STATE.settings.usdPln), feeUsd: 0, note: '' });
+    renderTxRows();
+  });
   el('saveToken').addEventListener('click', saveDraft);
   el('resetToken').addEventListener('click', () => { editTokenId = null; editDraft = newDraft(); renderEditView(); });
 }
@@ -2112,19 +2474,64 @@ function renderUnlockRows(){
   }));
 }
 
+function renderTxRows(){
+  const host = el('txRows');
+  if (!host) return;
+  const led = ledger(editDraft);
+  host.innerHTML = (editDraft.transactions.length ? '' : '<p class="note">Brak transakcji — pozycja liczona z pól ręcznych.</p>') +
+    editDraft.transactions.map((x, i) =>
+      '<div class="row" style="margin-bottom:6px; flex-wrap:wrap">' +
+        '<input type="date" data-x="' + i + '" data-f="date" value="' + esc(x.date) + '" style="width:145px">' +
+        '<select data-x="' + i + '" data-f="type" style="width:110px">' +
+          '<option value="buy"' + (x.type === 'buy' ? ' selected' : '') + '>kupno</option>' +
+          '<option value="sell"' + (x.type === 'sell' ? ' selected' : '') + '>sprzedaż</option></select>' +
+        '<input type="text" inputmode="decimal" data-x="' + i + '" data-f="tokens" value="' + esc(num(x.tokens) || '') + '" placeholder="szt." style="width:110px">' +
+        '<input type="text" inputmode="decimal" data-x="' + i + '" data-f="priceUsd" value="' + esc(num(x.priceUsd) || '') + '" placeholder="cena USD" style="width:110px">' +
+        '<input type="text" inputmode="decimal" data-x="' + i + '" data-f="usdPln" value="' + esc(num(x.usdPln) || '') + '" placeholder="USD/PLN" style="width:100px">' +
+        '<input type="text" inputmode="decimal" data-x="' + i + '" data-f="feeUsd" value="' + esc(num(x.feeUsd) || '') + '" placeholder="prowizja $" style="width:100px">' +
+        '<button class="btn small danger" data-del-x="' + i + '">×</button>' +
+      '</div>').join('') +
+    (led ? '<p class="note">Z księgi: <b>' + fmt(led.holdings, 4) + '</b> szt., średnia cena <b>' + usd(led.avgEntryPrice) +
+      '</b>, wkład ' + usdBig(led.investedUsd) + ' / ' + pln(led.investedPln) + ' (kursy z dni zakupu)' +
+      (led.avgEntryDate ? ' · ważona data wejścia ' + fmtDate(isoOf(led.avgEntryDate)) + ', ' + fmt(led.holdingYears, 1) + ' lat temu' : '') +
+      (led.realizedUsd !== 0 ? ' · zysk zrealizowany ' + usdBig(led.realizedUsd) : '') + '</p>' : '');
+  host.querySelectorAll('[data-x]').forEach(inp => inp.addEventListener('input', () => {
+    const i = Number(inp.getAttribute('data-x')), f = inp.getAttribute('data-f');
+    if (f === 'date' || f === 'type' || f === 'note') editDraft.transactions[i][f] = inp.value;
+    else editDraft.transactions[i][f] = parseLocaleNumber(inp.value) || 0;
+    if (f !== 'date') renderTxRows();
+  }));
+  host.querySelectorAll('[data-del-x]').forEach(b => b.addEventListener('click', () => {
+    editDraft.transactions.splice(Number(b.getAttribute('data-del-x')), 1); renderTxRows();
+  }));
+}
+
 function saveDraft(){
   const msg = el('editMsg');
   if (!editDraft.symbol.trim()){ msg.textContent = 'Podaj symbol tokena.'; msg.style.color = 'var(--critical)'; return; }
   if (!(num(editDraft.circulatingSupply) > 0)){ msg.textContent = 'Podaż w obiegu musi być większa od zera.'; msg.style.color = 'var(--critical)'; return; }
+  const badTx = (editDraft.transactions || []).filter(x => !(num(x.tokens) > 0) || !(num(x.priceUsd) > 0));
+  if (badTx.length){ msg.textContent = 'Każda transakcja potrzebuje liczby sztuk i ceny większych od zera (' + badTx.length + ' niekompletnych).'; msg.style.color = 'var(--critical)'; return; }
   const t = normalizeToken(editDraft);
   if (!t.name) t.name = t.symbol;
   const idx = STATE.tokens.findIndex(x => x.id === t.id);
   if (idx >= 0){
     t.priceHistory = STATE.tokens[idx].priceHistory;   // historii nie nadpisujemy formularzem
     t.historyIsDemo = STATE.tokens[idx].historyIsDemo;
+    t.fundamentalsHistory = STATE.tokens[idx].fundamentalsHistory || [];
     STATE.tokens[idx] = t;
   } else {
     STATE.tokens.push(t);
+  }
+  // migawka fundamentów — żeby dało się policzyć tempo wzrostu przychodu i węzłów
+  if (t.fundamentals.revenueAnnualUsd > 0 || t.fundamentals.nodes > 0){
+    const stamp = t.fundamentals.updatedAt || todayISO();
+    const fh = t.fundamentalsHistory;
+    const prev = fh.filter(x => x.date === stamp)[0];
+    const snap = { date: stamp, revenueAnnualUsd: t.fundamentals.revenueAnnualUsd, nodes: t.fundamentals.nodes };
+    if (prev){ prev.revenueAnnualUsd = snap.revenueAnnualUsd; prev.nodes = snap.nodes; }
+    else fh.push(snap);
+    fh.sort((a, b) => a.date.localeCompare(b.date));
   }
   editTokenId = t.id; editDraft = null;
   saveState();
@@ -2403,7 +2810,9 @@ function renderLinkPane(){
    12. WIDOK 4 — CODZIENNA AKTUALIZACJA
    ============================================================ */
 let dailyInputs = {};
+let dailyBenchmark = 0;
 const CG_URL = 'https://api.coingecko.com/api/v3/simple/price';
+const CG_GLOBAL = 'https://api.coingecko.com/api/v3/global';
 
 function lastReadingInfo(){
   let last = null;
@@ -2424,6 +2833,8 @@ function renderDaily(){
     '<div class="banner ' + (stale ? 'bad' : 'info') + '" style="margin:0">' +
       (info.date ? 'Ostatni odczyt: <b>' + fmtDate(info.date) + '</b> — ' + (info.days === 0 ? 'dzisiaj' : info.days + ' dni temu') : 'Brak zapisanych odczytów') +
       (stale ? ' ⚠ przerwa dłuższa niż 3 dni psuje sygnał odbudowy' : '') + '</div></div>' +
+    '<label class="field" style="max-width:420px"><span class="lab">Kapitalizacja całego rynku krypto (USD) <span class="sub">· benchmark do siły względnej</span></span>' +
+    '<input type="text" inputmode="decimal" id="benchInput" value="' + esc(NF(0, 0).format(benchNow() ? benchNow().value : 0)) + '"></label>' +
     '<div class="row" style="margin-bottom:12px">' +
       '<button class="btn primary" id="fetchPrices">Pobierz ceny</button>' +
       '<label class="row" style="gap:5px; font-size:.78rem"><input type="checkbox" id="deriveSupply" checked style="width:auto">wylicz podaż w obiegu z kapitalizacji CoinGecko</label>' +
@@ -2450,6 +2861,11 @@ function renderDaily(){
   }));
   el('fetchPrices').addEventListener('click', fetchPrices);
   el('saveReading').addEventListener('click', saveReading);
+  el('benchInput').addEventListener('input', () => {
+    const v = parseLocaleNumber(el('benchInput').value);
+    dailyBenchmark = isFinite(v) ? v : 0;
+  });
+  dailyBenchmark = benchNow() ? benchNow().value : 0;
 }
 function fetchPrices(){
   const msg = el('fetchMsg');
@@ -2481,6 +2897,11 @@ function fetchPrices(){
         const rv = el('dailyPane').querySelector('input[data-d="' + t.id + '"][data-f="vol"]');
         if (rv) rv.value = NF(0, 0).format(dailyInputs[t.id].vol);
       });
+      // benchmark rynkowy — osobne zapytanie, jego brak nie psuje reszty
+      fetch(CG_GLOBAL).then(r2 => r2.ok ? r2.json() : null).then(g => {
+        const v = g && g.data && g.data.total_market_cap ? g.data.total_market_cap.usd : null;
+        if (v > 0){ dailyBenchmark = v; const bi = el('benchInput'); if (bi) bi.value = NF(0, 0).format(v); }
+      }).catch(() => {});
       msg.style.color = okCount ? 'var(--good)' : 'var(--warn)';
       msg.textContent = 'Pobrano ' + okCount + ' z ' + ids.length + '.' + (missing.length ? ' Brak danych dla: ' + missing.join(', ') + ' — sprawdź ID albo wpisz ręcznie.' : '') + ' Nic jeszcze nie zapisano.';
     })
@@ -2505,6 +2926,13 @@ function saveReading(){
     else h.push(entry);
     h.sort((a, b) => a.date.localeCompare(b.date));
   });
+  if (dailyBenchmark > 0){
+    const bh = STATE.benchmark.history;
+    const ex = bh.filter(x => x.date === today)[0];
+    if (ex) ex.value = dailyBenchmark; else bh.push({ date: today, value: dailyBenchmark });
+    bh.sort((a, b) => a.date.localeCompare(b.date));
+    STATE.benchmark.isDemo = false;
+  }
   saveState();
   const m = el('saveReadingMsg');
   m.textContent = 'Zapisano odczyt z ' + fmtDate(today) + '.';
@@ -2523,6 +2951,10 @@ const CMP_COLS = [
   { key: 'risk', label: 'Ryzyko', num: true },
   { key: 'fdvMultiple', label: 'FDV × do progu', num: true },
   { key: 'absorbDays', label: 'Wchłonięcie odblokowań (dni obrotu)', num: true },
+  { key: 'effFloat', label: 'Efektywny float', num: true },
+  { key: 'ps', label: 'P/S', num: true },
+  { key: 'subsidy', label: 'Pokrycie subsydium', num: true },
+  { key: 'rel30d', label: 'Siła vs rynek 30d', num: true },
   { key: 'insiders', label: 'Insiderzy', num: true },
   { key: 'volToMc', label: 'Obrót / kapitalizacja', num: true },
   { key: 'position', label: 'Wartość pozycji', num: true },
@@ -2530,10 +2962,12 @@ const CMP_COLS = [
 ];
 function compareRows(){
   return STATE.tokens.map(t => {
-    const m = metrics(t), rs = riskScore(t);
+    const m = metrics(t), rs = riskScore(t), r = recovery(t);
     return {
       id: t.id, symbol: t.symbol, name: t.name,
       float: m.float * 100, dilution: m.remainingDilution * 100, risk: rs.score, band: rs.band,
+      effFloat: m.hasLockData ? m.effectiveFloat * 100 : m.float * 100, hasLock: m.hasLockData,
+      ps: m.fund.ps, subsidy: m.fund.subsidyRatio, rel30d: isFinite(r.rel30d) ? r.rel30d * 100 : NaN,
       fdvMultiple: m.fdvMultiple, absorbDays: rs.absorbDays, insiders: rs.insiderPct,
       volToMc: m.volToMc * 100, position: m.positionValue, positionPln: m.positionValuePln, pnlPct: m.pnlPct
     };
@@ -2560,12 +2994,16 @@ function renderCompare(){
       '<td class="num"><span class="badge ' + r.band.cls + '">' + r.risk + ' · ' + r.band.label + '</span></td>' +
       '<td class="num">' + mult(r.fdvMultiple) + '</td>' +
       '<td class="num">' + (isFinite(r.absorbDays) ? fmt(r.absorbDays, 1) : '∞') + '</td>' +
+      '<td class="num">' + pct(r.effFloat) + (r.hasLock ? '' : ' <span class="chip">brak danych</span>') + '</td>' +
+      '<td class="num">' + (isFinite(r.ps) ? fmt(r.ps, 1) + '×' : '—') + '</td>' +
+      '<td class="num">' + (isFinite(r.subsidy) ? '<span class="' + (r.subsidy < 1 ? 'neg' : 'pos') + '">' + pct(r.subsidy * 100) + '</span>' : '—') + '</td>' +
+      '<td class="num ' + (r.rel30d >= 0 ? 'pos' : 'neg') + '">' + (isFinite(r.rel30d) ? pctSigned(r.rel30d) : '—') + '</td>' +
       '<td class="num">' + pct(r.insiders) + '</td>' +
       '<td class="num">' + pct(r.volToMc, 2) + '</td>' +
       '<td class="num">' + pln(r.positionPln) + '</td>' +
       '<td class="num ' + (r.pnlPct >= 0 ? 'pos' : 'neg') + '">' + pctSigned(r.pnlPct) + '</td></tr>';
   });
-  h += '</tbody></table></div><p class="note" style="margin-top:10px">„FDV × do progu” mówi, ile razy musi urosnąć wycena sieci, żeby wyjść na zero. „Wchłonięcie odblokowań” to liczba dni pełnego obrotu potrzebna, żeby rynek przyjął podaż z najbliższych 90 dni.</p></div>';
+  h += '</tbody></table></div><p class="note" style="margin-top:10px">„Efektywny float” pomija tokeny w stakingu i skarbcu — bez wpisanych danych pokazuje zwykły float. „Pokrycie subsydium” poniżej 100% znaczy, że sieć rozdaje dostawcom w emisji więcej, niż zbiera od klientów. „Siła vs rynek” odejmuje ruch całego rynku, żeby zostało to, co zrobił sam projekt. „FDV × do progu” mówi, ile razy musi urosnąć wycena sieci, żeby wyjść na zero. „Wchłonięcie odblokowań” to liczba dni pełnego obrotu potrzebna, żeby rynek przyjął podaż z najbliższych 90 dni.</p></div>';
   el('comparePane').innerHTML = h;
   el('comparePane').querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => {
     const k = th.getAttribute('data-sk');
@@ -2585,6 +3023,9 @@ function renderData(){
     '<label class="field"><span class="lab">Kurs USD/PLN</span><input type="text" inputmode="decimal" id="setUsdPln" value="' + esc(NF(0, 6).format(num(st.usdPln))) + '"></label>' +
     '<label class="field"><span class="lab">Horyzont inwestycyjny (lata)</span><input type="text" inputmode="decimal" id="setHorizon" value="' + esc(NF(0, 1).format(num(st.horizonYears))) + '"></label>' +
     '<label class="field"><span class="lab">Domyślny wzrost wyceny sieci r/r (%)</span><input type="text" inputmode="decimal" id="setGrowth" value="' + esc(NF(0, 1).format(num(st.networkGrowthPct))) + '"></label>' +
+    '<label class="field"><span class="lab">Koszt kapitału / stopa dyskontowa (%)</span><input type="text" inputmode="decimal" id="setDiscount" value="' + esc(NF(0, 1).format(num(st.discountRatePct))) + '"></label>' +
+    '<label class="field"><span class="lab">Docelowy mnożnik P/S</span><input type="text" inputmode="decimal" id="setPS" value="' + esc(NF(0, 1).format(num(st.targetPS))) + '"></label>' +
+    '<label class="field"><span class="lab">Podatek od zysku (%)</span><input type="text" inputmode="decimal" id="setTax" value="' + esc(NF(0, 1).format(num(st.taxRatePct))) + '"></label>' +
     '</div><button class="btn primary" id="saveSettings">Zapisz ustawienia</button> <span class="note" id="setMsg"></span></div>';
 
   h += '<div class="card"><h2>Twoje dane</h2>' +
@@ -2628,6 +3069,9 @@ function renderData(){
     STATE.settings.usdPln = parseLocaleNumber(el('setUsdPln').value) || 3.7137;
     STATE.settings.horizonYears = parseLocaleNumber(el('setHorizon').value) || 10;
     STATE.settings.networkGrowthPct = parseLocaleNumber(el('setGrowth').value) || 0;
+    STATE.settings.discountRatePct = parseLocaleNumber(el('setDiscount').value) || 0;
+    STATE.settings.targetPS = parseLocaleNumber(el('setPS').value) || 30;
+    STATE.settings.taxRatePct = parseLocaleNumber(el('setTax').value) || 0;
     projGrowth = null;
     saveState();
     el('setMsg').textContent = 'Zapisano.'; el('setMsg').style.color = 'var(--good)';
@@ -2787,6 +3231,62 @@ function runTests(){
     'Kapitalizacja +' + pct((recovery(flat).mcChange30d || 0) * 100) + ' przy zmianie FDV ' + pctSigned((recovery(flat).fdvChange30d || 0) * 100) + '.');
   add('Sygnał: rosnące FDV → REALNA ODBUDOWA', recovery(up).status === 'real', 'real', recovery(up).status, '');
   add('Sygnał: spadające FDV bez odblokowań → BRAK ODBUDOWY', recovery(down).status === 'none', 'none', recovery(down).status, '');
+
+  // księga transakcji: pozycja, średnia i wkład w PLN po kursach z dni zakupu
+  const tx = normalizeToken({
+    symbol: 'LEDGER', circulatingSupply: 1e9, totalSupply: 1e9, price: 0.5,
+    transactions: [
+      { date: '2024-01-10', type: 'buy', tokens: 1000, priceUsd: 0.10, usdPln: 4.00, feeUsd: 0 },
+      { date: '2025-01-10', type: 'buy', tokens: 1000, priceUsd: 0.30, usdPln: 4.20, feeUsd: 0 }
+    ]
+  });
+  const lg = ledger(tx), mt = metrics(tx);
+  add('Księga: pozycja, średnia cena i wkład w PLN z kursów dnia zakupu',
+    lg.holdings === 2000 && Math.abs(lg.avgEntryPrice - 0.2) < 1e-12 && Math.abs(lg.investedPln - 1660) < 1e-6 && Math.abs(mt.invested - 400) < 1e-9,
+    '2000 szt. · $0,20 · 1660 zł', fmt(lg.holdings, 0) + ' szt. · ' + usd(lg.avgEntryPrice) + ' · ' + pln(lg.investedPln),
+    '100 $ po kursie 4,00 + 300 $ po 4,20 = 1660 zł, a nie 400 $ × dzisiejszy kurs.');
+
+  // dyskonto i IRR
+  const scT = scenarioTimed(tx, 1e9, 'fdv', 1e9, 2);   // cena 1 $, pozycja 2000 $, 2 lata
+  const r10 = num(STATE.settings.discountRatePct) / 100;
+  const pvOk = Math.abs(scT.presentValue - 2000 / Math.pow(1 + r10, 2)) < 1e-6;
+  const irrOk = Math.abs(scT.irrForward - (Math.pow(2000 / 1000, 1 / 2) - 1)) < 1e-9;
+  add('Dyskonto i IRR', pvOk && irrOk,
+    'wartość bieżąca ' + usdBig(2000 / Math.pow(1 + r10, 2)) + ' · IRR ' + pctSigned((Math.pow(2, 0.5) - 1) * 100),
+    usdBig(scT.presentValue) + ' · ' + pctSigned(scT.irrForward * 100),
+    'Pozycja 1000 $ dziś rośnie do 2000 $ w 2 lata przy stopie ' + pct(num(STATE.settings.discountRatePct)) + '.');
+
+  // podatek nie rusza progu opłacalności — przy niezmienionym kursie
+  const txFlat = normalizeToken({
+    symbol: 'FLATFX', circulatingSupply: 1e9, totalSupply: 1e9, price: 0.5,
+    transactions: [{ date: '2024-01-10', type: 'buy', tokens: 2000, priceUsd: 0.20, usdPln: rate, feeUsd: 0 }]
+  });
+  const mFlat = metrics(txFlat);
+  const scBE = scenarioTimed(txFlat, mFlat.breakEvenFDV, 'fdv', 1e9, 1);
+  add('Podatek nie przesuwa progu opłacalności', Math.abs(scBE.netAfterTaxPln - mFlat.investedPln) < 0.01,
+    'na rękę = wkład', pln(scBE.netAfterTaxPln) + ' vs wkład ' + pln(mFlat.investedPln),
+    'Przy 19% od zysku warunek „pozycja − podatek = wkład” upraszcza się do „pozycja = wkład”. Podatek zjada tylko górkę powyżej progu.');
+
+  // ale kurs USD/PLN próg przesuwa
+  const mTx = metrics(tx);
+  add('Zmiana kursu USD/PLN przesuwa próg w złotówkach', mTx.breakEvenPricePln > mTx.breakEvenPrice * 1.05,
+    'próg w PLN wyżej niż w USD', usd(mTx.breakEvenPrice) + ' w USD → ' + usd(mTx.breakEvenPricePln) + ' żeby wyjść na zero w PLN',
+    'Kupowane po 4,00 i 4,20 zł za dolara, dziś ' + fmt(rate, 4) + ' — odzyskanie dolarów nie znaczy odzyskania złotówek.');
+
+  // efektywny float
+  const lk = normalizeToken({ symbol: 'LOCK', circulatingSupply: 1e9, totalSupply: 2e9, price: 1,
+    stakedSupply: 4e8, treasurySupply: 1e8, volume24h: 1e7 });
+  const ml = metrics(lk);
+  add('Efektywny float odejmuje staking i skarbiec',
+    Math.abs(ml.effectiveFloat - 0.25) < 1e-12 && Math.abs(ml.liquidSupply - 5e8) < 1e-6,
+    'float 50% → efektywny 25%', pct(ml.float * 100) + ' → ' + pct(ml.effectiveFloat * 100),
+    'Płynność scoringu liczy się wtedy względem ' + usdBig(ml.liquidMarketCap) + ', nie ' + usdBig(ml.marketCap) + '.');
+
+  // siła względna wobec benchmarku
+  const bch = benchChange(30);
+  add('Benchmark rynkowy dostępny', isFinite(bch), 'zmiana rynku policzona',
+    isFinite(bch) ? pctSigned(bch * 100) + ' w 30 dni' : 'brak historii benchmarku',
+    (STATE.benchmark && STATE.benchmark.isDemo) ? 'Historia benchmarku jest startowa/demonstracyjna — nadpisz ją własnymi odczytami.' : '');
 
   // 9. środowisko
   add('Autozapis do localStorage', storageOk, 'dostępny', storageOk ? 'dostępny' : 'zablokowany — używaj eksportu JSON', '');

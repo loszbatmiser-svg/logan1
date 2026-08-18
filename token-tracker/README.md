@@ -82,6 +82,57 @@ Suwak (10 mln – 10 mld $, skala logarytmiczna) i pole na dokładną kwotę są
 kwota wpisana ręcznie może wyjść poza zakres suwaka — wtedy suwak stoi na krańcu, a liczby
 liczą się z wpisanej wartości.
 
+## Cztery warstwy poza podażą
+
+Sama tokenomia mówi, *ile* musi się stać, żeby wyjść na zero — nie mówi, *dlaczego* miałoby.
+Te warstwy dokładają resztę. Wszystkie pola są opcjonalne: puste znaczy „nie wiem”, a nie „zero”,
+i tak też są opisane w interfejsie.
+
+### Czas i koszt kapitału
+
+Kalkulator scenariuszy zwraca wartość bieżącą pozycji (dyskonto ustawialne, domyślnie 10% r/r),
+**IRR od dziś** oraz **IRR całej inwestycji** — ta druga liczy też czas już przetrzymany, jeśli
+wpisałeś transakcje. Do tego wynik po podatku od zysku.
+
+Uwaga na częsty błąd: **podatek nie podnosi progu opłacalności**. Przy 19% od zysku warunek
+`pozycja − 0,19 × (pozycja − wkład) = wkład` upraszcza się do `pozycja = wkład`. Podatek zjada
+wyłącznie górkę powyżej progu. Próg naprawdę przesuwa co innego — kurs (niżej).
+
+### Efektywny float i benchmark
+
+Pola: podaż w stakingu, w skarbcu, saldo na giełdach, głębokość księgi ±2%.
+`efektywny float = (podaż w obiegu − staking − skarbiec) / podaż docelowa`. Gdy te dane są wpisane,
+scoring płynności mierzy obrót względem podaży **płynnej**, a nie całej kapitalizacji — bo tokeny
+w stakingu nie stoją po drugiej stronie księgi. To sufit, nie gwarancja: staking można odwinąć,
+i tak jest to opisane w karcie tokena.
+
+Benchmark (kapitalizacja całego rynku krypto, pobierana z `/api/v3/global` albo wpisywana ręcznie)
+daje **siłę względną**: `(1 + zmiana FDV) / (1 + zmiana rynku) − 1`. Bez tego zielony kafelek
+„realna odbudowa” myli betę rynku z siłą projektu.
+
+### Fundamenty sieci
+
+Pola: roczny przychód, jaka jego część trafia do tokena, wartość emisji rozdanej dostawcom,
+liczba węzłów. Z tego liczą się:
+
+* **P/S** = FDV ÷ przychód — jedyny mnożnik porównywalny między sieciami, i P/S po value capture
+* **pokrycie subsydium** = przychód od klientów ÷ emisja rozdana dostawcom; poniżej 100% sieć
+  dopłaca do siebie drukiem (osobna czerwona flaga)
+* **przychód wymagany do progu** = próg FDV ÷ docelowy mnożnik P/S — ile sieć musiałaby robić rocznie,
+  żeby dzisiejszy próg opłacalności był uzasadniony fundamentami
+* przychód i FDV na węzeł, tempo wzrostu przychodu i węzłów z migawek historycznych
+
+### Księga transakcji
+
+Lista kupna i sprzedaży z **kursem USD/PLN z dnia zakupu**. Gdy jest niepusta, pozycja, średnia cena
+i wkład liczą się z niej, a pola „ile sztuk” i „średnia cena zakupu” przestają być używane.
+Koszt metodą średniej ważonej; sprzedaż zdejmuje koszt proporcjonalnie i zamyka zysk zrealizowany.
+
+Efekt uboczny, który wyszedł dopiero na testach i jest teraz osobnym ostrzeżeniem w karcie tokena:
+**próg w złotówkach to nie to samo, co próg w dolarach.** Kupując po 4,00 i 4,20 zł za dolara przy
+dzisiejszym kursie 3,71, musisz dojść do ceny o ~12% wyższej niż średnia cena zakupu w USD, żeby
+w ogóle wyjść na zero w PLN.
+
 ## Czego to narzędzie nie robi
 
 Nie prognozuje cen, nie daje sygnałów kupna/sprzedaży, nie liczy wskaźników technicznych.
