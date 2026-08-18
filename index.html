@@ -235,7 +235,9 @@
             </tbody>
           </table>
           <p class="note">
-            Kolumna „Po wapnowaniu” powstaje z założonego nowego pH → nowego Ex H (wzór Logan Labs).
+            Kolumna „Po wapnowaniu” powstaje odwrotnie niż mogłoby się wydawać: najpierw wapń zajmuje miejsca
+            zwolnione przez wodór (TCEC bez zmian), a z wynikowej sumy nasycenia zasadami odczytujemy nowe
+            Ex H i pH (wzór Logan Labs). Nasycenie Mg, K i Na nie zmienia się, bo wapnowanie ich nie usuwa.
           </p>
         </div>
 
@@ -288,7 +290,8 @@
               <th>Cel nasycenia Ca</th>
               <th>Brakuje Ca</th>
               <th>Nowe Ca</th>
-              <th>Oczekiwany efekt na pH</th>
+              <th>Suma zasad</th>
+              <th>Wynikowe pH</th>
             </tr>
           </thead>
           <tbody>
@@ -296,22 +299,32 @@
               <td><strong>68%</strong></td>
               <td>+ <span id="dyn_inc_68">—</span> ppm</td>
               <td><span id="dyn_new_68">—</span> ppm</td>
-              <td>pH ~6,5</td>
+              <td><span id="dyn_tbs_68">—</span> %</td>
+              <td><span id="dyn_ph_68" class="badge">—</span></td>
             </tr>
             <tr>
               <td><strong>72%</strong> (zalecane)</td>
               <td>+ <span id="dyn_inc_72">—</span> ppm</td>
               <td><span id="dyn_new_72">—</span> ppm</td>
-              <td>pH ~6,7</td>
+              <td><span id="dyn_tbs_72">—</span> %</td>
+              <td><span id="dyn_ph_72" class="badge">—</span></td>
             </tr>
             <tr>
               <td><strong>75%</strong></td>
               <td>+ <span id="dyn_inc_75">—</span> ppm</td>
               <td><span id="dyn_new_75">—</span> ppm</td>
-              <td>pH ~6,8</td>
+              <td><span id="dyn_tbs_75">—</span> %</td>
+              <td><span id="dyn_ph_75" class="badge">—</span></td>
             </tr>
           </tbody>
         </table>
+        <p class="note">
+          pH nie jest tu wpisane z góry — wynika z modelu Logan Labs. Wapnowanie wypiera wymienny wodór (Ex H)
+          z kompleksu sorpcyjnego, więc rośnie <strong>suma nasycenia zasadami</strong> (Ca+Mg+K+Na). Ponieważ
+          Ex H i „Other Bases” są funkcjami pH, z sumy zasad odczytujemy pH wstecz: pH = takie, przy którym
+          Other + Ex H = 100 − suma zasad. Dlatego to samo 72% Ca da inne pH na glebie ubogiej w magnez
+          i inne na glebie po dolomicie.
+        </p>
       </div>
 
       <div class="section">
@@ -354,6 +367,7 @@
           <div id="no-lime-msg" class="no-lime-msg">
             pH gleby ≥ 7 — wapnowanie nie jest potrzebne. Gleba nie jest kwaśna, a dodatek węglanu wapnia nie jest zalecany.
           </div>
+          <div id="lime-unreachable-msg" class="no-lime-msg"></div>
           <div id="lime-results">
             <table>
               <tr><td>Aktualne nasycenie Ca</td><td><span id="lime_curr_sat" class="badge">—</span> %</td></tr>
@@ -361,7 +375,13 @@
               <tr><td>Deficyt Ca (meq/100g)</td><td><span id="lime_deficit_meq" class="badge">—</span></td></tr>
               <tr><td><strong>Brakuje Ca</strong></td><td class="big">+ <span id="lime_ca_increase">—</span> ppm</td></tr>
               <tr><td>Nowe Ca</td><td><span id="lime_new_ca" class="badge highlight">—</span> ppm</td></tr>
+              <tr><td><strong>Wynikowe pH (z modelu)</strong></td><td class="big"><span id="lime_result_ph">—</span></td></tr>
             </table>
+            <p class="note">
+              Wynikowe pH liczone jest wstecz z sumy nasycenia zasadami po wapnowaniu, a nie przyjmowane z góry —
+              zależy więc od tego, ile miejsca zajmują u Ciebie Mg, K i Na. TCEC pozostaje bez zmian, bo wapnowanie
+              wypiera wodór z istniejących miejsc sorpcyjnych, a nie tworzy nowych.
+            </p>
             <h3 style="margin:16px 0 8px; color:#276749;">Dawka na podaną objętość</h3>
             <table>
               <tr><td><strong>Czysty CaCO₃ (100%)</strong></td><td class="big"><span id="lime_pure_vol">—</span> g</td></tr>
@@ -2139,10 +2159,56 @@
       return 155 - (25 * ph);
     }
 
-    function getTargetPh(sat) {
-      if (sat >= 75) return 6.8;
-      if (sat >= 72) return 6.7;
-      return 6.5;
+    // Suma miejsc zajętych przez kwasowość (Other Bases + Ex H) przy danym pH.
+    // Funkcja malejąca względem pH — to pozwala odczytać pH wstecz z sumy nasycenia zasadami.
+    function getAcidityShare(ph) {
+      return getOtherBases(ph) + getExH(ph);
+    }
+
+    // Odwrotność powyższej: jakie pH odpowiada danej sumie nasycenia zasadami (Ca+Mg+K+Na w %).
+    // Zwraca null, gdy taka suma zasad jest nieosiągalna (kwasowość nigdy nie spada tak nisko).
+    const PH_SOLVE_MIN = 3.0;
+    const PH_SOLVE_MAX = 7.5;
+    function solvePhForBaseSaturation(totalBaseSat) {
+      const wantedAcidity = 100 - totalBaseSat;
+      if (getAcidityShare(PH_SOLVE_MAX) > wantedAcidity) return null;
+      if (getAcidityShare(PH_SOLVE_MIN) < wantedAcidity) return PH_SOLVE_MIN;
+      let lo = PH_SOLVE_MIN, hi = PH_SOLVE_MAX;
+      for (let i = 0; i < 60; i++) {
+        const mid = (lo + hi) / 2;
+        if (getAcidityShare(mid) > wantedAcidity) lo = mid; else hi = mid;
+      }
+      return (lo + hi) / 2;
+    }
+
+    // Scenariusz wapnowania do zadanego nasycenia Ca.
+    // TCEC (pojemność sorpcyjna) to cecha gleby — zależy od ilości iłu i próchnicy, a nie od wapnowania,
+    // więc trzymamy ją stałą. Wapń wchodzi na miejsca zwolnione przez wodór, nie tworzy nowych miejsc.
+    // Dzięki temu deficyt liczy się wprost, bez iteracji, a Mg/K/Na zachowują swoje meq.
+    function getLimeScenario(d, targetSat) {
+      const targetMeqCa = (targetSat / 100) * d.tcec;
+      const deficitMeq = Math.max(0, targetMeqCa - d.meqCa);
+      const newMeqCa = d.meqCa + deficitMeq;
+      const newSatCa = d.tcec > 0 ? (newMeqCa / d.tcec) * 100 : 0;
+      const totalBaseSat = newSatCa + d.satMg + d.satK + d.satNa;
+      const ph = solvePhForBaseSaturation(totalBaseSat);
+      const reachable = ph !== null;
+      return {
+        deficitMeq,
+        caIncrease: deficitMeq * 200,
+        newCa: d.ca + deficitMeq * 200,
+        newMeqCa,
+        tcec: d.tcec,
+        newSatCa,
+        newSatMg: d.satMg,
+        newSatK: d.satK,
+        newSatNa: d.satNa,
+        totalBaseSat,
+        reachable,
+        ph: reachable ? ph : PH_SOLVE_MAX,
+        other: getOtherBases(reachable ? ph : PH_SOLVE_MAX),
+        exh: getExH(reachable ? ph : PH_SOLVE_MAX)
+      };
     }
 
     function calculateCAC() {
@@ -2191,28 +2257,20 @@
         [68, 72, 75].forEach(function(pct) {
           document.getElementById('dyn_inc_' + pct).innerText = '0';
           document.getElementById('dyn_new_' + pct).innerText = d.ca.toFixed(0);
+          document.getElementById('dyn_tbs_' + pct).innerText = (d.satCa + d.satMg + d.satK + d.satNa).toFixed(1);
+          document.getElementById('dyn_ph_' + pct).innerText = d.ph.toFixed(2);
         });
         return;
       }
 
       [68, 72, 75].forEach(function(pct) {
-        const targetPh = getTargetPh(pct);
-        const newExH = getExH(targetPh);
-        const newOther = getOtherBases(targetPh);
-        const meqOthers = d.meqMg + d.meqK + d.meqNa;
-        let deficitMeq = 0;
-        for (let i = 0; i < 8; i++) {
-          const newMeqCa = d.meqCa + deficitMeq;
-          const newSum = newMeqCa + meqOthers;
-          const newDenom = 100 - (newOther + newExH);
-          const newTcec = newDenom > 0 ? (newSum * 100) / newDenom : newSum;
-          const needed = newTcec * (pct / 100);
-          deficitMeq = Math.max(0, needed - d.meqCa);
-        }
-        const increase = deficitMeq * 200;
-        const newCa = d.ca + increase;
-        document.getElementById('dyn_inc_' + pct).innerText = increase.toFixed(0);
-        document.getElementById('dyn_new_' + pct).innerText = newCa.toFixed(0);
+        const sc = getLimeScenario(d, pct);
+        document.getElementById('dyn_inc_' + pct).innerText = sc.caIncrease.toFixed(0);
+        document.getElementById('dyn_new_' + pct).innerText = sc.newCa.toFixed(0);
+        document.getElementById('dyn_tbs_' + pct).innerText = sc.totalBaseSat.toFixed(1);
+        document.getElementById('dyn_ph_' + pct).innerText = sc.reachable
+          ? sc.ph.toFixed(2)
+          : 'nieosiągalne';
       });
     }
 
@@ -2234,6 +2292,8 @@
       if (d.ph >= 7) {
         limeBox.classList.add('no-lime');
         noLimeMsg.classList.add('visible');
+        document.getElementById('lime-unreachable-msg').classList.remove('visible');
+        document.getElementById('lime_result_ph').innerText = d.ph.toFixed(2);
         // „Po wapnowaniu” = bez zmian (nie wapnujemy)
         document.getElementById('cac_other_after').innerText = d.other.toFixed(1);
         document.getElementById('cac_exh_after').innerText = d.exh.toFixed(1);
@@ -2266,34 +2326,37 @@
       limeBox.classList.remove('no-lime');
       noLimeMsg.classList.remove('visible');
 
-      const targetPh = getTargetPh(targetSat);
-      const newExH = getExH(targetPh);
-      const newOther = getOtherBases(targetPh);
-      const meqOthers = d.meqMg + d.meqK + d.meqNa;
-      let deficitMeq = 0;
-      for (let i = 0; i < 10; i++) {
-        const newMeqCa = d.meqCa + deficitMeq;
-        const newSum = newMeqCa + meqOthers;
-        const newDenom = 100 - (newOther + newExH);
-        const newTcec = newDenom > 0 ? (newSum * 100) / newDenom : newSum;
-        const needed = newTcec * (targetSat / 100);
-        deficitMeq = Math.max(0, needed - d.meqCa);
-      }
-      const newMeqCa = d.meqCa + deficitMeq;
-      const newSum = newMeqCa + meqOthers;
-      const newDenom = 100 - (newOther + newExH);
-      const newTcec = newDenom > 0 ? (newSum * 100) / newDenom : newSum;
-      const newSatCa = newTcec > 0 ? (newMeqCa / newTcec) * 100 : 0;
-      const newSatMg = newTcec > 0 ? (d.meqMg / newTcec) * 100 : 0;
-      const newSatK = newTcec > 0 ? (d.meqK / newTcec) * 100 : 0;
-      const newSatNa = newTcec > 0 ? (d.meqNa / newTcec) * 100 : 0;
-      const caIncrease = deficitMeq * 200;
-      const newCa = d.ca + caIncrease;
+      const sc = getLimeScenario(d, targetSat);
+      const deficitMeq = sc.deficitMeq;
+      const newExH = sc.exh;
+      const newOther = sc.other;
+      const newTcec = sc.tcec;
+      const newSatCa = sc.newSatCa;
+      const newSatMg = sc.newSatMg;
+      const newSatK = sc.newSatK;
+      const newSatNa = sc.newSatNa;
+      const caIncrease = sc.caIncrease;
+      const newCa = sc.newCa;
       const newCaMg = d.mg > 0 ? (newCa / d.mg) : 0;
+
+      const unreachableMsg = document.getElementById('lime-unreachable-msg');
+      if (sc.reachable) {
+        unreachableMsg.classList.remove('visible');
+        unreachableMsg.innerHTML = '';
+      } else {
+        limeBox.classList.add('no-lime');
+        unreachableMsg.classList.add('visible');
+        unreachableMsg.innerHTML = `Cel ${targetSat}% nasycenia wapniem jest <strong>nieosiągalny na tej glebie</strong>. `
+          + `Ca ${targetSat}% + Mg ${d.satMg.toFixed(1)}% + K ${d.satK.toFixed(1)}% + Na ${d.satNa.toFixed(1)}% `
+          + `= ${sc.totalBaseSat.toFixed(1)}% miejsc sorpcyjnych, a nawet przy pH 7 wolne jest tylko ok. 95,6% `
+          + `(reszta to „Other Bases”). Samo wapnowanie tego nie naprawi — najpierw trzeba obniżyć nasycenie `
+          + `magnezem lub potasem (np. gipsem, wypłukiwaniem), bo to one zajmują miejsce wapnia.`;
+      }
 
       document.getElementById('cac_other_after').innerText = newOther.toFixed(1);
       document.getElementById('cac_exh_after').innerText = newExH.toFixed(1);
       document.getElementById('cac_tcec_after').innerText = newTcec.toFixed(2);
+      document.getElementById('lime_result_ph').innerText = sc.reachable ? sc.ph.toFixed(2) : 'nieosiągalne';
       document.getElementById('cac_camg_after').innerText = newCaMg > 0 ? newCaMg.toFixed(1) : '—';
       document.getElementById('cac_sat_ca_after').innerText = newSatCa.toFixed(1);
       document.getElementById('cac_sat_mg_after').innerText = newSatMg.toFixed(1);
@@ -2319,7 +2382,7 @@
       document.getElementById('lime_caco3_l').innerText = caco3_g_l.toFixed(2);
       document.getElementById('lime_woll_l').innerText = woll_g_l.toFixed(2);
 
-      window._postLime = { ca: newCa, mg: d.mg, k: d.k, na: d.na, other: newOther, exh: newExH, ph: targetPh };
+      window._postLime = { ca: newCa, mg: d.mg, k: d.k, na: d.na, other: newOther, exh: newExH, ph: sc.ph };
       if (typeof renderAmendmentsAll === 'function') renderAmendmentsAll();
     }
     window.calculateLime = calculateLime;
