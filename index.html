@@ -1763,7 +1763,22 @@
         html += `<tr class="${elementRowClass(el)}"><td>${ELEMENT_LABELS[el] || el}</td><td>${b.toFixed(1)}</td><td>+${a.toFixed(1)}</td>`
           + `<td><strong>${(b + a).toFixed(1)}</strong> ppm</td></tr>`;
       });
+
+      const state = getFinalSoilState(base, added);
+      if (state) {
+        const phDelta = state.reachable ? state.ph - state.startPh : null;
+        const deltaTxt = phDelta === null
+          ? '—'
+          : (phDelta >= 0 ? '+' : '') + phDelta.toFixed(2);
+        html += `<tr><td><strong>pH gleby</strong></td><td>${state.startPh.toFixed(2)}</td><td>${deltaTxt}</td>`
+          + `<td><strong>${formatFinalPh(state)}</strong></td></tr>`;
+      }
       html += '</tbody></table>';
+      if (state) {
+        html += `<p class="note">pH liczone jest z sumy nasycenia zasadami (${state.totalBaseSat.toFixed(1)}%) — `
+          + `„Start” to pH po wapnowaniu z zakładki CAC, „Razem” uwzględnia już wszystkie odżywki z listy. `
+          + `Szczegóły w tabeli nasycenia kationów obok.</p>`;
+      }
       document.getElementById('am_summary_table').innerHTML = html;
 
       renderFinalSaturation(base, added);
@@ -1895,12 +1910,11 @@
     }
     window.fillTargetDeficit = fillTargetDeficit;
 
-    function renderFinalSaturation(base, added) {
-      const box = document.getElementById('am_saturation_table');
-      if (!window._postLime) {
-        box.innerHTML = '<p class="note">Najpierw policz wapnowanie w zakładce CAC/Gleba.</p>';
-        return;
-      }
+    // Końcowy stan kompleksu sorpcyjnego po wapnowaniu i po dodanych odżywkach.
+    // TCEC pozostaje stałe (to cecha gleby), więc dosypane kationy zajmują miejsca po wodorze —
+    // rośnie suma nasycenia zasadami, a z niej odczytujemy wynikowe pH tą samą metodą co w zakładce CAC.
+    function getFinalSoilState(base, added) {
+      if (!window._postLime || !window._cac) return null;
       const finalCa = (base.Ca || 0) + (added.Ca || 0);
       const finalMg = (base.Mg || 0) + (added.Mg || 0);
       const finalK = (base.K || 0) + (added.K || 0);
@@ -1910,21 +1924,51 @@
       const meqMg = finalMg / 120;
       const meqK = finalK / 390;
       const meqNa = finalNa / 230;
-      const sumMeq = meqCa + meqMg + meqK + meqNa;
-      const denom = 100 - (window._postLime.other + window._postLime.exh);
-      const tcec = denom > 0 ? (sumMeq * 100) / denom : sumMeq;
+      const tcec = window._cac.tcec;
       const satCa = tcec > 0 ? (meqCa / tcec) * 100 : 0;
       const satMg = tcec > 0 ? (meqMg / tcec) * 100 : 0;
       const satK = tcec > 0 ? (meqK / tcec) * 100 : 0;
       const satNa = tcec > 0 ? (meqNa / tcec) * 100 : 0;
+      const totalBaseSat = satCa + satMg + satK + satNa;
+      const ph = solvePhForBaseSaturation(totalBaseSat);
+
+      return {
+        tcec, satCa, satMg, satK, satNa, totalBaseSat,
+        ph, reachable: ph !== null,
+        startPh: window._postLime.ph
+      };
+    }
+
+    function formatFinalPh(state) {
+      if (!state.reachable) return 'ponad 7,5';
+      return state.ph.toFixed(2);
+    }
+
+    function renderFinalSaturation(base, added) {
+      const box = document.getElementById('am_saturation_table');
+      const state = getFinalSoilState(base, added);
+      if (!state) {
+        box.innerHTML = '<p class="note">Najpierw policz wapnowanie w zakładce CAC/Gleba.</p>';
+        return;
+      }
 
       let html = '<table><thead><tr><th>Pierwiastek</th><th>Nasycenie %</th><th>Cel</th></tr></thead><tbody>';
-      html += `<tr><td>Ca</td><td><span class="badge highlight">${satCa.toFixed(1)}</span></td><td>68–75%</td></tr>`;
-      html += `<tr><td>Mg</td><td><span class="badge">${satMg.toFixed(1)}</span></td><td>10–15%</td></tr>`;
-      html += `<tr><td>K</td><td><span class="badge">${satK.toFixed(1)}</span></td><td>3–5%</td></tr>`;
-      html += `<tr><td>Na</td><td><span class="badge">${satNa.toFixed(1)}</span></td><td>&lt; 2%</td></tr>`;
-      html += `<tr><td><strong>TCEC</strong></td><td colspan="2"><span class="badge">${tcec.toFixed(2)}</span></td></tr>`;
-      html += '</tbody></table><p class="note">Przybliżenie: zakłada, że dodatkowe odżywki nie zmieniają już pH ani wymiennego wodoru ustalonego przy wapnowaniu.</p>';
+      html += `<tr><td>Ca</td><td><span class="badge highlight">${state.satCa.toFixed(1)}</span></td><td>68–75%</td></tr>`;
+      html += `<tr><td>Mg</td><td><span class="badge">${state.satMg.toFixed(1)}</span></td><td>10–15%</td></tr>`;
+      html += `<tr><td>K</td><td><span class="badge">${state.satK.toFixed(1)}</span></td><td>3–5%</td></tr>`;
+      html += `<tr><td>Na</td><td><span class="badge">${state.satNa.toFixed(1)}</span></td><td>&lt; 2%</td></tr>`;
+      html += `<tr><td><strong>Suma zasad</strong></td><td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td><td>—</td></tr>`;
+      html += `<tr><td><strong>TCEC</strong></td><td colspan="2"><span class="badge">${state.tcec.toFixed(2)}</span></td></tr>`;
+      html += `<tr><td><strong>pH gleby (końcowe)</strong></td><td><span class="badge highlight">${formatFinalPh(state)}</span></td>`
+        + `<td>6,3–6,8</td></tr>`;
+      html += '</tbody></table>';
+      html += `<p class="note">pH końcowe wynika z sumy nasycenia zasadami po wszystkich dodatkach: kationy zajmują miejsca `
+        + `po wymiennym wodorze, więc każdy dosypany wapń, magnez czy potas lekko podnosi pH. `
+        + `Start po wapnowaniu: pH ${state.startPh.toFixed(2)} → po odżywkach: pH ${formatFinalPh(state)}. `
+        + `TCEC nie zmienia się, bo dodatki nie tworzą nowych miejsc sorpcyjnych.`
+        + (state.reachable ? '' : ' <strong>Uwaga:</strong> suma zasad przekracza to, co gleba jest w stanie pomieścić — '
+          + 'to znak, że dawki kationów są za duże.')
+        + '</p>';
       box.innerHTML = html;
     }
 
