@@ -296,39 +296,21 @@
               <th>TCEC po</th>
             </tr>
           </thead>
-          <tbody>
-            <tr>
-              <td><strong>68%</strong></td>
-              <td>+ <span id="dyn_inc_68">—</span> ppm</td>
-              <td><span id="dyn_new_68">—</span> ppm</td>
-              <td><span id="dyn_ph2_68" class="badge">—</span></td>
-              <td><span id="dyn_tbs_68">—</span> %</td>
-              <td><span id="dyn_ph_68" class="badge">—</span></td>
-            </tr>
-            <tr>
-              <td><strong>72%</strong> (zalecane)</td>
-              <td>+ <span id="dyn_inc_72">—</span> ppm</td>
-              <td><span id="dyn_new_72">—</span> ppm</td>
-              <td><span id="dyn_ph2_72" class="badge">—</span></td>
-              <td><span id="dyn_tbs_72">—</span> %</td>
-              <td><span id="dyn_ph_72" class="badge">—</span></td>
-            </tr>
-            <tr>
-              <td><strong>75%</strong></td>
-              <td>+ <span id="dyn_inc_75">—</span> ppm</td>
-              <td><span id="dyn_new_75">—</span> ppm</td>
-              <td><span id="dyn_ph2_75" class="badge">—</span></td>
-              <td><span id="dyn_tbs_75">—</span> %</td>
-              <td><span id="dyn_ph_75" class="badge">—</span></td>
-            </tr>
-          </tbody>
+          <tbody id="dyn_rows"></tbody>
         </table>
         <p class="note">
-          pH przypisane do celu nasycenia wapniem wg Albrechta (68% → 6,5; 72% → 6,7; 75% → 6,8, wartości
-          pośrednie interpolowane). Z tego pH wynikają „Other Bases” i „Ex H”, a z nich pojemność sorpcyjna:
+          <strong>Kolumny „Cel nasycenia Ca” i „pH” są do wpisania — to Twój wybór, nie wynik obliczeń.</strong>
+          Model Logan Labs nie wyznacza jednej pary Ca%↔pH: przy danym pH <em>każde</em> nasycenie wapniem poniżej
+          sumy zasad jest spójne, a różni je tylko ilość wapnia i wynikowe TCEC. Przy pH 6,8 zasady zajmują 92,4%
+          miejsc — i 70% Ca, i 75% Ca mieści się w tym samym pH, tyle że pierwsze wymaga mniej wapna i daje
+          niższe TCEC. Wpisz więc parę, którą sam wyliczyłeś; reszta tabeli przeliczy się od razu.
+        </p>
+        <p class="note">
+          Z wpisanego pH wynikają „Other Bases” i „Ex H”, a z nich pojemność sorpcyjna:
           <strong>TCEC = suma meq zasad ÷ (1 − Other − Ex H)</strong>. Dlatego dodany wapń podnosi TCEC,
           a nasycenie magnezem i potasem spada — ten sam meq dzieli się przez większy mianownik.
-          Suma zasad nie dochodzi do 100%, bo resztę miejsc zajmuje kwasowość.
+          Suma zasad nie dochodzi do 100%, bo resztę miejsc zajmuje kwasowość. Cele pośrednie (pole
+          „Docelowe nasycenie Ca” w punkcie 2) są interpolowane między wpisanymi wierszami.
         </p>
       </div>
 
@@ -2256,22 +2238,64 @@
       return (100 - getAcidityShare(ph)) / 100;
     }
 
-    // pH po wapnowaniu wynika z docelowego nasycenia wapniem — zależność empiryczna wg Albrechta,
-    // zakotwiczona na trzech punktach (68% → 6,5; 72% → 6,7; 75% → 6,8) i interpolowana liniowo,
-    // żeby pośrednie cele nie skakały skokowo.
-    const ALBRECHT_PH_ANCHORS = [
+    // Powiązanie „nasycenie Ca → pH” jest WYBOREM użytkownika, nie wynikiem modelu: przy danym pH
+    // każde nasycenie wapniem poniżej sumy zasad jest spójne z wzorem Logan Labs (różni je tylko ilość
+    // wapnia i wynikowe TCEC). Dlatego trzy pary są edytowalne, a wartości pośrednie interpolujemy.
+    const DEFAULT_PH_ANCHORS = [
       { sat: 68, ph: 6.5 },
       { sat: 72, ph: 6.7 },
       { sat: 75, ph: 6.8 }
     ];
 
+    function getPhAnchors() {
+      const out = DEFAULT_PH_ANCHORS.map((def, i) => {
+        const satEl = document.getElementById('anchor_sat_' + i);
+        const phEl = document.getElementById('anchor_ph_' + i);
+        const sat = satEl ? parseFloat(satEl.value) : NaN;
+        const ph = phEl ? parseFloat(phEl.value) : NaN;
+        return {
+          sat: isNaN(sat) ? def.sat : Math.min(95, Math.max(30, sat)),
+          ph: isNaN(ph) ? def.ph : Math.min(7.5, Math.max(4, ph))
+        };
+      });
+      out.sort((a, b) => a.sat - b.sat);
+      return out;
+    }
+
     function getTargetPh(targetSat) {
-      const a = ALBRECHT_PH_ANCHORS;
-      let lo = a[0], hi = a[1];
-      if (targetSat >= a[1].sat) { lo = a[1]; hi = a[2]; }
+      const a = getPhAnchors();
+      const last = a.length - 1;
+      // Szukamy odcinka, w którym leży cel; poza zakresem przedłużamy nachylenie skrajnego odcinka.
+      let i = 0;
+      if (targetSat >= a[last].sat) {
+        i = last - 1;
+      } else {
+        while (i < last - 1 && targetSat > a[i + 1].sat) i++;
+      }
+      const lo = a[i], hi = a[i + 1];
+      if (hi.sat === lo.sat) return Math.min(7.5, Math.max(4, hi.ph));
       const slope = (hi.ph - lo.ph) / (hi.sat - lo.sat);
-      const ph = lo.ph + slope * (targetSat - lo.sat);
-      return Math.min(7.5, Math.max(5, ph));
+      return Math.min(7.5, Math.max(4, lo.ph + slope * (targetSat - lo.sat)));
+    }
+
+    function renderDynRows() {
+      const body = document.getElementById('dyn_rows');
+      if (!body || body.dataset.built === '1') return;
+      let html = '';
+      DEFAULT_PH_ANCHORS.forEach((a, i) => {
+        html += `<tr>`
+          + `<td><input type="number" id="anchor_sat_${i}" value="${a.sat}" step="1" min="30" max="95" `
+          + `style="max-width:78px; display:inline-block;" oninput="calculateCAC()"> %</td>`
+          + `<td>+ <span id="dyn_inc_${i}">—</span> ppm</td>`
+          + `<td><span id="dyn_new_${i}">—</span> ppm</td>`
+          + `<td><input type="number" id="anchor_ph_${i}" value="${a.ph}" step="0.05" min="4" max="7.5" `
+          + `style="max-width:78px; display:inline-block;" oninput="calculateCAC()"></td>`
+          + `<td><span id="dyn_tbs_${i}">—</span> %</td>`
+          + `<td><span id="dyn_tcec_${i}" class="badge">—</span></td>`
+          + `</tr>`;
+      });
+      body.innerHTML = html;
+      body.dataset.built = '1';
     }
 
     // Scenariusz wapnowania do zadanego nasycenia Ca, przy zadanym docelowym pH.
@@ -2353,29 +2377,27 @@
 
     function updateDynTable() {
       if (!window._cac) return;
+      renderDynRows();
       const d = window._cac;
 
-      // Przy pH ≥ 7 nie pokazujemy deficytu Ca do wapnowania
-      if (d.ph >= 7) {
-        [68, 72, 75].forEach(function(pct) {
-          document.getElementById('dyn_inc_' + pct).innerText = '0';
-          document.getElementById('dyn_new_' + pct).innerText = d.ca.toFixed(0);
-          document.getElementById('dyn_ph2_' + pct).innerText = d.ph.toFixed(2);
-          document.getElementById('dyn_tbs_' + pct).innerText = (d.satCa + d.satMg + d.satK + d.satNa).toFixed(1);
-          document.getElementById('dyn_ph_' + pct).innerText = d.tcec.toFixed(2);
-        });
-        return;
-      }
+      DEFAULT_PH_ANCHORS.forEach(function(_, i) {
+        const satEl = document.getElementById('anchor_sat_' + i);
+        const pct = satEl ? (parseFloat(satEl.value) || DEFAULT_PH_ANCHORS[i].sat) : DEFAULT_PH_ANCHORS[i].sat;
 
-      [68, 72, 75].forEach(function(pct) {
+        // Przy pH ≥ 7 nie pokazujemy deficytu Ca do wapnowania
+        if (d.ph >= 7) {
+          document.getElementById('dyn_inc_' + i).innerText = '0';
+          document.getElementById('dyn_new_' + i).innerText = d.ca.toFixed(0);
+          document.getElementById('dyn_tbs_' + i).innerText = (d.satCa + d.satMg + d.satK + d.satNa).toFixed(1);
+          document.getElementById('dyn_tcec_' + i).innerText = d.tcec.toFixed(2);
+          return;
+        }
+
         const sc = getLimeScenario(d, pct);
-        document.getElementById('dyn_inc_' + pct).innerText = sc.reachable ? sc.caIncrease.toFixed(0) : '—';
-        document.getElementById('dyn_new_' + pct).innerText = sc.reachable ? sc.newCa.toFixed(0) : '—';
-        document.getElementById('dyn_ph2_' + pct).innerText = sc.ph.toFixed(2);
-        document.getElementById('dyn_tbs_' + pct).innerText = sc.totalBaseSat.toFixed(1);
-        document.getElementById('dyn_ph_' + pct).innerText = sc.reachable
-          ? sc.tcec.toFixed(2)
-          : 'nieosiągalne';
+        document.getElementById('dyn_inc_' + i).innerText = sc.reachable ? sc.caIncrease.toFixed(0) : '—';
+        document.getElementById('dyn_new_' + i).innerText = sc.reachable ? sc.newCa.toFixed(0) : '—';
+        document.getElementById('dyn_tbs_' + i).innerText = sc.totalBaseSat.toFixed(1);
+        document.getElementById('dyn_tcec_' + i).innerText = sc.reachable ? sc.tcec.toFixed(2) : 'nieosiągalne';
       });
     }
 
