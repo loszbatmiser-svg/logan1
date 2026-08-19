@@ -691,6 +691,39 @@
           <button class="col-btn" style="margin-top:10px;" onclick="applyCompostToPpmTab()">Przenieś tę dawkę do zakładki PPM</button>
         </div>
       </div>
+
+      <div class="section">
+        <h2 class="collapsible-heading" onclick="toggleCollapse('komp_body_5', this)"><span class="caret">▾</span> 5. Kalibracja wyciągu — zrób pomiar TDS</h2>
+        <div class="collapsible-body" id="komp_body_5">
+          <p class="note">
+            Przelicznik <strong>3,66 l wyciągu na kg kompostu</strong> (używany wyżej) nie pochodzi z żadnego
+            z dwóch raportów — Logan Labs nie podaje, ile wody laboratorium zużyło robiąc pastę nasyconą.
+            Dopasowałem go tak, żeby odtworzyć stałe, które były w tym pliku od początku dla potasu i magnezu;
+            dla wapnia i fosforu wychodzi już gorzej. To wartość prawdopodobna (torfy/komposty trzymają
+            300–500% wilgotności przy nasyceniu), ale niepotwierdzona pomiarem.
+          </p>
+          <p class="note">
+            Żeby to sprawdzić: namocz <strong>100 ml kompostu w 1 litrze wody</strong> (destylowanej lub
+            demineralizowanej), odczekaj ok. doby, przecedź i zmierz TDS miernikiem. Wpisz wynik niżej —
+            narzędzie wyliczy z niego rzeczywiste R i porówna z przyjętym 3,66.
+          </p>
+          <div class="input-group">
+            <div>
+              <label>Kompost użyty do testu (ml)</label>
+              <input type="number" id="komp_cal_ml" value="100" step="1" min="1" oninput="renderCompostCalibration()">
+            </div>
+            <div>
+              <label>Woda użyta do testu (l)</label>
+              <input type="number" id="komp_cal_l" value="1" step="0.1" min="0.05" oninput="renderCompostCalibration()">
+            </div>
+            <div>
+              <label>Zmierzone TDS wyciągu (ppm)</label>
+              <input type="number" id="komp_cal_tds" value="" step="1" min="0" placeholder="wpisz po pomiarze" oninput="renderCompostCalibration()">
+            </div>
+          </div>
+          <div id="komp_cal_result"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2493,9 +2526,6 @@
     // przy nasycaniu do pasty. Przelicza stężenie z Saturated Paste na mg/kg kompostu,
     // dzięki czemu oba raporty stoją na tej samej podstawie.
     const COMPOST_EXTRACT_RATIO = 3.66;
-    function getCompostExtractRatio() {
-      return COMPOST_EXTRACT_RATIO;
-    }
 
     // Zawartość pierwiastka w kompoście w mg/kg, w dwóch wariantach:
     //   glebowy (max) — wprost z Mehlich 3
@@ -2632,6 +2662,81 @@
     }
     window.renderCompostExtract = renderCompostExtract;
 
+    // ---- Kalibracja przelicznika wyciągu (punkt 5) ----
+    // 3,66 l/kg jest dopasowaniem, nie pomiarem — patrz notka w sekcji 5. Jeśli użytkownik
+    // zmierzy TDS własnego wyciągu, liczymy z niego rzeczywiste R z bilansu masy:
+    // sole rozpuszczalne z raportu (ppm) × R (l/kg) = masa soli na kg kompostu (stała, niezależna
+    // od tego, ile wody dolejemy). Dla nowego testu ta sama masa rozpuszcza się w innej objętości:
+    //   TDS_test = (salts_raport × R) × kg_test / L_test   =>   R = TDS_test × L_test / (salts_raport × kg_test)
+    window._compostCalibratedRatio = null;
+
+    function getCompostExtractRatio() {
+      return window._compostCalibratedRatio != null ? window._compostCalibratedRatio : COMPOST_EXTRACT_RATIO;
+    }
+
+    function applyCompostCalibration(r) {
+      window._compostCalibratedRatio = r;
+      onCompostChange();
+    }
+    window.applyCompostCalibration = applyCompostCalibration;
+
+    function resetCompostCalibration() {
+      window._compostCalibratedRatio = null;
+      document.getElementById('komp_cal_tds').value = '';
+      onCompostChange();
+    }
+    window.resetCompostCalibration = resetCompostCalibration;
+
+    function renderCompostCalibration() {
+      const box = document.getElementById('komp_cal_result');
+      if (!box) return;
+      const mlTest = parseFloat(document.getElementById('komp_cal_ml').value) || 0;
+      const lTest = parseFloat(document.getElementById('komp_cal_l').value) || 0;
+      const tdsRaw = document.getElementById('komp_cal_tds').value;
+      const salts = window._compost.sp.salts;
+      const activeR = getCompostExtractRatio();
+      const usingCalibrated = window._compostCalibratedRatio != null;
+
+      if (salts == null) {
+        box.innerHTML = '<p class="note">Wczytaj raport Saturated Paste (punkt 1) — potrzebna jest z niego wartość „Soluble Salts”.</p>';
+        return;
+      }
+
+      let html = '';
+      if (tdsRaw === '' || mlTest <= 0 || lTest <= 0) {
+        // Bez pomiaru: pokazujemy, jakiego TDS się spodziewać przy obecnym R, żeby było wiadomo, czego szukać.
+        const kgTest = mlTest * getCompostBd() / 1000;
+        const predicted = salts * activeR * kgTest / Math.max(lTest, 0.0001);
+        html = `<p class="note">Jeszcze bez pomiaru. Przy obecnie przyjętym R = ${activeR.toFixed(2)} l/kg,
+          wyciąg z ${mlTest || '—'} ml kompostu w ${lTest || '—'} l wody powinien dać TDS ≈
+          <strong>${(mlTest > 0 && lTest > 0) ? predicted.toFixed(0) : '—'} ppm</strong>. Zmierz i wpisz wynik wyżej.</p>`;
+      } else {
+        const tds = parseFloat(tdsRaw) || 0;
+        const kgTest = mlTest * getCompostBd() / 1000;
+        const rMeasured = kgTest > 0 ? (tds * lTest) / (salts * kgTest) : 0;
+        const diffPct = ((rMeasured - COMPOST_EXTRACT_RATIO) / COMPOST_EXTRACT_RATIO) * 100;
+
+        html = '<table><tbody>'
+          + `<tr><td>Kompost w teście</td><td>${mlTest} ml × ${getCompostBd()} g/cm³ = ${kgTest.toFixed(4)} kg</td></tr>`
+          + `<tr><td>Sole rozpuszczalne z raportu</td><td>${salts} ppm <span class="explain">(Saturated Paste)</span></td></tr>`
+          + `<tr><td>Zmierzone TDS Twojego wyciągu</td><td><span class="badge highlight">${tds}</span> ppm</td></tr>`
+          + `<tr><td><strong>Wyliczone R</strong></td><td class="big">${rMeasured.toFixed(2)} l/kg</td></tr>`
+          + `<tr><td>Różnica względem przyjętego 3,66</td><td>${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(0)}%</td></tr>`
+          + '</tbody></table>';
+        html += `<div class="quick-btns">`
+          + `<button class="quick-btn${usingCalibrated ? '' : ' active'}" onclick="resetCompostCalibration()">Użyj domyślnego 3,66</button>`
+          + `<button class="quick-btn${usingCalibrated ? ' active' : ''}" onclick="applyCompostCalibration(${rMeasured})">Użyj zmierzonego ${rMeasured.toFixed(2)}</button>`
+          + `</div>`;
+        html += `<p class="note">Po zastosowaniu R = ${rMeasured.toFixed(2)} zmieni się skład kompostu w punkcie 2,
+          dawka w punkcie 3 i profil w punkcie 4 — wszystkie liczą wariant wodny z tego samego przelicznika.</p>`;
+      }
+      if (usingCalibrated) {
+        html += `<p class="note">Obecnie używane: <strong>R = ${activeR.toFixed(2)} l/kg (zmierzone)</strong>, nie domyślne 3,66.</p>`;
+      }
+      box.innerHTML = html;
+    }
+    window.renderCompostCalibration = renderCompostCalibration;
+
     function applyCompostToPpmTab() {
       const ml = parseFloat(document.getElementById('komp_ext_ml').value) || 0;
       const litres = parseFloat(document.getElementById('komp_ext_l').value) || 5;
@@ -2649,6 +2754,7 @@
       renderCompostComposition();
       renderCompostSoilDose();
       renderCompostExtract();
+      renderCompostCalibration();
       calculatePPM();
       if (typeof renderAmendmentsAll === 'function' && window._postLime) renderAmendmentsAll();
     }
