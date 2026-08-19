@@ -99,19 +99,26 @@
             <div class="explain">Objętość roztworu, w którym rozpuszczasz nawozy</div>
           </div>
           <div>
-            <label>PPM wody startowej</label>
+            <label>PPM wody startowej (odczyt TDS)</label>
             <input type="number" id="water_ppm" value="0" step="1" min="0" oninput="calculatePPM()">
             <div class="explain">
-              Twarda część wody z kranu (wapń + magnez). Wpisz 0 dla wody osmotycznej.
-              Ta wartość jest już stężeniem, więc dolicza się wprost do profilu — niezależnie od objętości.
+              Odczyt z miernika TDS. Wpisz 0 dla wody osmotycznej. To nie jest czysty wapń — miernik pokazuje
+              sumę rozpuszczonych soli, w tym wodorowęglany, sód i chlorki.
+            </div>
+          </div>
+          <div>
+            <label>Udział twardości w odczycie (%)</label>
+            <input type="number" id="water_hardness_pct" value="100" step="5" min="10" max="100" oninput="calculatePPM()">
+            <div class="explain">
+              Ile z odczytu to twardość węglanowa (Ca + Mg). Reszta to „tło”: sód, chlorki, siarczany, krzemionka.
+              100% odpowiada odczytowi twardości ogólnej; dla surowego TDS bywa 70–80%.
             </div>
           </div>
           <div>
             <label>Stosunek Ca:Mg w wodzie</label>
             <input type="number" id="water_camg" value="4" step="0.1" min="0.5" max="20" oninput="calculatePPM()">
             <div class="explain">
-              W wodzie kranowej zwykle 3:1 do 5:1. Dzieli PPM wody na wapń i magnez:
-              Ca = PPM × R/(R+1), Mg = PPM × 1/(R+1).
+              W wodzie kranowej zwykle 3:1 do 5:1 (czysty wapń do czystego magnezu).
             </div>
           </div>
         </div>
@@ -156,8 +163,8 @@
         <h3 style="margin-top:20px;">Proporcje w roztworze</h3>
         <div id="ppm_ratios"></div>
         <p class="note">
-          Proporcje wagowe, liczone z tych samych wartości co tabela wyżej — razem z wapniem i magnezem
-          z wody startowej. Kolumny „minimum” i „maksimum” odpowiadają dwóm wariantom z profilu.
+          Proporcje wagowe, liczone z wariantu wodnego profilu wyżej — razem z wapniem i magnezem
+          z wody startowej.
         </p>
       </div>
 
@@ -2055,18 +2062,29 @@
       const mg_min = mg_base + 186.0 * kg_komp;
       const mg_max = mg_base + 464.0 * kg_komp;
 
-      // Woda startowa: podany PPM to już stężenie, więc dolicza się wprost, bez dzielenia przez objętość.
-      // Stosunek R rozdziela go na wapń i magnez: Ca = PPM × R/(R+1), Mg = PPM × 1/(R+1).
+      // Woda startowa. Twardość podaje się w przeliczeniu na CaCO₃, więc odczytu NIE dzieli się
+      // wprost na wapń i magnez — trzeba zejść do czystego pierwiastka przez masy molowe:
+      //   H = (CaCO₃/Ca)·Ca + (CaCO₃/Mg)·Mg = 2,4973·Ca + 4,1180·Mg,  przy Ca = R·Mg
+      //   → Mg = H / (2,4973·R + 4,1180),  Ca = R·Mg
+      // Dla 160 ppm i R = 4 daje to ok. 45 ppm Ca i 11 ppm Mg — tyle, ile realnie jest w kranówce.
+      // Podane wartości to już stężenia, więc dolicza się je bez dzielenia przez objętość.
+      const CACO3_PER_CA = 100.087 / 40.078;
+      const CACO3_PER_MG = 100.087 / 24.305;
       const waterPpm = Math.max(0, parseFloat(document.getElementById('water_ppm').value) || 0);
+      const hardnessPct = Math.min(100, Math.max(0, parseFloat(document.getElementById('water_hardness_pct').value) || 100));
       const R = Math.max(0.01, parseFloat(document.getElementById('water_camg').value) || 4);
-      const waterCa = waterPpm * (R / (R + 1));
-      const waterMg = waterPpm * (1 / (R + 1));
+      const hardness = waterPpm * (hardnessPct / 100);
+      const waterMg = hardness / (CACO3_PER_CA * R + CACO3_PER_MG);
+      const waterCa = R * waterMg;
 
       const splitBox = document.getElementById('water_split');
       if (splitBox) {
         splitBox.innerHTML = waterPpm > 0
-          ? `Woda startowa wnosi <strong>${waterCa.toFixed(2)} ppm Ca</strong> i <strong>${waterMg.toFixed(2)} ppm Mg</strong> `
-            + `(${waterPpm.toFixed(0)} ppm przy stosunku ${R.toFixed(1)}:1). Jest to już wliczone w profil poniżej.`
+          ? `Woda startowa wnosi <strong>${waterCa.toFixed(1)} ppm czystego Ca</strong> i `
+            + `<strong>${waterMg.toFixed(1)} ppm czystego Mg</strong> — wliczone w profil poniżej. `
+            + `<span class="explain">Z odczytu ${waterPpm.toFixed(0)} ppm twardość to ${hardness.toFixed(0)} ppm `
+            + `(jako CaCO₃) przy stosunku ${R.toFixed(1)}:1. Pozostałe ${(waterPpm - waterCa - waterMg).toFixed(0)} ppm `
+            + `to wodorowęglany i tło jonowe (Na, Cl, SO₄, krzemionka) — nie wchodzą do profilu.</span>`
           : 'Woda startowa: 0 ppm — profil pochodzi wyłącznie z dawek produktów.';
       }
 
@@ -2114,31 +2132,21 @@
       return v === null ? '—' : v.toFixed(2) + ' : 1';
     }
 
-    function formatRatioRange(r) {
-      if (r.min === null && r.max === null) return '—';
-      if (r.min === null || r.max === null) return formatRatio(r.min === null ? r.max : r.min);
-      if (Math.abs(r.max - r.min) < 0.005) return formatRatio(r.min);
-      // Wariant „maksimum” nie zawsze daje wyższą proporcję, więc zakres porządkujemy rosnąco.
-      const lo = Math.min(r.min, r.max), hi = Math.max(r.min, r.max);
-      return `${lo.toFixed(2)}–${hi.toFixed(2)} : 1`;
-    }
 
     function renderSolutionRatios(profile) {
       const box = document.getElementById('ppm_ratios');
       if (!box) return;
       const ratios = computeSolutionRatios(profile);
-      let html = '<table><thead><tr><th>Proporcja</th><th>Minimum (wodne)</th><th>Maksimum (glebowe)</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Proporcja</th><th>Wartość</th></tr></thead><tbody>';
       SOLUTION_RATIOS.forEach(r => {
-        const v = ratios[r.key];
         html += `<tr><td><strong>${r.label}</strong></td>`
-          + `<td><span class="badge">${formatRatio(v.min)}</span></td>`
-          + `<td><span class="badge">${formatRatio(v.max)}</span></td></tr>`;
+          + `<td><span class="badge">${formatRatio(ratios[r.key].min)}</span></td></tr>`;
       });
       html += '</tbody></table>';
       box.innerHTML = html;
     }
 
-    const PPM_DOSE_FIELDS = ['water_volume', 'water_ppm', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_kompost'];
+    const PPM_DOSE_FIELDS = ['water_volume', 'water_ppm', 'water_hardness_pct', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_kompost'];
     const PPM_PROFILE_ELEMENTS = [
       { key: 'n', label: 'N' }, { key: 'p', label: 'P' }, { key: 'k', label: 'K' },
       { key: 'ca', label: 'Ca' }, { key: 's', label: 'S' }, { key: 'mg', label: 'Mg' }
@@ -2265,7 +2273,7 @@
         html += `<tr><td colspan="${cols}" style="padding-top:0; border-bottom:2px solid #e2e8f0;">`
           + '<span class="explain">Proporcje:</span> '
           + SOLUTION_RATIOS.map(r =>
-              `<span class="badge" style="margin-right:6px;">${r.label} = ${formatRatioRange(ratios[r.key])}</span>`
+              `<span class="badge" style="margin-right:6px;">${r.label} = ${formatRatio(ratios[r.key].min)}</span>`
             ).join('')
           + '</td></tr>';
       });
