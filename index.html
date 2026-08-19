@@ -313,33 +313,6 @@
           „Docelowe nasycenie Ca” w punkcie 2) są interpolowane między wpisanymi wierszami.
         </p>
 
-        <h3 class="collapsible-heading" style="margin-top:22px;" onclick="toggleCollapse('whatif_body', this)">
-          <span class="caret">▾</span> Sprawdź parę: pH + wapń → nasycenie
-        </h3>
-        <div class="collapsible-body" id="whatif_body">
-          <p class="note">
-            Tu nic nie jest wybierane — <strong>podajesz pH i wapń, reszta jest policzona</strong>, dokładnie jak
-            w arkuszu Logan Labs. Mg, K i Na brane są z testu glebowego (punkt 1) i nie zmieniają się przy wapnowaniu.
-            Zmiana wartości tutaj nie rusza danych z testu ani dawki wapnowania.
-          </p>
-          <div class="input-group">
-            <div>
-              <label>pH</label>
-              <input type="number" id="whatif_ph" value="6.8" step="0.05" min="4" max="7.5" oninput="renderWhatIf()">
-            </div>
-            <div>
-              <label>Wapń (ppm)</label>
-              <input type="number" id="whatif_ca" value="1850" step="10" min="0" oninput="renderWhatIf()">
-            </div>
-            <div>
-              <label>Albo: zadaj nasycenie Ca (%)</label>
-              <input type="number" id="whatif_sat" value="" step="0.5" min="1" max="95"
-                placeholder="wpisz, by policzyć Ca" oninput="whatIfFromSat()">
-              <div class="explain">Wpisanie tu wartości przeliczy potrzebny wapń przy powyższym pH.</div>
-            </div>
-          </div>
-          <div id="whatif_result"></div>
-        </div>
       </div>
 
       <div class="section">
@@ -1782,19 +1755,13 @@
 
       const state = getFinalSoilState(base, added);
       if (state) {
-        const startState = getBaseSoilState(base);
-        html += `<tr><td><strong>TCEC</strong></td><td>${startState.tcec.toFixed(2)}</td>`
-          + `<td>+${(state.tcec - startState.tcec).toFixed(2)}</td>`
-          + `<td><strong>${state.tcec.toFixed(2)}</strong> meq/100g</td></tr>`;
-        html += `<tr><td><strong>pH gleby</strong></td><td colspan="3">${state.ph.toFixed(2)} `
-          + `<span class="explain">(pH po wapnowaniu, przepisane z zakładki CAC)</span></td></tr>`;
+        html += `<tr><td><strong>TCEC</strong></td><td colspan="3"><strong>${state.tcec.toFixed(2)}</strong> meq/100g</td></tr>`;
+        html += `<tr><td><strong>pH gleby</strong></td><td colspan="3"><strong>${state.ph.toFixed(2)}</strong></td></tr>`;
       }
       html += '</tbody></table>';
       if (state) {
-        html += `<p class="note">pH jest daną wejściową (ustawiasz je w zakładce CAC), a nie wynikiem — `
-          + `tak samo jak w arkuszu Logan Labs. Z pH wynikają „Other Bases” i „Ex H”, a z nich pojemność `
-          + `sorpcyjna: TCEC = suma meq zasad ÷ (1 − Other − Ex H). Szczegóły i zmiany poszczególnych `
-          + `kationów w tabeli nasycenia obok.</p>`;
+        html += `<p class="note">pH przepisane z zakładki CAC/Gleba (po wapnowaniu).
+          Nasycenia kationów w tabeli obok.</p>`;
       }
       document.getElementById('am_summary_table').innerHTML = html;
 
@@ -1967,11 +1934,6 @@
       };
     }
 
-    // Nasycenia przy samym punkcie startowym (bez odżywek z listy) — do pokazania,
-    // o ile dodatki przesunęły poszczególne kationy.
-    function getBaseSoilState(base) {
-      return getFinalSoilState(base, {});
-    }
 
     function renderFinalSaturation(base, added) {
       const box = document.getElementById('am_saturation_table');
@@ -1981,44 +1943,17 @@
         return;
       }
 
-      const start = getBaseSoilState(base);
-      const shift = (now, before) => {
-        const d = now - before;
-        if (Math.abs(d) < 0.05) return '<span class="explain">bez zmian</span>';
-        const arrow = d > 0 ? '▲' : '▼';
-        const color = d > 0 ? '#2b6cb0' : '#c53030';
-        return `<span style="color:${color}; font-weight:600;">${arrow} ${d > 0 ? '+' : ''}${d.toFixed(1)}</span>`;
-      };
-
-      let html = '<table><thead><tr><th>Pierwiastek</th><th>Start</th><th>Nasycenie %</th><th>Zmiana</th><th>Cel</th></tr></thead><tbody>';
-      const rows = [
-        ['Ca', start.satCa, state.satCa, '68–75%'],
-        ['Mg', start.satMg, state.satMg, '10–15%'],
-        ['K', start.satK, state.satK, '3–5%'],
-        ['Na', start.satNa, state.satNa, '&lt; 2%']
-      ];
-      rows.forEach(([label, before, now, target]) => {
-        html += `<tr><td>${label}</td><td class="explain">${before.toFixed(1)}</td>`
-          + `<td><span class="badge${label === 'Ca' ? ' highlight' : ''}">${now.toFixed(1)}</span></td>`
-          + `<td>${shift(now, before)}</td><td>${target}</td></tr>`;
-      });
-      html += `<tr><td><strong>Suma zasad</strong></td><td class="explain">${start.totalBaseSat.toFixed(1)}</td>`
-        + `<td><span class="badge">${state.totalBaseSat.toFixed(1)}</span></td>`
-        + `<td>${shift(state.totalBaseSat, start.totalBaseSat)}</td>`
-        + `<td class="explain">= 100 − Other − Ex H = ${state.maxBaseSat.toFixed(1)}%</td></tr>`;
-      html += `<tr><td><strong>TCEC</strong></td><td class="explain">${start.tcec.toFixed(2)}</td>`
-        + `<td><span class="badge">${state.tcec.toFixed(2)}</span></td><td>${shift(state.tcec, start.tcec)}</td>`
-        + `<td class="explain">meq/100g</td></tr>`;
-      html += `<tr><td><strong>pH gleby</strong></td><td colspan="4"><span class="badge highlight">${state.ph.toFixed(2)}</span> `
-        + `<span class="explain">pH po wapnowaniu, przepisane z zakładki CAC — Other ${state.other.toFixed(1)}%, Ex H ${state.exh.toFixed(1)}%</span></td></tr>`;
+      let html = '<table><thead><tr><th>Pierwiastek</th><th>Nasycenie %</th><th>Cel</th></tr></thead><tbody>';
+      html += `<tr><td>Ca</td><td><span class="badge highlight">${state.satCa.toFixed(1)}</span></td><td>68–75%</td></tr>`;
+      html += `<tr><td>Mg</td><td><span class="badge">${state.satMg.toFixed(1)}</span></td><td>10–15%</td></tr>`;
+      html += `<tr><td>K</td><td><span class="badge">${state.satK.toFixed(1)}</span></td><td>3–5%</td></tr>`;
+      html += `<tr><td>Na</td><td><span class="badge">${state.satNa.toFixed(1)}</span></td><td>&lt; 2%</td></tr>`;
+      html += `<tr><td><strong>TCEC</strong></td><td colspan="2"><span class="badge">${state.tcec.toFixed(2)}</span></td></tr>`;
+      html += `<tr><td><strong>pH gleby</strong></td><td colspan="2"><span class="badge highlight">${state.ph.toFixed(2)}</span></td></tr>`;
       html += '</tbody></table>';
-
-      html += `<p class="note">Liczone wzorem Logan Labs: <strong>TCEC = suma meq zasad ÷ (1 − Other − Ex H)</strong>. `
-        + `Dosypanie kationów podnosi sumę meq (${start.sumMeq.toFixed(2)} → ${state.sumMeq.toFixed(2)}), `
-        + `więc rośnie też TCEC (${start.tcec.toFixed(2)} → ${state.tcec.toFixed(2)}). `
-        + `Nasycenie pierwiastków, których nie dosypywałeś, spada — ten sam meq dzieli się przez większy mianownik. `
-        + `Suma nasyceń wynosi ${state.maxBaseSat.toFixed(1)}%, a nie 100%, bo pozostałe miejsca zajmują `
-        + `„Other Bases” (${state.other.toFixed(1)}%) i wymienny wodór (${state.exh.toFixed(1)}%) — obie wielkości wynikają z pH.</p>`;
+      html += `<p class="note">pH przepisane z zakładki CAC/Gleba (po wapnowaniu). Nasycenia liczone wzorem
+        Logan Labs: TCEC = suma meq zasad ÷ (1 − Other − Ex H), więc sumują się do ${state.maxBaseSat.toFixed(1)}%,
+        a resztę miejsc zajmuje kwasowość.</p>`;
       box.innerHTML = html;
     }
 
@@ -2399,7 +2334,6 @@
 
       window._cac = { tcec, meqCa, meqMg, meqK, meqNa, satCa, satMg, satK, satNa, ca, mg, k, na, other, exh, ph };
       updateDynTable();
-      renderWhatIf();
       calculateLime();
     }
     window.calculateCAC = calculateCAC;
@@ -2429,57 +2363,6 @@
         document.getElementById('dyn_tcec_' + i).innerText = sc.reachable ? sc.tcec.toFixed(2) : 'nieosiągalne';
       });
     }
-
-    // Przypadek w pełni wyznaczony: podane pH i podane kationy → TCEC i nasycenia są policzone,
-    // bez żadnego wyboru. Mg, K i Na bierzemy z testu glebowego (wapnowanie ich nie zmienia).
-    function renderWhatIf() {
-      const box = document.getElementById('whatif_result');
-      if (!box || !window._cac) return;
-      const d = window._cac;
-      const ph = Math.min(7.5, Math.max(4, parseFloat(document.getElementById('whatif_ph').value) || 6.8));
-      const ca = Math.max(0, parseFloat(document.getElementById('whatif_ca').value) || 0);
-
-      const meqCa = ca / 200;
-      const sumMeq = meqCa + d.meqMg + d.meqK + d.meqNa;
-      const o = getOtherBases(ph), e = getExH(ph);
-      const share = (100 - o - e) / 100;
-      const tcec = share > 0 ? sumMeq / share : sumMeq;
-      const sat = m => tcec > 0 ? (m / tcec) * 100 : 0;
-      const satCa = sat(meqCa), satMg = sat(d.meqMg), satK = sat(d.meqK), satNa = sat(d.meqNa);
-
-      box.innerHTML = '<table><tbody>'
-        + `<tr><td>Suma meq zasad</td><td><span class="badge">${sumMeq.toFixed(4)}</span> `
-        + `<span class="explain">Ca ${meqCa.toFixed(3)} + Mg ${d.meqMg.toFixed(3)} + K ${d.meqK.toFixed(3)} + Na ${d.meqNa.toFixed(3)}</span></td></tr>`
-        + `<tr><td>Other Bases / Ex H przy pH ${ph.toFixed(2)}</td><td><span class="badge">${o.toFixed(1)}</span> % / <span class="badge">${e.toFixed(1)}</span> %</td></tr>`
-        + `<tr><td>Zasady zajmują</td><td><span class="badge">${(share * 100).toFixed(1)}</span> % miejsc</td></tr>`
-        + `<tr><td><strong>TCEC = ${sumMeq.toFixed(4)} ÷ ${share.toFixed(4)}</strong></td><td class="big">${tcec.toFixed(2)}</td></tr>`
-        + `<tr class="el-cation"><td>Nasycenie Ca</td><td class="big">${satCa.toFixed(2)} %</td></tr>`
-        + `<tr class="el-cation"><td>Nasycenie Mg</td><td><span class="badge">${satMg.toFixed(2)}</span> %</td></tr>`
-        + `<tr class="el-cation"><td>Nasycenie K</td><td><span class="badge">${satK.toFixed(2)}</span> %</td></tr>`
-        + `<tr class="el-cation"><td>Nasycenie Na</td><td><span class="badge">${satNa.toFixed(2)}</span> %</td></tr>`
-        + `<tr><td><strong>Suma nasyceń</strong></td><td><span class="badge highlight">${(satCa + satMg + satK + satNa).toFixed(2)}</span> % `
-        + `<span class="explain">= 100 − ${o.toFixed(1)} − ${e.toFixed(1)}</span></td></tr>`
-        + '</tbody></table>';
-    }
-    window.renderWhatIf = renderWhatIf;
-
-    // Kierunek odwrotny, też jednoznaczny: przy zadanym pH nasycenie Ca wyznacza ilość wapnia,
-    // bo meqCa = s × (meqMg+meqK+meqNa) / (udział zasad − s).
-    function whatIfFromSat() {
-      if (!window._cac) return;
-      const d = window._cac;
-      const raw = document.getElementById('whatif_sat').value;
-      if (raw === '') { renderWhatIf(); return; }
-      const s = (parseFloat(raw) || 0) / 100;
-      const ph = Math.min(7.5, Math.max(4, parseFloat(document.getElementById('whatif_ph').value) || 6.8));
-      const share = (100 - getOtherBases(ph) - getExH(ph)) / 100;
-      const meqOthers = d.meqMg + d.meqK + d.meqNa;
-      if (s > 0 && s < share) {
-        document.getElementById('whatif_ca').value = ((s * meqOthers / (share - s)) * 200).toFixed(0);
-      }
-      renderWhatIf();
-    }
-    window.whatIfFromSat = whatIfFromSat;
 
     function calculateLime() {
       if (!window._cac) return;
