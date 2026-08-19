@@ -142,6 +142,15 @@
           </div>
         </div>
         <div class="input-group">
+          <div>
+            <label>Aminokwasy — proszek (g)</label>
+            <input type="number" id="dose_amino" value="0" step="0.01" min="0" oninput="calculatePPM()">
+            <div class="explain">
+              Azot całkowity (organiczny) 12%, wolne aminokwasy 80%, substancje organiczne 85%, sucha masa 90%.
+              Do profilu wchodzi wyłącznie azot — pozostałe parametry opisują nośnik organiczny, nie wnoszą
+              makroskładników mineralnych.
+            </div>
+          </div>
           <div><label>Kompost Logan Labs Comp (ml)</label><input type="number" id="dose_kompost" value="100" step="1" oninput="calculatePPM()"></div>
         </div>
       </div>
@@ -2037,6 +2046,7 @@
       const d_gips = parseFloat(document.getElementById('dose_gips').value) || 0;
       const d_sk = parseFloat(document.getElementById('dose_sk').value) || 0;
       const d_ms = parseFloat(document.getElementById('dose_ms').value) || 0;
+      const d_amino = parseFloat(document.getElementById('dose_amino').value) || 0;
       const d_kompost = parseFloat(document.getElementById('dose_kompost').value) || 0;
 
       const kg_komp = (d_kompost * 0.425) / 1000;
@@ -2046,8 +2056,10 @@
       const mg_gips = d_gips * 1000;
       const mg_sk = d_sk * 1000;
       const mg_msulf = d_ms * 1000; // miligramy siarczanu magnezu (MgSO₄·7H₂O)
+      const mg_amino = d_amino * 1000; // miligramy proszku aminokwasowego (N organiczny 12%)
 
-      const n_total = (mg_bloom * 0.02) + (mg_sorbK * 0.01) + (mg_sorbCa * 0.05) + (612.9 * kg_komp);
+      const n_total = (mg_bloom * 0.02) + (mg_sorbK * 0.01) + (mg_sorbCa * 0.05)
+        + (mg_amino * 0.12) + (612.9 * kg_komp);
       const p_base = mg_bloom * 0.07 * 0.4364;
       const p_min = p_base + 10.24 * kg_komp;
       const p_max = p_base + 161.0 * kg_komp;
@@ -2146,7 +2158,7 @@
       box.innerHTML = html;
     }
 
-    const PPM_DOSE_FIELDS = ['water_volume', 'water_ppm', 'water_hardness_pct', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_kompost'];
+    const PPM_DOSE_FIELDS = ['water_volume', 'water_ppm', 'water_hardness_pct', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_amino', 'dose_kompost'];
     const PPM_PROFILE_ELEMENTS = [
       { key: 'n', label: 'N' }, { key: 'p', label: 'P' }, { key: 'k', label: 'K' },
       { key: 'ca', label: 'Ca' }, { key: 's', label: 'S' }, { key: 'mg', label: 'Mg' }
