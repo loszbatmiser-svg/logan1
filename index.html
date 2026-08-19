@@ -98,7 +98,24 @@
             <input type="number" id="water_volume" value="5" step="0.1" oninput="calculatePPM()">
             <div class="explain">Objętość roztworu, w którym rozpuszczasz nawozy</div>
           </div>
+          <div>
+            <label>PPM wody startowej</label>
+            <input type="number" id="water_ppm" value="0" step="1" min="0" oninput="calculatePPM()">
+            <div class="explain">
+              Twarda część wody z kranu (wapń + magnez). Wpisz 0 dla wody osmotycznej.
+              Ta wartość jest już stężeniem, więc dolicza się wprost do profilu — niezależnie od objętości.
+            </div>
+          </div>
+          <div>
+            <label>Stosunek Ca:Mg w wodzie</label>
+            <input type="number" id="water_camg" value="4" step="0.1" min="0.5" max="20" oninput="calculatePPM()">
+            <div class="explain">
+              W wodzie kranowej zwykle 3:1 do 5:1. Dzieli PPM wody na wapń i magnez:
+              Ca = PPM × R/(R+1), Mg = PPM × 1/(R+1).
+            </div>
+          </div>
         </div>
+        <div id="water_split" class="note"></div>
       </div>
 
       <div class="section">
@@ -135,6 +152,13 @@
             <tr><td><strong>Magnez (Mg)</strong></td><td><span id="ppm_mg_min" class="badge">0.00</span> ppm</td><td><span id="ppm_mg_max" class="badge">0.00</span> ppm</td></tr>
           </tbody>
         </table>
+
+        <h3 style="margin-top:20px;">Proporcje w roztworze</h3>
+        <div id="ppm_ratios"></div>
+        <p class="note">
+          Proporcje wagowe, liczone z tych samych wartości co tabela wyżej — razem z wapniem i magnezem
+          z wody startowej. Kolumny „minimum” i „maksimum” odpowiadają dwóm wariantom z profilu.
+        </p>
       </div>
 
       <div class="section">
@@ -2031,22 +2055,90 @@
       const mg_min = mg_base + 186.0 * kg_komp;
       const mg_max = mg_base + 464.0 * kg_komp;
 
-      document.getElementById('ppm_n_min').innerText = (n_total / V).toFixed(2);
-      document.getElementById('ppm_n_max').innerText = (n_total / V).toFixed(2);
-      document.getElementById('ppm_p_min').innerText = (p_min / V).toFixed(2);
-      document.getElementById('ppm_p_max').innerText = (p_max / V).toFixed(2);
-      document.getElementById('ppm_k_min').innerText = (k_min / V).toFixed(2);
-      document.getElementById('ppm_k_max').innerText = (k_max / V).toFixed(2);
-      document.getElementById('ppm_ca_min').innerText = (ca_min / V).toFixed(2);
-      document.getElementById('ppm_ca_max').innerText = (ca_max / V).toFixed(2);
-      document.getElementById('ppm_s_min').innerText = (s_total / V).toFixed(2);
-      document.getElementById('ppm_s_max').innerText = (s_total / V).toFixed(2);
-      document.getElementById('ppm_mg_min').innerText = (mg_min / V).toFixed(2);
-      document.getElementById('ppm_mg_max').innerText = (mg_max / V).toFixed(2);
+      // Woda startowa: podany PPM to już stężenie, więc dolicza się wprost, bez dzielenia przez objętość.
+      // Stosunek R rozdziela go na wapń i magnez: Ca = PPM × R/(R+1), Mg = PPM × 1/(R+1).
+      const waterPpm = Math.max(0, parseFloat(document.getElementById('water_ppm').value) || 0);
+      const R = Math.max(0.01, parseFloat(document.getElementById('water_camg').value) || 4);
+      const waterCa = waterPpm * (R / (R + 1));
+      const waterMg = waterPpm * (1 / (R + 1));
+
+      const splitBox = document.getElementById('water_split');
+      if (splitBox) {
+        splitBox.innerHTML = waterPpm > 0
+          ? `Woda startowa wnosi <strong>${waterCa.toFixed(2)} ppm Ca</strong> i <strong>${waterMg.toFixed(2)} ppm Mg</strong> `
+            + `(${waterPpm.toFixed(0)} ppm przy stosunku ${R.toFixed(1)}:1). Jest to już wliczone w profil poniżej.`
+          : 'Woda startowa: 0 ppm — profil pochodzi wyłącznie z dawek produktów.';
+      }
+
+      const profile = {
+        n:  { min: n_total / V,          max: n_total / V },
+        p:  { min: p_min / V,            max: p_max / V },
+        k:  { min: k_min / V,            max: k_max / V },
+        ca: { min: ca_min / V + waterCa, max: ca_max / V + waterCa },
+        s:  { min: s_total / V,          max: s_total / V },
+        mg: { min: mg_min / V + waterMg, max: mg_max / V + waterMg }
+      };
+
+      Object.keys(profile).forEach(el => {
+        document.getElementById('ppm_' + el + '_min').innerText = profile[el].min.toFixed(2);
+        document.getElementById('ppm_' + el + '_max').innerText = profile[el].max.toFixed(2);
+      });
+
+      window._solutionProfile = profile;
+      renderSolutionRatios(profile);
     }
     window.calculatePPM = calculatePPM;
 
-    const PPM_DOSE_FIELDS = ['water_volume', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_kompost'];
+    // Proporcje wagowe w roztworze. Liczone z gotowego profilu, więc uwzględniają wodę startową.
+    const SOLUTION_RATIOS = [
+      { key: 'n_k',   label: 'N : K',   a: 'n',  b: 'k'  },
+      { key: 'ca_mg', label: 'Ca : Mg', a: 'ca', b: 'mg' },
+      { key: 'k_ca',  label: 'K : Ca',  a: 'k',  b: 'ca' },
+      { key: 'n_s',   label: 'N : S',   a: 'n',  b: 's'  }
+    ];
+
+    function computeSolutionRatios(ppm) {
+      const out = {};
+      SOLUTION_RATIOS.forEach(r => {
+        const calc = which => {
+          const a = ppm[r.a] ? ppm[r.a][which] : 0;
+          const b = ppm[r.b] ? ppm[r.b][which] : 0;
+          return b > 0 ? a / b : null;
+        };
+        out[r.key] = { min: calc('min'), max: calc('max') };
+      });
+      return out;
+    }
+
+    function formatRatio(v) {
+      return v === null ? '—' : v.toFixed(2) + ' : 1';
+    }
+
+    function formatRatioRange(r) {
+      if (r.min === null && r.max === null) return '—';
+      if (r.min === null || r.max === null) return formatRatio(r.min === null ? r.max : r.min);
+      if (Math.abs(r.max - r.min) < 0.005) return formatRatio(r.min);
+      // Wariant „maksimum” nie zawsze daje wyższą proporcję, więc zakres porządkujemy rosnąco.
+      const lo = Math.min(r.min, r.max), hi = Math.max(r.min, r.max);
+      return `${lo.toFixed(2)}–${hi.toFixed(2)} : 1`;
+    }
+
+    function renderSolutionRatios(profile) {
+      const box = document.getElementById('ppm_ratios');
+      if (!box) return;
+      const ratios = computeSolutionRatios(profile);
+      let html = '<table><thead><tr><th>Proporcja</th><th>Minimum (wodne)</th><th>Maksimum (glebowe)</th></tr></thead><tbody>';
+      SOLUTION_RATIOS.forEach(r => {
+        const v = ratios[r.key];
+        html += `<tr><td><strong>${r.label}</strong></td>`
+          + `<td><span class="badge">${formatRatio(v.min)}</span></td>`
+          + `<td><span class="badge">${formatRatio(v.max)}</span></td></tr>`;
+      });
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }
+
+    const PPM_DOSE_FIELDS = ['water_volume', 'water_ppm', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_kompost'];
     const PPM_PROFILE_ELEMENTS = [
       { key: 'n', label: 'N' }, { key: 'p', label: 'P' }, { key: 'k', label: 'K' },
       { key: 'ca', label: 'Ca' }, { key: 's', label: 'S' }, { key: 'mg', label: 'Mg' }
@@ -2158,6 +2250,7 @@
       let html = '<table><thead><tr><th>Faza</th>'
         + PPM_PROFILE_ELEMENTS.map(e => `<th>${e.label} (ppm)</th>`).join('')
         + '<th>Zapisano</th><th></th></tr></thead><tbody>';
+      const cols = PPM_PROFILE_ELEMENTS.length + 3;
       sorted.forEach(profile => {
         const savedDate = new Date(profile.savedAt).toLocaleString('pl-PL');
         html += `<tr><td><strong>${profile.name}</strong></td>`
@@ -2165,6 +2258,16 @@
           + `<td class="explain">${savedDate}</td>`
           + `<td><button class="col-btn" style="padding:5px 10px;" onclick="loadPhaseProfile('${profile.id}')">Wczytaj</button>`
           + `<button class="col-btn" style="padding:5px 10px;" onclick="deletePhaseProfile('${profile.id}')">Usuń</button></td></tr>`;
+
+        // Proporcje liczone z zapisanego profilu, a nie przechowywane — dzięki temu starsze
+        // zapisy też je pokazują, a wzór pozostaje jeden dla całego narzędzia.
+        const ratios = computeSolutionRatios(profile.ppm);
+        html += `<tr><td colspan="${cols}" style="padding-top:0; border-bottom:2px solid #e2e8f0;">`
+          + '<span class="explain">Proporcje:</span> '
+          + SOLUTION_RATIOS.map(r =>
+              `<span class="badge" style="margin-right:6px;">${r.label} = ${formatRatioRange(ratios[r.key])}</span>`
+            ).join('')
+          + '</td></tr>';
       });
       html += '</tbody></table>';
       listDiv.innerHTML = html;
