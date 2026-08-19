@@ -69,7 +69,7 @@
     .col-btn.selected { background: #3182ce; color: #fff; }
     .file-label { display: inline-block; padding: 10px 18px; background: #2b6cb0; color: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; margin-bottom: 12px; }
     .file-label:hover { background: #2c5282; }
-    #pdf-file { display: none; }
+    #pdf-file, #komp-m3-file, #komp-sp-file { display: none; }
     .status { font-size: 0.9rem; margin: 8px 0; min-height: 1.2em; }
     .status.ok { color: #276749; font-weight: 600; }
     .status.err { color: #c53030; font-weight: 600; }
@@ -2522,8 +2522,20 @@
       let html = `<p class="note">Mehlich 3: <strong>${c.m3.label}</strong> &nbsp;|&nbsp; `
         + `Saturated Paste: <strong>${c.sp.label}</strong> &nbsp;|&nbsp; `
         + `gęstość nasypowa ${getCompostBd()} g/cm³ &nbsp;|&nbsp; wyciąg ${ratio} l/kg</p>`;
-      html += '<table><thead><tr><th>Pierwiastek</th><th>Mehlich 3 (mg/kg)</th>'
-        + '<th>Saturated Paste (ppm wyciągu)</th><th>Wyciąg → mg/kg</th></tr></thead><tbody>';
+      html += `<p class="note">
+        <strong>Jak czytać ostatnią kolumnę.</strong> Dwa raporty podają wynik w różnych jednostkach,
+        więc nie da się ich porównać wprost. Mehlich 3 mówi, ile pierwiastka jest w <em>kilogramie kompostu</em>.
+        Saturated Paste mówi, jakie jest <em>stężenie w wodzie</em>, którą z tego kompostu odsączono —
+        a to zależy od tego, ile wody użyto, więc sama liczba nic nie mówi o zasobności kompostu.
+        Ostatnia kolumna sprowadza jedno do drugiego: mnożymy stężenie przez ${ratio} litra wyciągu na kilogram
+        (pole „Wyciąg wodny” wyżej), więc <strong>ppm × ${ratio} = mg pierwiastka na kg kompostu</strong>.
+        Dzięki temu obie kolumny liczbowe stoją na tej samej podstawie i można je czytać obok siebie:
+        Mehlich 3 to pula całkowita, a wyciąg — ta jej część, która jest od razu rozpuszczona i dostępna.
+        Różnica między nimi to zapas związany w materii organicznej, uwalniany stopniowo.
+      </p>`;
+      html += '<table><thead><tr><th>Pierwiastek</th><th>Mehlich 3 — pula całkowita (mg/kg)</th>'
+        + '<th>Saturated Paste — stężenie w wyciągu (ppm)</th>'
+        + `<th>Frakcja rozpuszczalna (mg/kg)<br><span class="explain">= ppm × ${ratio}</span></th></tr></thead><tbody>`;
       COMPOST_ELEMENTS.forEach(e => {
         const m3 = c.m3[e.key], sp = c.sp[e.key];
         html += `<tr class="${elementRowClass(e.key.charAt(0).toUpperCase() + e.key.slice(1))}">`
