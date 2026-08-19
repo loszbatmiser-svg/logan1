@@ -631,14 +631,6 @@
             <input type="number" id="komp_bd" value="0.425" step="0.001" min="0.05" max="2" oninput="onCompostChange()">
             <div class="explain">Z raportu Mehlich 3 („Bulk Density”). Przelicza mililitry na kilogramy.</div>
           </div>
-          <div>
-            <label>Wyciąg wodny: litry na kg kompostu</label>
-            <input type="number" id="komp_extract" value="3.66" step="0.01" min="0.1" max="50" oninput="onCompostChange()">
-            <div class="explain">
-              Przelicza ppm z Saturated Paste (stężenie w wyciągu) na mg/kg kompostu.
-              To ono odpowiada za wariant „minimum (wodne)” w profilu roztworu.
-            </div>
-          </div>
         </div>
       </div>
 
@@ -2497,9 +2489,12 @@
       const v = parseFloat(document.getElementById('komp_bd').value);
       return isNaN(v) || v <= 0 ? 0.425 : v;
     }
+    // Litry wyciągu wodnego przypadające na kilogram kompostu — tyle wody pochłania próbka
+    // przy nasycaniu do pasty. Przelicza stężenie z Saturated Paste na mg/kg kompostu,
+    // dzięki czemu oba raporty stoją na tej samej podstawie.
+    const COMPOST_EXTRACT_RATIO = 3.66;
     function getCompostExtractRatio() {
-      const v = parseFloat(document.getElementById('komp_extract').value);
-      return isNaN(v) || v <= 0 ? 3.66 : v;
+      return COMPOST_EXTRACT_RATIO;
     }
 
     // Zawartość pierwiastka w kompoście w mg/kg, w dwóch wariantach:
@@ -2518,32 +2513,24 @@
     function renderCompostComposition() {
       const box = document.getElementById('komp_composition');
       if (!box) return;
-      const c = window._compost, ratio = getCompostExtractRatio();
+      const c = window._compost;
       let html = `<p class="note">Mehlich 3: <strong>${c.m3.label}</strong> &nbsp;|&nbsp; `
         + `Saturated Paste: <strong>${c.sp.label}</strong> &nbsp;|&nbsp; `
-        + `gęstość nasypowa ${getCompostBd()} g/cm³ &nbsp;|&nbsp; wyciąg ${ratio} l/kg</p>`;
+        + `gęstość nasypowa ${getCompostBd()} g/cm³</p>`;
       html += `<p class="note">
-        <strong>Jak czytać ostatnią kolumnę.</strong> Dwa raporty podają wynik w różnych jednostkach,
-        więc nie da się ich porównać wprost. Mehlich 3 mówi, ile pierwiastka jest w <em>kilogramie kompostu</em>.
-        Saturated Paste mówi, jakie jest <em>stężenie w wodzie</em>, którą z tego kompostu odsączono —
-        a to zależy od tego, ile wody użyto, więc sama liczba nic nie mówi o zasobności kompostu.
-        Ostatnia kolumna sprowadza jedno do drugiego: mnożymy stężenie przez ${ratio} litra wyciągu na kilogram
-        (pole „Wyciąg wodny” wyżej), więc <strong>ppm × ${ratio} = mg pierwiastka na kg kompostu</strong>.
-        Dzięki temu obie kolumny liczbowe stoją na tej samej podstawie i można je czytać obok siebie:
-        Mehlich 3 to pula całkowita, a wyciąg — ta jej część, która jest od razu rozpuszczona i dostępna.
-        Różnica między nimi to zapas związany w materii organicznej, uwalniany stopniowo.
+        <strong>Mehlich 3</strong> mówi, ile pierwiastka jest w kilogramie kompostu — to pula całkowita.
+        <strong>Saturated Paste</strong> mówi, jakie jest stężenie w wodzie odsączonej z tej samej próbki,
+        czyli w części od razu rozpuszczonej. Te dwie liczby są w różnych jednostkach i nie porównuje się
+        ich wprost; narzędzie używa pierwszej do dawek glebowych, a drugiej do wariantu wodnego w roztworze.
       </p>`;
       html += '<table><thead><tr><th>Pierwiastek</th><th>Mehlich 3 — pula całkowita (mg/kg)</th>'
-        + '<th>Saturated Paste — stężenie w wyciągu (ppm)</th>'
-        + `<th>Frakcja rozpuszczalna (mg/kg)<br><span class="explain">= ppm × ${ratio}</span></th></tr></thead><tbody>`;
+        + '<th>Saturated Paste — stężenie w wyciągu (ppm)</th></tr></thead><tbody>';
       COMPOST_ELEMENTS.forEach(e => {
         const m3 = c.m3[e.key], sp = c.sp[e.key];
         html += `<tr class="${elementRowClass(e.key.charAt(0).toUpperCase() + e.key.slice(1))}">`
           + `<td>${e.label}</td>`
           + `<td>${m3 == null ? '—' : m3}</td>`
-          + `<td>${sp == null ? '—' : sp}</td>`
-          + `<td>${sp == null ? '<span class="explain">brak w wyciągu — używana wartość Mehlich 3</span>'
-                : (sp * ratio).toFixed(2)}</td></tr>`;
+          + `<td>${sp == null ? '<span class="explain">brak w wyciągu</span>' : sp}</td></tr>`;
       });
       html += '</tbody></table>';
       html += '<table style="margin-top:12px;"><tbody>'
