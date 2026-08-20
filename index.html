@@ -99,26 +99,51 @@
             <div class="explain">Objętość roztworu, w którym rozpuszczasz nawozy</div>
           </div>
           <div>
+            <label>GH — twardość ogólna (°dH)</label>
+            <input type="number" id="water_gh" value="" step="0.1" min="0" placeholder="z testu kroplowego" oninput="calculatePPM()">
+            <div class="explain">
+              Zmierzona testem kroplowym (ok. 30 zł, drogeria akwarystyczna) — pomiar bezwzględny,
+              niezależny od marki miernika TDS. 1°dH = 17,85 ppm CaCO₃ (Ca + Mg razem). Gdy wypełnione,
+              to jest główne źródło twardości wody; pola TDS niżej stają się tylko kontrolą krzyżową.
+            </div>
+          </div>
+          <div>
+            <label>KH — zasadowość (°dH)</label>
+            <input type="number" id="water_kh" value="" step="0.1" min="0" placeholder="z testu kroplowego" oninput="calculatePPM()">
+            <div class="explain">
+              Sam wodorowęglan (HCO₃⁻), z tego samego testu kroplowego. Nie wchodzi do profilu Ca/Mg —
+              ale gdy wyjdzie wyższy niż GH, to znak wodorowęglanu sodu w wodzie, wart sprawdzenia osobno.
+            </div>
+          </div>
+          <div>
             <label>PPM wody startowej (odczyt TDS)</label>
             <input type="number" id="water_ppm" value="0" step="1" min="0" oninput="calculatePPM()">
             <div class="explain">
-              Odczyt z miernika TDS. Wpisz 0 dla wody osmotycznej. To nie jest czysty wapń — miernik pokazuje
-              sumę rozpuszczonych soli, w tym wodorowęglany, sód i chlorki.
+              Odczyt z miernika TDS. Miernik pokazuje sumę rozpuszczonych soli (Ca, Mg, wodorowęglany,
+              sód, chlorki razem), nie sam wapń. Gdy podałeś GH wyżej — to pole liczy się tylko jako
+              kontrola krzyżowa; gdy GH puste, to on (razem z polem niżej) zastępuje pomiar szacunkiem.
+              Wpisz 0 dla wody osmotycznej.
             </div>
           </div>
           <div>
-            <label>Udział twardości w odczycie (%)</label>
+            <label>Udział twardości w odczycie TDS (%)</label>
             <input type="number" id="water_hardness_pct" value="100" step="5" min="10" max="100" oninput="calculatePPM()">
             <div class="explain">
-              Ile z odczytu to twardość węglanowa (Ca + Mg). Reszta to „tło”: sód, chlorki, siarczany, krzemionka.
-              100% odpowiada odczytowi twardości ogólnej; dla surowego TDS bywa 70–80%.
+              Używane tylko jako rozwiązanie awaryjne, gdy nie masz jeszcze testu kroplowego (pole GH
+              powyżej puste). Ile z odczytu TDS to twardość węglanowa (Ca + Mg), a ile „tło”: sód,
+              chlorki, siarczany, krzemionka. 100% dla odczytu twardości ogólnej wprost; dla surowego
+              TDS bywa 70–80% — to zgadywanka, dlatego test kroplowy jest dokładniejszy.
             </div>
           </div>
           <div>
-            <label>Stosunek Ca:Mg w wodzie</label>
-            <input type="number" id="water_camg" value="4" step="0.1" min="0.5" max="20" oninput="calculatePPM()">
+            <label>Stosunek Ca:Mg w wodzie (wagowo)</label>
+            <input type="number" id="water_camg" value="5.5" step="0.1" min="0.5" max="20" oninput="calculatePPM()">
             <div class="explain">
-              W wodzie kranowej zwykle 3:1 do 5:1 (czysty wapń do czystego magnezu).
+              Wagowo (mg Ca do mg Mg) woda kranowa/studzienna to zwykle 4:1–8:1 — to NIE to samo,
+              co często cytowane 3:1–5:1, bo tamto liczone jest w meq (ładunek, nie masa);
+              przelicznik między nimi to ×1,65 (200/120, czyli stosunek mas równoważnikowych Ca i Mg).
+              Zbyt niski R tutaj zawyża wyliczony magnez z wody — przy R=4 zamiast realnych 5–6:1
+              magnez wychodzi zawyżony o ok. 25%.
             </div>
           </div>
         </div>
@@ -823,6 +848,7 @@
         columns.forEach((col, idx) => {
           const btn = document.createElement('button');
           btn.className = 'col-btn';
+          btn.dataset.colIndex = idx;
           btn.textContent = col.label || `Kolumna ${idx + 1}`;
           btn.onclick = () => loadParsedColumn(idx, btn);
           btnContainer.appendChild(btn);
@@ -864,21 +890,12 @@
         return rows.find(r => r.some(i => i.str.toLowerCase().includes(labelPart.toLowerCase())));
       }
 
-      // Extract numbers from a row (right side of labels)
+      // Liczby czytamy współdzieloną funkcją rowNumbers (patrz niżej w pliku — parser kompostu
+      // używa tej samej), zamiast osobnej lokalnej kopii. Dwie niezależne implementacje rozjechały
+      // się kiedyś w obsłudze przecinków w liczbach 4-cyfrowych („1,622” dawało [1, 622] zamiast
+      // [1622]) — teraz jest jedno miejsce, które może się zepsuć, nie dwa.
       function extractNumbers(row) {
-        if (!row) return [];
-        const nums = [];
-        row.forEach(i => {
-          // match numbers like 6.60, 3170, -53, 66.88
-          const m = i.str.match(/-?\d+\.?\d*/g);
-          if (m) m.forEach(n => {
-            const v = parseFloat(n);
-            if (!isNaN(v)) nums.push({ val: v, x: i.x });
-          });
-        });
-        // sort by x
-        nums.sort((a, b) => a.x - b.x);
-        return nums;
+        return rowNumbers(row, null);
       }
 
       // Find Sample Location / Sample ID labels to get column headers
@@ -1007,30 +1024,21 @@
       ).pop();
       const nCols = mode || colCount;
 
+      const fieldSources = {
+        ph: phNums, ca: caNums, mg: mgNums, k: kNums, na: naNums, p: pNums, s: sNums,
+        b: bNums, fe: feNums, mn: mnNums, cu: cuNums, zn: znNums, al: alNums,
+        co: coNums, mo: moNums, se: seNums, si: siNums, n: nNums
+      };
       const result = [];
       for (let c = 0; c < nCols; c++) {
         const label = (labels[c] && labels[c].text) ? labels[c].text : `Kolumna ${c + 1}`;
-        result.push({
-          label: label,
-          ph: phNums[c] ? phNums[c].val : null,
-          ca: caNums[c] ? caNums[c].val : null,
-          mg: mgNums[c] ? mgNums[c].val : null,
-          k:  kNums[c]  ? kNums[c].val  : null,
-          na: naNums[c] ? naNums[c].val : null,
-          p:  pNums[c]  ? pNums[c].val  : null,
-          s:  sNums[c]  ? sNums[c].val  : null,
-          b:  bNums[c]  ? bNums[c].val  : null,
-          fe: feNums[c] ? feNums[c].val : null,
-          mn: mnNums[c] ? mnNums[c].val : null,
-          cu: cuNums[c] ? cuNums[c].val : null,
-          zn: znNums[c] ? znNums[c].val : null,
-          al: alNums[c] ? alNums[c].val : null,
-          co: coNums[c] ? coNums[c].val : null,
-          mo: moNums[c] ? moNums[c].val : null,
-          se: seNums[c] ? seNums[c].val : null,
-          si: siNums[c] ? siNums[c].val : null,
-          n:  nNums[c]  ? nNums[c].val  : null
+        const col = { label: label, lod: {} };
+        Object.keys(fieldSources).forEach(key => {
+          const entry = fieldSources[key][c];
+          col[key] = entry ? entry.val : null;
+          if (entry && entry.belowLod) col.lod[key] = true;
         });
+        result.push(col);
       }
 
       // Filter out completely empty columns
@@ -1056,20 +1064,26 @@
 
       // Wszystkie pozostałe zaimportowane pierwiastki trafiają do punktu startowego
       // w zakładce "Nawożenie gleby" (N, P, S, B, Fe, Mn, Cu, Zn, Al, Co, Mo, Se, Si) – cokolwiek raport zawiera.
+      const lod = col.lod || {};
+      const fmt = key => (lod[key] ? '<' : '') + col[key];
       const importedExtras = [];
       Object.keys(EXTRA_IMPORT_FIELDS).forEach(key => {
         const el = document.getElementById(EXTRA_IMPORT_FIELDS[key]);
         if (col[key] != null && el) {
           el.value = Math.round(col[key] * 100) / 100;
-          importedExtras.push(key.toUpperCase() + ' ' + col[key]);
+          importedExtras.push(key.toUpperCase() + ' ' + fmt(key));
         }
       });
 
-      document.querySelectorAll('.col-btn').forEach(b => b.classList.remove('selected'));
+      document.querySelectorAll('[data-col-index]').forEach(b => b.classList.remove('selected'));
       if (btnEl) btnEl.classList.add('selected');
 
+      // „<0,02” obok pierwiastka oznacza wynik poniżej progu oznaczalności raportu — do obliczeń
+      // brana jest ta liczba, ale warto widzieć, że to nie jest dokładny pomiar.
       document.getElementById('pdf-info').innerText =
-        `Wczytano: ${col.label} → pH ${col.ph ?? '—'} | Ca ${col.ca ?? '—'} | Mg ${col.mg ?? '—'} | K ${col.k ?? '—'} | Na ${col.na ?? '—'}`
+        `Wczytano: ${col.label} → pH ${col.ph ?? '—'} | Ca ${col.ca != null ? fmt('ca') : '—'} `
+        + `| Mg ${col.mg != null ? fmt('mg') : '—'} | K ${col.k != null ? fmt('k') : '—'} `
+        + `| Na ${col.na != null ? fmt('na') : '—'}`
         + (importedExtras.length ? ` | ${importedExtras.join(' | ')} (patrz zakładka „Nawożenie gleby”)` : '');
 
       calculateCAC();
@@ -1158,9 +1172,42 @@
     };
     // Docelowe proporcje między pierwiastkami (trzecia kolumna Twojej tabeli), jako przedziały.
     // K:Fe = 2–3, bo Fe ma być 1/2 do 1/3 potasu; reszta to pojedyncze, stałe proporcje.
+    // Dzielniki na miliekwiwalenty — te same zaokrąglone wartości, których cała reszta narzędzia
+    // (zakładka CAC/Gleba, getFinalSoilState) już używa. NIE zmieniać na „dokładniejsze” 200,39 /
+    // 121,53 / 390,98 / 229,90 — Logan Labs sam drukuje wyniki na zaokrąglonych dzielnikach, więc
+    // to jest wersja zgodna z laboratorium, nie przybliżenie.
+    const MEQ_DIV = { Ca: 200, Mg: 120, K: 390, Na: 230 };
+
+    // Cele nasycenia kationami z zakładki CAC/Gleba (Ca 68–75%, Mg 10–15%, K 3–5% — te same liczby,
+    // co w tabeli „Nasycenie kationowe”). Stąd wyprowadzamy dopuszczalne zakresy stosunków Ca:Mg,
+    // Ca:K i Mg:K w meq, zamiast wymyślać nowe liczby oderwane od reszty narzędzia: konkurencja
+    // o miejsca na kompleksie sorpcyjnym zachodzi na jednostkę ładunku, więc te trzy stosunki muszą
+    // być liczone w meq, a nie na wadze (ppm) jak reszta.
+    const CATION_SAT_TARGETS = { Ca: { min: 68, max: 75 }, Mg: { min: 10, max: 15 }, K: { min: 3, max: 5 } };
+
+    // Wartość pierwiastka w jednostce właściwej dla danego stosunku (meq dla konkurencji kationów,
+    // ppm dla klasycznych stosunków wagowych Mehlich III).
+    function ratioUnitValue(totals, el, unit) {
+      const v = totals[el] || 0;
+      return (unit === 'meq' && MEQ_DIV[el]) ? v / MEQ_DIV[el] : v;
+    }
+    // Odwrotność powyższej — z powrotem na ppm, bo dawkuje się masą, nie ładunkiem.
+    function ratioUnitToPpm(v, el, unit) {
+      return (unit === 'meq' && MEQ_DIV[el]) ? v * MEQ_DIV[el] : v;
+    }
+
     const TARGET_RATIOS = [
-      { label: 'Ca:Mg', a: 'Ca', b: 'Mg', min: 10, max: 10 },
-      { label: 'Ca:K', a: 'Ca', b: 'K', min: 6, max: 6 },
+      // Konkurencja kationów o kompleks sorpcyjny — w meq, wyprowadzone z CATION_SAT_TARGETS.
+      { label: 'Ca:Mg', a: 'Ca', b: 'Mg', unit: 'meq',
+        min: CATION_SAT_TARGETS.Ca.min / CATION_SAT_TARGETS.Mg.max,
+        max: CATION_SAT_TARGETS.Ca.max / CATION_SAT_TARGETS.Mg.min },
+      { label: 'Ca:K', a: 'Ca', b: 'K', unit: 'meq',
+        min: CATION_SAT_TARGETS.Ca.min / CATION_SAT_TARGETS.K.max,
+        max: CATION_SAT_TARGETS.Ca.max / CATION_SAT_TARGETS.K.min },
+      { label: 'Mg:K', a: 'Mg', b: 'K', unit: 'meq',
+        min: CATION_SAT_TARGETS.Mg.min / CATION_SAT_TARGETS.K.max,
+        max: CATION_SAT_TARGETS.Mg.max / CATION_SAT_TARGETS.K.min },
+      // Stosunki wagowe z praktyki Mehlich III — zostają liczone na ppm, jak dotychczas.
       { label: 'K:P', a: 'K', b: 'P', min: 1.7, max: 1.7 },
       { label: 'B:Ca', a: 'B', b: 'Ca', min: 0.001, max: 0.001 },
       { label: 'K:Fe', a: 'K', b: 'Fe', min: 2, max: 3 },
@@ -1453,31 +1500,41 @@
         const isNum = (r.a === el);
         const isDen = (r.b === el);
         if (!isNum && !isDen) return;
-        const va = ref[r.a] || 0;
-        const vb = ref[r.b] || 0;
+        const unit = r.unit || 'ppm';
+        // vaPpm/vbPpm — surowe ppm, do komunikatów i porównań z targetami Mehlich 3 (które są w ppm).
+        // va/vb — wartość w jednostce stosunku (meq dla Ca:Mg/Ca:K/Mg:K, inaczej to samo co ppm).
+        const vaPpm = ref[r.a] || 0;
+        const vbPpm = ref[r.b] || 0;
+        if (vbPpm <= 0) return;
+        const va = ratioUnitValue(ref, r.a, unit);
+        const vb = ratioUnitValue(ref, r.b, unit);
         if (vb <= 0) return;
         const cur = va / vb;
         const partner = isNum ? r.b : r.a;
-        const partnerVal = isNum ? vb : va;
+        const partnerVal = isNum ? vbPpm : vaPpm;
 
-        // Czy ta proporcja w ogóle wymaga DODANIA tego pierwiastka?
-        let need;
+        // Czy ta proporcja w ogóle wymaga DODANIA tego pierwiastka? Liczone w jednostce stosunku,
+        // na końcu przeliczone z powrotem na ppm — dawkuje się masą, nie ładunkiem.
+        let needUnit;
         if (isNum) {
           if (cur >= r.min - 1e-9) return;   // stosunek nie jest za niski → licznika nie brakuje
-          need = r.min * vb;
+          needUnit = r.min * vb;
         } else {
           if (r.max <= 0 || cur <= r.max + 1e-9) return; // stosunek nie jest za wysoki → mianownika nie brakuje
-          need = va / r.max;
+          needUnit = va / r.max;
         }
+        const need = ratioUnitToPpm(needUnit, el, unit);
 
         // „conflict” — sprzeczność samych tabel (sprawdzana przy obu pierwiastkach na targetach).
         const partnerTargetLvl = stageTargetLevel(partner);
         if (myTargetLvl != null && partnerTargetLvl != null) {
-          const needAtTargets = isNum ? r.min * partnerTargetLvl : partnerTargetLvl / r.max;
+          const partnerTargetUnit = ratioUnitValue({ [partner]: partnerTargetLvl }, partner, unit);
+          const needAtTargetsUnit = isNum ? r.min * partnerTargetUnit : partnerTargetUnit / r.max;
+          const needAtTargets = ratioUnitToPpm(needAtTargetsUnit, el, unit);
           if (needAtTargets > myTargetLvl + 0.05) {
             blocked.push({
               kind: 'conflict', ratio: r, partner,
-              explain: `${r.label} = ${formatRatioBounds(r)} nie da się pogodzić z targetami tego etapu: `
+              explain: `${r.label} = ${formatRatioBounds(r)} (${unit}) nie da się pogodzić z targetami tego etapu: `
                 + `przy ${partner} na swoim celu (${partnerTargetLvl.toFixed(1)} ppm) proporcja żądałaby ${needAtTargets.toFixed(1)} ppm ${el}, `
                 + `a target ${el} to ${myTargetLvl.toFixed(1)} ppm. Do poprawy jest tabela targetów albo sama proporcja, nie gleba.`
             });
@@ -1499,11 +1556,11 @@
         }
 
         const formula = isNum
-          ? `${r.min} × ${vb.toFixed(1)}`
-          : `${va.toFixed(1)} ÷ ${r.max}`;
+          ? `${r.min.toFixed(2)} × ${vb.toFixed(2)} ${unit}`
+          : `${va.toFixed(2)} ÷ ${r.max.toFixed(2)} ${unit}`;
         usable.push({
           need, ratio: r, partner, partnerVal, cur,
-          explain: `${r.label} = ${cur.toFixed(2)}, a ma być ${formatRatioBounds(r)} → przy ${partner} = ${partnerVal.toFixed(1)} ppm `
+          explain: `${r.label} = ${cur.toFixed(2)} ${unit}, a ma być ${formatRatioBounds(r)} ${unit} → przy ${partner} = ${partnerVal.toFixed(1)} ppm `
             + `${el} musi sięgnąć ${need.toFixed(1)} ppm (${formula})`
         });
       });
@@ -2009,8 +2066,9 @@
       let html = '<table><thead><tr><th>Proporcja</th><th>Cel</th><th>Aktualnie</th>'
         + '<th>Zmiana pierwszego pierwiastka</th><th>Dodaj drugiego pierwiastka</th></tr></thead><tbody>';
       TARGET_RATIOS.forEach(r => {
-        const va = total[r.a] || 0;
-        const vb = total[r.b] || 0;
+        const unit = r.unit || 'ppm';
+        const va = ratioUnitValue(total, r.a, unit);
+        const vb = ratioUnitValue(total, r.b, unit);
         const current = vb > 0 ? va / vb : null;
         let status = null, refRatio = null;
         if (current != null) {
@@ -2019,8 +2077,10 @@
           else status = 'in';
         }
         // Kolumna A: ile brakuje/nadmiaruje pierwszego pierwiastka (przy stałym drugim).
-        const neededA = (status === 'below' || status === 'above') && vb > 0 ? refRatio * vb : null;
-        const diffA = neededA != null ? neededA - va : null;
+        // Liczone w jednostce stosunku (meq albo ppm), a na końcu przeliczone z powrotem na ppm —
+        // dawkuje się masą, nie ładunkiem.
+        const neededAUnit = (status === 'below' || status === 'above') && vb > 0 ? refRatio * vb : null;
+        const diffA = neededAUnit != null ? ratioUnitToPpm(neededAUnit - va, r.a, unit) : null;
         let labelA = '—', colorA = '#4a5568';
         if (status === 'in') { labelA = 'w normie'; colorA = '#276749'; }
         else if (diffA != null) {
@@ -2032,20 +2092,21 @@
         // Przy niedomiarze A dodanie B tylko pogłębia problem, więc wtedy fix jest w kolumnie A.
         let labelB = '—', colorB = '#4a5568';
         if (status === 'above' && va > 0) {
-          const neededB = va / refRatio;
-          const addB = neededB - vb;
+          const neededBUnit = va / refRatio;
+          const addB = ratioUnitToPpm(neededBUnit - vb, r.b, unit);
           labelB = `+${addB.toFixed(1)} ppm ${r.b}`;
           colorB = '#c53030';
         } else if (status === 'in') {
           labelB = 'w normie'; colorB = '#276749';
         }
-        const targetLabel = r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`;
+        const targetLabel = (r.min === r.max ? `${r.min.toFixed(unit === 'meq' ? 2 : 3)}` : `${r.min.toFixed(2)}–${r.max.toFixed(2)}`)
+          + ` <span class="explain">(${unit})</span>`;
         html += `<tr class="${elementRowClass(r.a)}"><td>${r.label}</td><td>${targetLabel}</td><td>${current != null ? current.toFixed(3) : '—'}</td>`
           + `<td style="color:${colorA}; font-weight:600;">${labelA}</td>`
           + `<td style="color:${colorB}; font-weight:600;">${labelB}</td></tr>`;
       });
       html += '</tbody></table>';
-      html += '<p class="note">Pierwsza kolumna zmian liczy brakującą/nadmiarową ilość pierwszego pierwiastka. Druga pokazuje, ile trzeba <strong>dodać</strong> drugiego pierwiastka, żeby proporcja wróciła do normy — praktyczniejsze przy nadmiarze, bo nawozem można tylko dodawać, nie odejmować. K:Fe = 2–3, bo żelazo ma być 1/2 do 1/3 potasu.</p>';
+      html += '<p class="note">Pierwsza kolumna zmian liczy brakującą/nadmiarową ilość pierwszego pierwiastka. Druga pokazuje, ile trzeba <strong>dodać</strong> drugiego pierwiastka, żeby proporcja wróciła do normy — praktyczniejsze przy nadmiarze, bo nawozem można tylko dodawać, nie odejmować. Obie kolumny zmian są zawsze w ppm (tyle sypiesz), nawet gdy sam stosunek liczony jest w meq. K:Fe = 2–3, bo żelazo ma być 1/2 do 1/3 potasu. Ca:Mg, Ca:K i Mg:K liczone są w meq — to one opisują konkurencję kationów o miejsca na kompleksie sorpcyjnym, a ta zachodzi na jednostkę ładunku, nie masy; zakresy wyprowadzone z celów nasycenia w zakładce CAC/Gleba (Ca 68–75%, Mg 10–15%, K 3–5%).</p>';
       document.getElementById('am_ratio_table').innerHTML = html;
     }
 
@@ -2212,22 +2273,57 @@
       // Podane wartości to już stężenia, więc dolicza się je bez dzielenia przez objętość.
       const CACO3_PER_CA = 100.087 / 40.078;
       const CACO3_PER_MG = 100.087 / 24.305;
+      const R = Math.max(0.01, parseFloat(document.getElementById('water_camg').value) || 5.5);
+
+      // Źródło twardości — dwa tryby:
+      //  1) test kroplowy GH/KH (°dH) — pomiar bezwzględny, nie zależy od marki miernika TDS
+      //     ani od zgadywanego udziału twardości w odczycie. 1°dH = 17,85 ppm CaCO₃.
+      //  2) brak GH → odczyt TDS × szacowany udział twardości (dawne zachowanie, zostaje jako
+      //     rozwiązanie awaryjne, gdy nie masz jeszcze testu kroplowego).
+      const gh = Math.max(0, parseFloat(document.getElementById('water_gh').value) || 0);
+      const kh = Math.max(0, parseFloat(document.getElementById('water_kh').value) || 0);
       const waterPpm = Math.max(0, parseFloat(document.getElementById('water_ppm').value) || 0);
       const hardnessPct = Math.min(100, Math.max(0, parseFloat(document.getElementById('water_hardness_pct').value) || 100));
-      const R = Math.max(0.01, parseFloat(document.getElementById('water_camg').value) || 4);
-      const hardness = waterPpm * (hardnessPct / 100);
+      const usingGh = gh > 0;
+      const hardness = usingGh ? gh * 17.85 : waterPpm * (hardnessPct / 100);
+      const alkalinity = kh * 17.85;
+
       const waterMg = hardness / (CACO3_PER_CA * R + CACO3_PER_MG);
       const waterCa = R * waterMg;
 
       const splitBox = document.getElementById('water_split');
       if (splitBox) {
-        splitBox.innerHTML = waterPpm > 0
-          ? `Woda startowa wnosi <strong>${waterCa.toFixed(1)} ppm czystego Ca</strong> i `
-            + `<strong>${waterMg.toFixed(1)} ppm czystego Mg</strong> — wliczone w profil poniżej. `
-            + `<span class="explain">Z odczytu ${waterPpm.toFixed(0)} ppm twardość to ${hardness.toFixed(0)} ppm `
-            + `(jako CaCO₃) przy stosunku ${R.toFixed(1)}:1. Pozostałe ${(waterPpm - waterCa - waterMg).toFixed(0)} ppm `
-            + `to wodorowęglany i tło jonowe (Na, Cl, SO₄, krzemionka) — nie wchodzą do profilu.</span>`
-          : 'Woda startowa: 0 ppm — profil pochodzi wyłącznie z dawek produktów.';
+        if (hardness <= 0) {
+          splitBox.innerHTML = 'Woda startowa: 0 ppm — profil pochodzi wyłącznie z dawek produktów.';
+        } else {
+          let html = `Woda startowa wnosi <strong>${waterCa.toFixed(1)} ppm czystego Ca</strong> i `
+            + `<strong>${waterMg.toFixed(1)} ppm czystego Mg</strong> — wliczone w profil poniżej. `;
+          if (usingGh) {
+            html += `<span class="explain">Z testu kroplowego: GH ${gh.toFixed(1)}°dH → twardość ${hardness.toFixed(0)} ppm CaCO₃, `
+              + `przy stosunku ${R.toFixed(1)}:1.</span>`;
+            if (waterPpm > 0) {
+              const impliedGh = waterPpm * (hardnessPct / 100) / 17.85;
+              const diffPct = ((gh - impliedGh) / Math.max(impliedGh, 0.001)) * 100;
+              if (Math.abs(diffPct) > 15) {
+                html += ` <span class="explain" style="color:#c53030;">Kontrola krzyżowa: przy udziale twardości `
+                  + `${hardnessPct.toFixed(0)}% Twój odczyt TDS (${waterPpm.toFixed(0)} ppm) sugerowałby GH ≈ ${impliedGh.toFixed(1)}°dH, `
+                  + `a zmierzone to ${gh.toFixed(1)}°dH (różnica ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(0)}%). `
+                  + `Test kroplowy jest tu wiarygodniejszy — sprawdź przelicznik pena TDS albo świeżość odczynnika.</span>`;
+              }
+            }
+          } else {
+            html += `<span class="explain">Z odczytu ${waterPpm.toFixed(0)} ppm twardość to ${hardness.toFixed(0)} ppm `
+              + `(jako CaCO₃) przy stosunku ${R.toFixed(1)}:1. Pozostałe ${(waterPpm - waterCa - waterMg).toFixed(0)} ppm `
+              + `to wodorowęglany i tło jonowe (Na, Cl, SO₄, krzemionka) — nie wchodzą do profilu. `
+              + `To szacunek — zrób test kroplowy GH/KH dla dokładnego pomiaru.</span>`;
+          }
+          if (kh > 0 && alkalinity > hardness + 0.5) {
+            html += ` <span class="explain" style="color:#c53030;">Uwaga: KH (${kh.toFixed(1)}°dH) przekracza GH `
+              + `(${gh.toFixed(1)}°dH) — to zwykle znak wodorowęglanu sodu w wodzie, nie tylko Ca/Mg. `
+              + `Sód nie jest tu liczony, więc sprawdź go osobno przed nawożeniem.</span>`;
+          }
+          splitBox.innerHTML = html;
+        }
       }
 
       const profile = {
@@ -2318,14 +2414,25 @@
       const nums = [];
       row.forEach(i => {
         if (minX != null && i.x < minX) return;
-        // „< 0.02” traktujemy jako 0.02 — raport oznacza tak wartości poniżej progu oznaczalności
+        // „< 0.02” traktujemy jako 0.02 w rachunkach (raport oznacza tak wartości poniżej progu
+        // oznaczalności), ale zapamiętujemy belowLod, żeby dało się to pokazać w tabelach —
+        // „poniżej progu” i „równo 0,02” to nie to samo przy mikroelementach.
+        const belowLod = /^\s*</.test(i.str);
         const m = i.str.replace(/,/g, '').match(/-?\d+\.?\d*/g);
         if (m) m.forEach(n => {
           const v = parseFloat(n);
-          if (!isNaN(v)) nums.push({ val: v, x: i.x });
+          if (!isNaN(v)) nums.push({ val: v, x: i.x, belowLod });
         });
       });
       return nums.sort((a, b) => a.x - b.x);
+    }
+
+    // „<0,02” w tabeli zamiast milczącego „0,02” — dla wartości oznaczonych jako poniżej progu.
+    function formatMaybeLod(entry, decimals) {
+      if (entry == null) return null;
+      const val = (typeof entry === 'object') ? entry.val : entry;
+      const text = val.toFixed(decimals != null ? decimals : 2);
+      return (typeof entry === 'object' && entry.belowLod) ? '<' + text : text;
     }
 
     // Lewa krawędź kolumn z wynikami, odczytana z nagłówka „Sample Location”.
@@ -2409,9 +2516,10 @@
 
       const cols = [];
       for (let c = 0; c < nCols; c++) {
-        const o = { label: labels[c] ? labels[c].text : 'Kolumna ' + (c + 1) };
+        const o = { label: labels[c] ? labels[c].text : 'Kolumna ' + (c + 1), lod: {} };
         Object.keys(raw).forEach(k => {
           o[k] = raw[k][c] ? raw[k][c].val : null;
+          if (raw[k][c] && raw[k][c].belowLod) o.lod[k] = true;
         });
         if (kind === 'm3') {
           // Azot mineralny = amon + azotany
@@ -2419,7 +2527,7 @@
         }
         cols.push(o);
       }
-      return cols.filter(o => Object.keys(o).some(k => k !== 'label' && o[k] != null));
+      return cols.filter(o => Object.keys(o).some(k => k !== 'label' && k !== 'lod' && o[k] != null));
     }
 
     window._compostParsed = { m3: [], sp: [] };
@@ -2452,10 +2560,11 @@
         cols.forEach((col, i) => {
           const b = document.createElement('button');
           b.className = 'col-btn';
+          b.dataset.colIndex = i;
           b.style.padding = '6px 12px';
           b.textContent = col.label;
           b.onclick = () => {
-            btnBox.querySelectorAll('.col-btn').forEach(x => x.classList.remove('selected'));
+            btnBox.querySelectorAll('[data-col-index]').forEach(x => x.classList.remove('selected'));
             b.classList.add('selected');
             applyCompostColumn(kind, i);
           };
@@ -2555,12 +2664,17 @@
       </p>`;
       html += '<table><thead><tr><th>Pierwiastek</th><th>Mehlich 3 — pula całkowita (mg/kg)</th>'
         + '<th>Saturated Paste — stężenie w wyciągu (ppm)</th></tr></thead><tbody>';
+      // „<0,02” oznacza wynik poniżej progu oznaczalności — do rachunków bierzemy tę liczbę,
+      // ale w tabeli widać, że to nie jest pomiar równy dokładnie tej wartości.
+      const m3Lod = c.m3.lod || {}, spLod = c.sp.lod || {};
       COMPOST_ELEMENTS.forEach(e => {
         const m3 = c.m3[e.key], sp = c.sp[e.key];
+        const m3Text = m3 == null ? '—' : (m3Lod[e.key] ? '<' + m3 : m3);
+        const spText = sp == null ? '<span class="explain">brak w wyciągu</span>' : (spLod[e.key] ? '<' + sp : sp);
         html += `<tr class="${elementRowClass(e.key.charAt(0).toUpperCase() + e.key.slice(1))}">`
           + `<td>${e.label}</td>`
-          + `<td>${m3 == null ? '—' : m3}</td>`
-          + `<td>${sp == null ? '<span class="explain">brak w wyciągu</span>' : sp}</td></tr>`;
+          + `<td>${m3Text}</td>`
+          + `<td>${spText}</td></tr>`;
       });
       html += '</tbody></table>';
       html += '<table style="margin-top:12px;"><tbody>'
@@ -2766,7 +2880,7 @@
     }
     window.renderCompostAll = renderCompostAll;
 
-    const PPM_DOSE_FIELDS = ['water_volume', 'water_ppm', 'water_hardness_pct', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_amino', 'dose_kompost'];
+    const PPM_DOSE_FIELDS = ['water_volume', 'water_gh', 'water_kh', 'water_ppm', 'water_hardness_pct', 'water_camg', 'dose_biobloom', 'dose_agrosorb_k', 'dose_agrosorb_ca', 'dose_gips', 'dose_sk', 'dose_ms', 'dose_amino', 'dose_kompost'];
     const PPM_PROFILE_ELEMENTS = [
       { key: 'n', label: 'N' }, { key: 'p', label: 'P' }, { key: 'k', label: 'K' },
       { key: 'ca', label: 'Ca' }, { key: 's', label: 'S' }, { key: 'mg', label: 'Mg' }
