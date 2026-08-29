@@ -1,0 +1,889 @@
+<title>Curve Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    color-scheme: light;
+    --page-bg:#f9f9f7;
+    --surface:#fcfcfb;
+    --text-primary:#0b0b0b;
+    --text-secondary:#52514e;
+    --text-muted:#898781;
+    --grid:#e1e0d9;
+    --axis:#c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --border-strong: rgba(11,11,11,0.16);
+    --accent-spread:#2a78d6;
+    --accent-btc:#eb6834;
+    --accent-eth:#4a3aa7;
+    --status-good:#0ca30c;
+    --status-critical:#d03b3b;
+    --status-good-bg: rgba(12,163,12,.12);
+    --status-critical-bg: rgba(208,59,59,.12);
+    --focus-ring: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --page-bg:#0d0d0d;
+      --surface:#1a1a19;
+      --text-primary:#ffffff;
+      --text-secondary:#c3c2b7;
+      --text-muted:#898781;
+      --grid:#2c2c2a;
+      --axis:#383835;
+      --border: rgba(255,255,255,0.10);
+      --border-strong: rgba(255,255,255,0.18);
+      --accent-spread:#3987e5;
+      --accent-btc:#d95926;
+      --accent-eth:#9085e9;
+      --status-good:#0ca30c;
+      --status-critical:#e0605f;
+      --status-good-bg: rgba(12,163,12,.20);
+      --status-critical-bg: rgba(224,96,95,.20);
+      --focus-ring:#3987e5;
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --page-bg:#0d0d0d;
+    --surface:#1a1a19;
+    --text-primary:#ffffff;
+    --text-secondary:#c3c2b7;
+    --text-muted:#898781;
+    --grid:#2c2c2a;
+    --axis:#383835;
+    --border: rgba(255,255,255,0.10);
+    --border-strong: rgba(255,255,255,0.18);
+    --accent-spread:#3987e5;
+    --accent-btc:#d95926;
+    --accent-eth:#9085e9;
+    --status-good:#0ca30c;
+    --status-critical:#e0605f;
+    --status-good-bg: rgba(12,163,12,.20);
+    --status-critical-bg: rgba(224,96,95,.20);
+    --focus-ring:#3987e5;
+  }
+
+  *{box-sizing:border-box;}
+  body{background:var(--page-bg);color:var(--text-primary);font-family:'IBM Plex Sans',system-ui,-apple-system,"Segoe UI",sans-serif;}
+  .num{font-family:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;font-variant-numeric:tabular-nums;}
+
+  .page{max-width:1080px;margin:0 auto;padding:32px 20px 64px;display:flex;flex-direction:column;gap:22px;}
+
+  header h1{margin:0 0 4px;font-size:26px;font-weight:700;letter-spacing:-0.01em;text-wrap:balance;}
+  header p.subtitle{margin:0 0 10px;color:var(--text-secondary);font-size:14.5px;max-width:62ch;line-height:1.5;}
+  header .meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--text-muted);}
+  header .meta span{white-space:nowrap;}
+  header .privacy{margin-top:8px;font-size:12px;color:var(--text-muted);}
+
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 18px 16px;}
+
+  details.loader summary{cursor:pointer;font-weight:600;font-size:14px;padding:2px 0;list-style:none;display:flex;align-items:center;gap:8px;}
+  details.loader summary::-webkit-details-marker{display:none;}
+  details.loader summary::before{content:"▸";color:var(--text-muted);font-size:11px;transition:transform .15s ease;}
+  details.loader[open] summary::before{transform:rotate(90deg);}
+  details.loader summary .summary-sub{font-weight:400;color:var(--text-muted);font-size:12.5px;}
+  .loader-body{margin-top:14px;display:flex;flex-direction:column;gap:16px;}
+  .loader-intro{font-size:13px;color:var(--text-secondary);line-height:1.55;max-width:70ch;}
+  .loader-intro a{color:var(--accent-spread);text-decoration:underline;text-underline-offset:2px;}
+
+  .field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;}
+  .field{display:flex;flex-direction:column;gap:6px;min-width:0;}
+  .field label{font-size:12.5px;font-weight:600;}
+  .field .hint{font-size:11.5px;color:var(--text-muted);line-height:1.45;}
+  .field .links{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;}
+  .field .links a{color:var(--accent-spread);text-decoration:underline;text-underline-offset:2px;}
+  .field input[type="file"]{font-size:11.5px;color:var(--text-secondary);max-width:100%;}
+  .field textarea{width:100%;min-height:76px;font-size:11.5px;background:var(--page-bg);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:8px;resize:vertical;}
+  .field textarea::placeholder{color:var(--text-muted);}
+  .field .err{font-size:11.5px;color:var(--status-critical);min-height:14px;}
+
+  .loader-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  button{font-family:inherit;}
+  .btn-primary{background:var(--accent-spread);color:#fff;border:none;border-radius:6px;padding:10px 20px;font-weight:600;font-size:13px;cursor:pointer;}
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-secondary{background:transparent;color:var(--text-secondary);border:1px solid var(--border-strong);border-radius:6px;padding:9px 16px;font-size:13px;cursor:pointer;}
+  .btn-secondary:hover{background:var(--border);}
+  .loader-actions .err{font-size:12.5px;color:var(--status-critical);}
+
+  :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;}
+
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;}
+  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;}
+  .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);}
+  .stat-value{font-size:23px;font-weight:600;line-height:1.1;}
+  .stat-sub{font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;width:fit-content;}
+  .chip.good{background:var(--status-good-bg);color:var(--status-good);}
+  .chip.critical{background:var(--status-critical-bg);color:var(--status-critical);}
+  .chg{font-weight:600;}
+  .chg.up{color:var(--status-good);}
+  .chg.down{color:var(--status-critical);}
+
+  .controls-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;justify-content:space-between;}
+  .controls-group{display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+  .controls-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-right:2px;}
+  .seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:6px;overflow:hidden;}
+  .seg button{font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:6px 11px;background:var(--surface);color:var(--text-secondary);border:none;cursor:pointer;}
+  .seg button+button{border-left:1px solid var(--border-strong);}
+  .seg button.active{background:var(--accent-spread);color:#fff;}
+
+  .panel-head{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px 18px;margin-bottom:10px;}
+  .panel-head h2{margin:0;font-size:15px;font-weight:600;}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;padding-top:2px;}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-secondary);}
+  .swatch{width:11px;height:3px;border-radius:2px;display:inline-block;}
+  .swatch.dash{background-image:linear-gradient(to right, currentColor 60%, transparent 0%);background-size:6px 3px;background-repeat:repeat-x;background-color:transparent;color:var(--accent-spread);}
+
+  .chart-holder{position:relative;height:250px;}
+  .chart-holder.tall{height:290px;}
+
+  #tableWrap .table-scroll{overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:6px;}
+  table.data-table{border-collapse:collapse;width:100%;font-size:11.5px;}
+  table.data-table th, table.data-table td{padding:6px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
+  table.data-table th:first-child, table.data-table td:first-child{text-align:left;}
+  table.data-table thead th{position:sticky;top:0;background:var(--surface);color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:10.5px;z-index:1;}
+  table.data-table tbody tr:hover{background:var(--border);}
+
+  [hidden]{display:none!important;}
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none!important;}
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <h1>Curve Watch</h1>
+    <p class="subtitle">Spread rentowności obligacji USA 10&nbsp;lat − 3&nbsp;miesiące (US10Y − US3M) ze średnią kroczącą, pokazany nad wykresem cen BTC i ETH w tym samym przedziale czasu.</p>
+    <div class="meta" id="headerMeta" hidden>
+      <span id="metaRange"></span>
+      <span id="metaWindow"></span>
+    </div>
+    <p class="privacy">Dane wklejasz lub wczytujesz sam — zostają wyłącznie w pamięci Twojej przeglądarki (localStorage), nic nie jest wysyłane na żaden serwer.</p>
+  </header>
+
+  <details class="panel loader" id="loaderPanel" open>
+    <summary>Dane źródłowe <span class="summary-sub" id="loaderSummarySub"></span></summary>
+    <div class="loader-body">
+      <p class="loader-intro">
+        Ten sesyjny sandbox nie ma dostępu do zewnętrznych API (FRED, giełdy krypto), więc dane trzeba pobrać samodzielnie
+        i wkleić lub wgrać poniżej jako CSV — parser rozpoznaje format automatycznie.
+      </p>
+
+      <div class="field-grid">
+        <div class="field">
+          <label for="taTreasury">Rentowności US10Y i US3M</label>
+          <div class="hint">Plik CSV z FRED z kolumnami DGS10 i DGS3MO (data + dwie rentowności).</div>
+          <div class="links"><a href="https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS3MO" target="_blank" rel="noopener">Pobierz CSV z FRED →</a></div>
+          <input type="file" id="fileTreasury" accept=".csv,.txt" />
+          <textarea id="taTreasury" placeholder="DATE,DGS10,DGS3MO&#10;2015-01-02,2.12,0.03&#10;..."></textarea>
+          <div class="err" id="errTreasury"></div>
+        </div>
+        <div class="field">
+          <label for="taBtc">Cena BTC/USD</label>
+          <div class="hint">CSV z kolumną daty i ceny zamknięcia (Yahoo Finance, CoinGecko lub inne).</div>
+          <div class="links">
+            <a href="https://finance.yahoo.com/quote/BTC-USD/history/" target="_blank" rel="noopener">Yahoo Finance →</a>
+            <a href="https://www.coingecko.com/en/coins/bitcoin/historical_data" target="_blank" rel="noopener">CoinGecko →</a>
+          </div>
+          <input type="file" id="fileBtc" accept=".csv,.txt" />
+          <textarea id="taBtc" placeholder="Date,Open,High,Low,Close,Adj Close,Volume&#10;2015-01-02,314.25,315.84,313.57,314.79,314.79,...&#10;..."></textarea>
+          <div class="err" id="errBtc"></div>
+        </div>
+        <div class="field">
+          <label for="taEth">Cena ETH/USD</label>
+          <div class="hint">CSV z kolumną daty i ceny zamknięcia (Yahoo Finance, CoinGecko lub inne).</div>
+          <div class="links">
+            <a href="https://finance.yahoo.com/quote/ETH-USD/history/" target="_blank" rel="noopener">Yahoo Finance →</a>
+            <a href="https://www.coingecko.com/en/coins/ethereum/historical_data" target="_blank" rel="noopener">CoinGecko →</a>
+          </div>
+          <input type="file" id="fileEth" accept=".csv,.txt" />
+          <textarea id="taEth" placeholder="snapped_at,price,market_cap,total_volume&#10;2015-08-07 00:00:00 UTC,2.83,...&#10;..."></textarea>
+          <div class="err" id="errEth"></div>
+        </div>
+      </div>
+
+      <div class="loader-actions">
+        <button class="btn-primary" id="btnLoad">Wczytaj i narysuj</button>
+        <button class="btn-secondary" id="btnClearData">Wyczyść zapisane dane</button>
+        <span class="err" id="loaderGlobalErr"></span>
+      </div>
+    </div>
+  </details>
+
+  <section id="dashboard" hidden>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Spread US10Y − US3M</div>
+        <div class="stat-value num" id="statSpread">—</div>
+        <div class="stat-sub"><span class="chip" id="statChip">—</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Średnia krocząca</div>
+        <div class="stat-value num" id="statMa">—</div>
+        <div class="stat-sub" id="statMaSub">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">BTC / USD</div>
+        <div class="stat-value num" id="statBtc">—</div>
+        <div class="stat-sub" id="statBtcSub">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">ETH / USD</div>
+        <div class="stat-value num" id="statEth">—</div>
+        <div class="stat-sub" id="statEthSub">—</div>
+      </div>
+    </div>
+
+    <div class="controls-row">
+      <div class="controls-group">
+        <span class="controls-label">Zakres</span>
+        <div class="seg" id="rangeSeg">
+          <button data-range="1y" title="Ostatni rok">1R</button>
+          <button data-range="2y" title="Ostatnie 2 lata">2L</button>
+          <button data-range="5y" title="Ostatnie 5 lat">5L</button>
+          <button data-range="ytd" title="Od początku roku">YTD</button>
+          <button data-range="all" class="active" title="Cała historia">Max</button>
+        </div>
+      </div>
+      <div class="controls-group">
+        <span class="controls-label">Śr. krocząca</span>
+        <div class="seg" id="maSeg">
+          <button data-window="21" class="active" title="≈ 1 miesiąc">21D</button>
+          <button data-window="63" title="≈ 1 kwartał">63D</button>
+          <button data-window="252" title="≈ 1 rok">252D</button>
+        </div>
+      </div>
+      <button class="btn-secondary" id="btnTable">Pokaż tabelę danych</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Spread rentowności US10Y − US3M</h2>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch" style="background:var(--accent-spread)"></span>Spread dzienny</span>
+          <span class="legend-item"><span class="swatch dash"></span>Średnia krocząca</span>
+          <span class="legend-item"><span class="swatch" style="background:var(--status-critical)"></span>Odwrócenie (&lt; 0)</span>
+        </div>
+      </div>
+      <div class="chart-holder"><canvas id="spreadChart"></canvas></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Cena BTC i ETH (USD, skala logarytmiczna)</h2>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch" style="background:var(--accent-btc)"></span>BTC/USD</span>
+          <span class="legend-item"><span class="swatch" style="background:var(--accent-eth)"></span>ETH/USD</span>
+        </div>
+      </div>
+      <div class="chart-holder tall"><canvas id="priceChart"></canvas></div>
+    </div>
+
+    <div class="panel" id="tableWrap" hidden>
+      <div class="panel-head"><h2>Dane (zakres jak wyżej)</h2></div>
+      <div class="table-scroll">
+        <table class="data-table num" id="dataTable">
+          <thead><tr>
+            <th>Data</th><th>US10Y</th><th>US3M</th><th>Spread</th><th>Śr. krocząca</th><th>BTC</th><th>ETH</th>
+          </tr></thead>
+          <tbody id="dataTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var LS_KEYS = { treasury:'curvewatch:treasury', btc:'curvewatch:btc', eth:'curvewatch:eth', ma:'curvewatch:ma', range:'curvewatch:range' };
+
+  var state = { treasury: [], btc: [], eth: [], maWindow: 21, range: 'all' };
+  var spreadChart = null, priceChart = null;
+  var crosshairState = { x: null };
+  var syncRaf = null;
+
+  function $(id){ return document.getElementById(id); }
+  function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function hexToRgba(hex, a){
+    hex = hex.replace('#','');
+    if(hex.length===3) hex = hex.split('').map(function(c){return c+c;}).join('');
+    var r=parseInt(hex.slice(0,2),16), g=parseInt(hex.slice(2,4),16), b=parseInt(hex.slice(4,6),16);
+    return 'rgba('+r+','+g+','+b+','+a+')';
+  }
+
+  // ---------- CSV parsing ----------
+
+  function splitCsvLines(text){
+    return text.replace(/^﻿/,'').trim().split(/\r\n|\n|\r/).filter(function(l){ return l.length>0; })
+      .map(function(l){ return l.split(',').map(function(c){ return c.trim().replace(/^"|"$/g,''); }); });
+  }
+
+  function parseTreasury(text){
+    var rows = splitCsvLines(text);
+    if(rows.length<2) throw new Error('Za mało wierszy w pliku rentowności.');
+    var header = rows[0].map(function(h){ return h.toLowerCase(); });
+    var dateIdx = header.findIndex(function(h){ return h.indexOf('date')>=0; });
+    if(dateIdx<0) dateIdx = 0;
+    var idx10 = header.findIndex(function(h){ return h.indexOf('dgs10')>=0 || /(^|[^0-9])10([^0-9]|$)/.test(h); });
+    var idx3 = header.findIndex(function(h,i){
+      if(i===idx10) return false;
+      return h.indexOf('dgs3mo')>=0 || h.indexOf('3mo')>=0 || h.indexOf('13w')>=0 || /(^|[^0-9])3([^0-9]|$)/.test(h);
+    });
+    if(idx10<0 || idx3<0){
+      if(header.length>=3){ idx10 = idx10>=0?idx10:1; idx3 = idx3>=0?idx3:2; }
+      else throw new Error('Nie rozpoznano kolumn US10Y / US3M — potrzebne co najmniej 3 kolumny (data, 10Y, 3M).');
+    }
+    var out = [];
+    for(var i=1;i<rows.length;i++){
+      var r = rows[i]; if(!r[dateIdx]) continue;
+      var t = Date.parse(r[dateIdx]); if(isNaN(t)) continue;
+      var v10 = parseFloat(r[idx10]); var v3 = parseFloat(r[idx3]);
+      if(!isFinite(v10) || !isFinite(v3)) continue;
+      out.push({ t: t, v10: v10, v3: v3, spread: v10 - v3 });
+    }
+    if(!out.length) throw new Error('Nie znaleziono poprawnych wierszy z danymi.');
+    out.sort(function(a,b){ return a.t-b.t; });
+    return out;
+  }
+
+  function parsePrice(text){
+    var rows = splitCsvLines(text);
+    if(rows.length<2) throw new Error('Za mało wierszy w pliku ceny.');
+    var header = rows[0].map(function(h){ return h.toLowerCase(); });
+    var dateIdx = header.findIndex(function(h){ return h.indexOf('date')>=0 || h.indexOf('snapped_at')>=0 || h.indexOf('time')>=0; });
+    if(dateIdx<0) dateIdx = 0;
+    var valIdx = header.findIndex(function(h){ return h==='close'; });
+    if(valIdx<0) valIdx = header.findIndex(function(h){ return h==='adj close' || h==='adj_close'; });
+    if(valIdx<0) valIdx = header.findIndex(function(h){ return h.indexOf('price')>=0; });
+    if(valIdx<0) valIdx = header.findIndex(function(h){ return h.indexOf('close')>=0; });
+    if(valIdx<0){
+      for(var c=0;c<rows[0].length;c++){
+        if(c===dateIdx) continue;
+        var v = parseFloat(rows[1][c]);
+        if(isFinite(v)){ valIdx = c; break; }
+      }
+    }
+    if(valIdx<0) throw new Error('Nie rozpoznano kolumny z ceną.');
+    var out = [];
+    for(var i=1;i<rows.length;i++){
+      var r = rows[i]; if(!r[dateIdx]) continue;
+      var t = Date.parse(r[dateIdx]); if(isNaN(t)) continue;
+      var v = parseFloat(r[valIdx]); if(!isFinite(v) || v<=0) continue;
+      out.push({ t: t, v: v });
+    }
+    if(!out.length) throw new Error('Nie znaleziono poprawnych wierszy z danymi.');
+    out.sort(function(a,b){ return a.t-b.t; });
+    return out;
+  }
+
+  function computeSMA(arr, key, windowSize){
+    var result = [], q = [], sum = 0;
+    for(var i=0;i<arr.length;i++){
+      var v = arr[i][key];
+      q.push(v); sum += v;
+      if(q.length>windowSize) sum -= q.shift();
+      if(q.length===windowSize) result.push({ t: arr[i].t, v: sum/windowSize });
+    }
+    return result;
+  }
+
+  // ---------- formatting ----------
+
+  function fmtSpread(v){ if(v==null||!isFinite(v)) return '—'; return (v>=0?'+':'')+v.toFixed(2)+' p.p.'; }
+  function fmtPct(v){ if(v==null||!isFinite(v)) return '—'; return v.toFixed(2)+'%'; }
+  function fmtUsd(v){
+    if(v==null||!isFinite(v)) return '—';
+    return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits: v<100?2:0}).format(v);
+  }
+  function fmtUsdCompact(v){
+    return new Intl.NumberFormat('en-US',{notation:'compact',style:'currency',currency:'USD',maximumFractionDigits:1}).format(v);
+  }
+  function fmtDateShort(t){ return new Date(t).toLocaleDateString('pl-PL',{day:'2-digit',month:'short',year:'2-digit'}); }
+  function fmtDateLong(t){ return new Date(t).toLocaleDateString('pl-PL',{day:'2-digit',month:'long',year:'numeric'}); }
+  function fmtDateTick(t){ return new Date(t).toLocaleDateString('pl-PL',{month:'short',year:'2-digit'}); }
+
+  // ---------- persistence ----------
+
+  function saveLS(key, val){ try{ localStorage.setItem(key, val); }catch(e){} }
+  function loadLS(key){ try{ return localStorage.getItem(key); }catch(e){ return null; } }
+  function removeLS(key){ try{ localStorage.removeItem(key); }catch(e){} }
+
+  // ---------- range handling ----------
+
+  function rangeCutoff(range){
+    var now = Date.now();
+    if(range==='1y') return now - 365*86400000;
+    if(range==='2y') return now - 2*365.25*86400000;
+    if(range==='5y') return now - 5*365.25*86400000;
+    if(range==='ytd') return new Date(new Date().getFullYear(),0,1).getTime();
+    return -Infinity;
+  }
+
+  // ---------- chart plugins ----------
+
+  var crosshairPlugin = {
+    id: 'syncCrosshair',
+    afterEvent: function(chart, args){
+      var e = args.event;
+      if(e.type==='mousemove'){
+        var xScale = chart.scales.x;
+        crosshairState.x = xScale.getValueForPixel(e.x);
+        scheduleSync();
+      } else if(e.type==='mouseout'){
+        crosshairState.x = null;
+        scheduleSync();
+      }
+    },
+    afterDraw: function(chart){
+      if(crosshairState.x==null) return;
+      var ctx = chart.ctx, area = chart.chartArea, xScale = chart.scales.x;
+      var xPix = xScale.getPixelForValue(crosshairState.x);
+      if(xPix < area.left || xPix > area.right) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(xPix, area.top);
+      ctx.lineTo(xPix, area.bottom);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = cssVar('--text-muted');
+      ctx.setLineDash([4,3]);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  function scheduleSync(){
+    if(syncRaf) return;
+    syncRaf = requestAnimationFrame(function(){
+      syncRaf = null;
+      if(spreadChart) spreadChart.update('none');
+      if(priceChart) priceChart.update('none');
+    });
+  }
+
+  var endLabelPlugin = {
+    id: 'endLabels',
+    afterDatasetsDraw: function(chart){
+      var ctx = chart.ctx;
+      chart.data.datasets.forEach(function(ds, i){
+        if(ds.noEndLabel) return;
+        var meta = chart.getDatasetMeta(i);
+        if(meta.hidden || !meta.data.length) return;
+        var pt = meta.data[meta.data.length-1];
+        if(pt.x < chart.chartArea.left || pt.x > chart.chartArea.right) return;
+        ctx.save();
+        ctx.font = '600 11px "IBM Plex Mono", monospace';
+        ctx.fillStyle = typeof ds.borderColor === 'string' ? ds.borderColor : '#888';
+        ctx.textBaseline = 'middle';
+        var text = ds.endLabel || ds.label;
+        var w = ctx.measureText(text).width;
+        var x = pt.x + 6;
+        var maxX = chart.chartArea.right - w - 2;
+        if(x > maxX) x = maxX;
+        ctx.fillText(text, x, pt.y);
+        ctx.restore();
+      });
+    }
+  };
+
+  Chart.register(crosshairPlugin, endLabelPlugin);
+
+  // ---------- chart creation ----------
+
+  function ensureCharts(){
+    if(spreadChart && priceChart) return;
+
+    var c = colors();
+
+    spreadChart = new Chart($('spreadChart').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        {
+          label: 'Spread dzienny',
+          data: [],
+          borderWidth: 2,
+          pointRadius: 0,
+          borderColor: c.spread,
+          fill: { target: 'origin', above: hexToRgba(c.spread, .12), below: hexToRgba(c.critical, .16) },
+          segment: {
+            borderColor: function(ctx){ return (ctx.p0.parsed.y<0 && ctx.p1.parsed.y<0) ? c.critical : c.spread; }
+          }
+        },
+        {
+          label: 'Średnia krocząca',
+          data: [],
+          borderWidth: 1.5,
+          borderDash: [6,4],
+          pointRadius: 0,
+          borderColor: c.textSecondary,
+          fill: false,
+          noEndLabel: true
+        }
+      ]},
+      options: chartOptions('spread', c)
+    });
+
+    priceChart = new Chart($('priceChart').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'BTC/USD', data: [], borderWidth: 2, pointRadius: 0, borderColor: c.btc, fill: false },
+        { label: 'ETH/USD', data: [], borderWidth: 2, pointRadius: 0, borderColor: c.eth, fill: false }
+      ]},
+      options: chartOptions('price', c)
+    });
+  }
+
+  function colors(){
+    return {
+      spread: cssVar('--accent-spread'),
+      btc: cssVar('--accent-btc'),
+      eth: cssVar('--accent-eth'),
+      critical: cssVar('--status-critical'),
+      good: cssVar('--status-good'),
+      grid: cssVar('--grid'),
+      axis: cssVar('--axis'),
+      textSecondary: cssVar('--text-secondary'),
+      textMuted: cssVar('--text-muted')
+    };
+  }
+
+  function chartOptions(kind, c){
+    var base = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: cssVar('--surface'),
+          titleColor: cssVar('--text-primary'),
+          bodyColor: cssVar('--text-secondary'),
+          borderColor: cssVar('--border'),
+          borderWidth: 1,
+          padding: 10,
+          titleFont: { family: "'IBM Plex Mono', monospace", size: 11 },
+          bodyFont: { family: "'IBM Plex Mono', monospace", size: 11 },
+          callbacks: {
+            title: function(items){ return items.length ? fmtDateLong(items[0].parsed.x) : ''; },
+            label: function(item){
+              var v = item.parsed.y;
+              if(kind==='spread') return item.dataset.label+': '+fmtSpread(v);
+              return item.dataset.label+': '+fmtUsd(v);
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          grid: { color: c.grid, drawTicks: false },
+          border: { color: c.axis },
+          ticks: {
+            color: c.textMuted,
+            font: { family: "'IBM Plex Mono', monospace", size: 10.5 },
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 8,
+            callback: function(v){ return fmtDateTick(v); }
+          }
+        }
+      }
+    };
+    if(kind==='spread'){
+      base.scales.y = {
+        grid: {
+          color: function(ctx){ return ctx.tick.value===0 ? c.axis : c.grid; },
+          lineWidth: function(ctx){ return ctx.tick.value===0 ? 1.5 : 1; },
+          drawTicks: false
+        },
+        border: { color: c.axis },
+        ticks: {
+          color: c.textMuted,
+          font: { family: "'IBM Plex Mono', monospace", size: 10.5 },
+          callback: function(v){ return (v>=0?'+':'')+v.toFixed(1); }
+        }
+      };
+    } else {
+      base.scales.y = {
+        type: 'logarithmic',
+        grid: { color: c.grid, drawTicks: false },
+        border: { color: c.axis },
+        ticks: {
+          color: c.textMuted,
+          font: { family: "'IBM Plex Mono', monospace", size: 10.5 },
+          callback: function(v){
+            var lg = Math.log10(v);
+            if(Math.abs(lg - Math.round(lg)) > 1e-6) return '';
+            return fmtUsdCompact(v);
+          }
+        }
+      };
+    }
+    return base;
+  }
+
+  function applyThemeColors(){
+    if(!spreadChart || !priceChart) return;
+    var c = colors();
+
+    spreadChart.data.datasets[0].borderColor = c.spread;
+    spreadChart.data.datasets[0].fill.above = hexToRgba(c.spread, .12);
+    spreadChart.data.datasets[0].fill.below = hexToRgba(c.critical, .16);
+    spreadChart.data.datasets[0].segment.borderColor = function(ctx){ return (ctx.p0.parsed.y<0 && ctx.p1.parsed.y<0) ? c.critical : c.spread; };
+    spreadChart.data.datasets[1].borderColor = c.textSecondary;
+    priceChart.data.datasets[0].borderColor = c.btc;
+    priceChart.data.datasets[1].borderColor = c.eth;
+
+    [spreadChart, priceChart].forEach(function(chart, idx){
+      var kind = idx===0 ? 'spread' : 'price';
+      chart.options = chartOptions(kind, c);
+    });
+    spreadChart.update('none');
+    priceChart.update('none');
+  }
+
+  // ---------- rendering ----------
+
+  function render(){
+    if(!state.treasury.length){ return; }
+    $('dashboard').hidden = false;
+    ensureCharts();
+
+    var cutoff = rangeCutoff(state.range);
+    var maFull = computeSMA(state.treasury, 'spread', state.maWindow);
+
+    var spreadRaw = state.treasury.filter(function(p){ return p.t>=cutoff; }).map(function(p){ return {x:p.t, y:p.spread}; });
+    var maSeries = maFull.filter(function(p){ return p.t>=cutoff; }).map(function(p){ return {x:p.t, y:p.v}; });
+    var btcSeries = state.btc.filter(function(p){ return p.t>=cutoff; }).map(function(p){ return {x:p.t, y:p.v}; });
+    var ethSeries = state.eth.filter(function(p){ return p.t>=cutoff; }).map(function(p){ return {x:p.t, y:p.v}; });
+
+    var allT = state.treasury.map(function(p){return p.t;}).concat(state.btc.map(function(p){return p.t;})).concat(state.eth.map(function(p){return p.t;}));
+    var domainMax = Math.max.apply(null, allT);
+    var domainMin = cutoff===-Infinity ? Math.min.apply(null, allT) : cutoff;
+
+    spreadChart.data.datasets[0].data = spreadRaw;
+    spreadChart.data.datasets[0].endLabel = spreadRaw.length ? fmtSpread(spreadRaw[spreadRaw.length-1].y) : '';
+    spreadChart.data.datasets[1].data = maSeries;
+    spreadChart.options.scales.x.min = domainMin;
+    spreadChart.options.scales.x.max = domainMax;
+    spreadChart.update('none');
+
+    priceChart.data.datasets[0].data = btcSeries;
+    priceChart.data.datasets[0].endLabel = btcSeries.length ? fmtUsdCompact(btcSeries[btcSeries.length-1].y) : '';
+    priceChart.data.datasets[1].data = ethSeries;
+    priceChart.data.datasets[1].endLabel = ethSeries.length ? fmtUsdCompact(ethSeries[ethSeries.length-1].y) : '';
+    priceChart.options.scales.x.min = domainMin;
+    priceChart.options.scales.x.max = domainMax;
+    priceChart.update('none');
+
+    renderStats(spreadRaw, maSeries, btcSeries, ethSeries);
+    renderMeta();
+    if(!$('tableWrap').hidden) renderTable(spreadRaw.length?state.treasury.filter(function(p){return p.t>=cutoff;}):[], maSeries, btcSeries, ethSeries);
+  }
+
+  function pctChange(series){
+    if(series.length<2) return null;
+    var first = series[0].y, last = series[series.length-1].y;
+    if(!first) return null;
+    return ((last-first)/first)*100;
+  }
+
+  function renderStats(spreadRaw, maSeries, btcSeries, ethSeries){
+    var lastSpread = spreadRaw.length ? spreadRaw[spreadRaw.length-1].y : null;
+    var lastMa = maSeries.length ? maSeries[maSeries.length-1].y : null;
+    var lastBtc = btcSeries.length ? btcSeries[btcSeries.length-1].y : null;
+    var lastEth = ethSeries.length ? ethSeries[ethSeries.length-1].y : null;
+
+    $('statSpread').textContent = fmtSpread(lastSpread);
+    var chip = $('statChip');
+    if(lastSpread==null){ chip.textContent='—'; chip.className='chip'; }
+    else if(lastSpread<0){ chip.textContent='Krzywa odwrócona'; chip.className='chip critical'; }
+    else { chip.textContent='Krzywa normalna'; chip.className='chip good'; }
+
+    $('statMa').textContent = fmtSpread(lastMa);
+    $('statMaSub').textContent = state.maWindow+'-dniowa średnia krocząca spreadu';
+
+    $('statBtc').textContent = fmtUsd(lastBtc);
+    var btcChg = pctChange(btcSeries);
+    $('statBtcSub').innerHTML = btcChg==null ? 'brak danych w zakresie' : ('<span class="chg '+(btcChg>=0?'up':'down')+'">'+(btcChg>=0?'▲':'▼')+' '+Math.abs(btcChg).toFixed(1)+'%</span> w zakresie');
+
+    $('statEth').textContent = fmtUsd(lastEth);
+    var ethChg = pctChange(ethSeries);
+    $('statEthSub').innerHTML = ethChg==null ? 'brak danych w zakresie' : ('<span class="chg '+(ethChg>=0?'up':'down')+'">'+(ethChg>=0?'▲':'▼')+' '+Math.abs(ethChg).toFixed(1)+'%</span> w zakresie');
+  }
+
+  function renderMeta(){
+    var allT = state.treasury.map(function(p){return p.t;}).concat(state.btc.map(function(p){return p.t;})).concat(state.eth.map(function(p){return p.t;}));
+    if(!allT.length) return;
+    var min = Math.min.apply(null, allT), max = Math.max.apply(null, allT);
+    $('metaRange').textContent = 'Dane: '+fmtDateShort(min)+' – '+fmtDateShort(max);
+    $('metaWindow').textContent = 'Skarbowe: '+state.treasury.length+' pkt · BTC: '+state.btc.length+' pkt · ETH: '+state.eth.length+' pkt';
+    $('headerMeta').hidden = false;
+    $('loaderSummarySub').textContent = '· wczytano ('+fmtDateShort(min)+' – '+fmtDateShort(max)+') — kliknij, by zmienić';
+  }
+
+  function renderTable(treasuryFiltered, maSeries, btcSeries, ethSeries){
+    function dayKey(t){ return new Date(t).toISOString().slice(0,10); }
+    var tMap = {}; treasuryFiltered.forEach(function(p){ tMap[dayKey(p.t)] = p; });
+    var maMap = {}; maSeries.forEach(function(p){ maMap[dayKey(p.x)] = p.y; });
+    var bMap = {}; btcSeries.forEach(function(p){ bMap[dayKey(p.x)] = p.y; });
+    var eMap = {}; ethSeries.forEach(function(p){ eMap[dayKey(p.x)] = p.y; });
+    var keys = Object.keys(tMap).concat(Object.keys(bMap)).concat(Object.keys(eMap));
+    var uniq = Array.from(new Set(keys)).sort().reverse();
+
+    var rows = uniq.map(function(k){
+      var t = tMap[k], b = bMap[k], e = eMap[k], m = maMap[k];
+      return '<tr><td>'+k+'</td>'+
+        '<td>'+(t?fmtPct(t.v10):'—')+'</td>'+
+        '<td>'+(t?fmtPct(t.v3):'—')+'</td>'+
+        '<td>'+(t?fmtSpread(t.spread):'—')+'</td>'+
+        '<td>'+(m!=null?fmtSpread(m):'—')+'</td>'+
+        '<td>'+(b!=null?fmtUsd(b):'—')+'</td>'+
+        '<td>'+(e!=null?fmtUsd(e):'—')+'</td></tr>';
+    });
+    $('dataTableBody').innerHTML = rows.join('');
+  }
+
+  // ---------- data loading ----------
+
+  function readFileInto(fileInput, textarea){
+    fileInput.addEventListener('change', function(){
+      var f = fileInput.files[0];
+      if(!f) return;
+      var reader = new FileReader();
+      reader.onload = function(){ textarea.value = String(reader.result); };
+      reader.readAsText(f);
+    });
+  }
+
+  function loadFromInputs(){
+    var errs = { treasury:'', btc:'', eth:'' };
+    var okAny = false;
+
+    var tText = $('taTreasury').value.trim();
+    if(tText){
+      try{ state.treasury = parseTreasury(tText); okAny = true; }
+      catch(e){ errs.treasury = e.message; state.treasury = []; }
+    } else { state.treasury = []; }
+
+    var bText = $('taBtc').value.trim();
+    if(bText){
+      try{ state.btc = parsePrice(bText); okAny = true; }
+      catch(e){ errs.btc = e.message; state.btc = []; }
+    } else { state.btc = []; }
+
+    var eText = $('taEth').value.trim();
+    if(eText){
+      try{ state.eth = parsePrice(eText); okAny = true; }
+      catch(e){ errs.eth = e.message; state.eth = []; }
+    } else { state.eth = []; }
+
+    $('errTreasury').textContent = errs.treasury;
+    $('errBtc').textContent = errs.btc;
+    $('errEth').textContent = errs.eth;
+
+    if(!state.treasury.length){
+      $('loaderGlobalErr').textContent = 'Potrzebne są przynajmniej dane rentowności US10Y/US3M, aby narysować spread.';
+      $('dashboard').hidden = true;
+      return;
+    }
+    $('loaderGlobalErr').textContent = '';
+
+    if(tText) saveLS(LS_KEYS.treasury, tText); else removeLS(LS_KEYS.treasury);
+    if(bText) saveLS(LS_KEYS.btc, bText); else removeLS(LS_KEYS.btc);
+    if(eText) saveLS(LS_KEYS.eth, eText); else removeLS(LS_KEYS.eth);
+
+    render();
+    $('loaderPanel').open = false;
+  }
+
+  function clearSavedData(){
+    removeLS(LS_KEYS.treasury); removeLS(LS_KEYS.btc); removeLS(LS_KEYS.eth);
+    removeLS(LS_KEYS.ma); removeLS(LS_KEYS.range);
+    $('taTreasury').value=''; $('taBtc').value=''; $('taEth').value='';
+    $('errTreasury').textContent=''; $('errBtc').textContent=''; $('errEth').textContent=''; $('loaderGlobalErr').textContent='';
+    state.treasury=[]; state.btc=[]; state.eth=[];
+    $('dashboard').hidden = true;
+    $('headerMeta').hidden = true;
+    $('loaderSummarySub').textContent = '';
+    $('loaderPanel').open = true;
+  }
+
+  // ---------- wiring ----------
+
+  function wireControls(){
+    readFileInto($('fileTreasury'), $('taTreasury'));
+    readFileInto($('fileBtc'), $('taBtc'));
+    readFileInto($('fileEth'), $('taEth'));
+
+    $('btnLoad').addEventListener('click', loadFromInputs);
+    $('btnClearData').addEventListener('click', clearSavedData);
+
+    $('rangeSeg').addEventListener('click', function(e){
+      var btn = e.target.closest('button'); if(!btn) return;
+      Array.from($('rangeSeg').children).forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      state.range = btn.dataset.range;
+      saveLS(LS_KEYS.range, state.range);
+      render();
+    });
+
+    $('maSeg').addEventListener('click', function(e){
+      var btn = e.target.closest('button'); if(!btn) return;
+      Array.from($('maSeg').children).forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      state.maWindow = parseInt(btn.dataset.window, 10);
+      saveLS(LS_KEYS.ma, String(state.maWindow));
+      render();
+    });
+
+    $('btnTable').addEventListener('click', function(){
+      var wrap = $('tableWrap');
+      wrap.hidden = !wrap.hidden;
+      $('btnTable').textContent = wrap.hidden ? 'Pokaż tabelę danych' : 'Ukryj tabelę danych';
+      if(!wrap.hidden) render();
+    });
+
+    if(window.matchMedia){
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyThemeColors);
+    }
+    new MutationObserver(applyThemeColors).observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });
+  }
+
+  function restoreFromStorage(){
+    var t = loadLS(LS_KEYS.treasury), b = loadLS(LS_KEYS.btc), e = loadLS(LS_KEYS.eth);
+    var ma = loadLS(LS_KEYS.ma), rg = loadLS(LS_KEYS.range);
+    if(t) $('taTreasury').value = t;
+    if(b) $('taBtc').value = b;
+    if(e) $('taEth').value = e;
+    if(ma){
+      state.maWindow = parseInt(ma,10);
+      Array.from($('maSeg').children).forEach(function(btn){
+        btn.classList.toggle('active', parseInt(btn.dataset.window,10)===state.maWindow);
+      });
+    }
+    if(rg){
+      state.range = rg;
+      Array.from($('rangeSeg').children).forEach(function(btn){
+        btn.classList.toggle('active', btn.dataset.range===state.range);
+      });
+    }
+    if(t) loadFromInputs();
+  }
+
+  wireControls();
+  restoreFromStorage();
+
+})();
+</script>
