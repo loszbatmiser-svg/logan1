@@ -55,9 +55,16 @@ nie z tego, co było w polu w chwili kliknięcia „+ Dodaj”. To samo dotyczy 
 zakładce „Kompost” (`getCompostContent()`) jest budowany na bieżąco z wczytanego raportu, więc
 wczytanie nowego pliku PDF przelicza wszystkie dawki bez dotykania kodu.
 
-Wyjątek świadomy: profile fazy zapisywane w „PPM (roztwór)” (`savePhaseProfile()`) *są*
-zamrożonym zrzutem stanu — to jest ich cel (zapisać „jak wyglądała faza wegetacji wtedy”), więc
-tu zamrażanie jest zamierzone, nie przeoczeniem.
+Objętość wody w „PPM (roztwór)” to wielkość partii, nie stężenie. Dawki produktów trzymane są
+jako „przepis” (`window._doseRecipe`: dokładne dawki przy konkretnej objętości), a zmiana litrów
+przelicza pola zawsze od przepisu (`applyDoseRecipe()`), nie od liczb już widocznych w polach —
+inaczej wpisanie „10” (pole przechodzi przez „1”) skalowałoby dwa razy i kumulowało zaokrąglenia.
+Przepis zmienia się dopiero, gdy użytkownik sam poprawi dawkę (`onDoseInput()`).
+
+Profile faz (`savePhaseProfile()`) też są przepisami: wczytanie (`loadPhaseProfile()`) zostawia
+aktualnie ustawioną objętość i przelicza do niej dawki, więc profil PPM jest taki sam jak w chwili
+zapisu, niezależnie od tego, czy robisz 5 czy 8 litrów. Parametry wody (GH, KH, TDS, Ca:Mg) to
+stężenia i wracają wprost, bez skalowania.
 
 ### 3. Jednostka fizyczna dyktuje formułę — nie odwrotnie
 
@@ -173,8 +180,11 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 
 **Zakładka PPM (roztwór)**
 - `calculatePPM()` — liczy profil N/P/K/Ca/S/Mg z dawek produktów + wody startowej + kompostu
+- `onWaterVolumeChange()`, `onDoseInput()`, `applyDoseRecipe()` — objętość jako wielkość partii:
+  zmiana litrów przelicza dawki, profil PPM zostaje ten sam
 - `computeSolutionRatios()` — proporcje N:K, Ca:Mg, K:Ca, N:S w roztworze
-- `savePhaseProfile()` / `loadPhaseProfile()` — zapisane profile faz w `localStorage`
+- `savePhaseProfile()` / `loadPhaseProfile()` — zapisane profile faz w `localStorage`,
+  wczytywane w skali aktualnej objętości
 
 **Zakładka CAC / Gleba**
 - `calculateCAC()` — TCEC, nasycenie kationowe z Value Found (Ca/Mg/K/Na)
