@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto API Dashboard</title>
+  <meta name="description" content="Konfigurowalny dashboard kryptowalut oparty o CoinMarketCap API">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M8 22l5-6 4 3 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/app.css">
+  <script>
+    try {
+      const theme = localStorage.getItem('crypto-api:theme');
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    } catch {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--series-1)"/><path d="M8 22l5-6 4 3 7-9" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div>
+        <h1>Crypto API</h1>
+        <p id="source-line" class="muted">Ładowanie…</p>
+      </div>
+    </div>
+
+    <div class="filters" role="group" aria-label="Filtry całego dashboardu">
+      <label class="field inline">
+        <span>Waluta</span>
+        <select id="currency">
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="PLN">PLN</option>
+        </select>
+      </label>
+      <label class="field inline">
+        <span>Odświeżanie</span>
+        <select id="refresh">
+          <option value="0">ręczne</option>
+          <option value="5">co 5 min</option>
+          <option value="10">co 10 min</option>
+          <option value="30">co 30 min</option>
+          <option value="60">co 60 min</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button id="btn-refresh" class="btn ghost" type="button" title="Odśwież wszystkie wykresy">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+        <span class="hide-sm">Odśwież</span>
+      </button>
+      <button id="btn-add" class="btn primary" type="button" title="Dodaj wykres (skrót: /)">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Dodaj wykres
+      </button>
+      <div class="menu">
+        <button id="btn-menu" class="btn ghost icon-only" type="button" aria-haspopup="true" aria-expanded="false" title="Więcej">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
+        </button>
+        <div id="menu" class="menu-list" role="menu" hidden>
+          <button type="button" role="menuitem" data-action="theme">Motyw: <span id="theme-name">automatyczny</span></button>
+          <button type="button" role="menuitem" data-action="export">Eksportuj układ (JSON)</button>
+          <button type="button" role="menuitem" data-action="import">Importuj układ…</button>
+          <button type="button" role="menuitem" data-action="snapshot">Zapisz snapshot teraz</button>
+          <hr>
+          <button type="button" role="menuitem" data-action="reset" class="danger">Przywróć układ domyślny</button>
+        </div>
+        <input id="import-file" type="file" accept="application/json" hidden>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="grid" class="grid" aria-live="polite"></main>
+
+  <div id="empty" class="empty" hidden>
+    <p>Dashboard jest pusty.</p>
+    <button class="btn primary" type="button" data-open-search>Dodaj pierwszy wykres</button>
+  </div>
+
+  <footer class="footer muted">
+    <span id="credits"></span>
+    <span id="history-info"></span>
+    <span>Dane: <a href="https://coinmarketcap.com/api/" target="_blank" rel="noopener">CoinMarketCap API</a></span>
+  </footer>
+
+  <!-- Wyszukiwarka wykresów -->
+  <dialog id="search" class="modal" aria-labelledby="search-title">
+    <div class="modal-shell">
+      <header class="modal-head">
+        <h2 id="search-title">Dodaj wykres</h2>
+        <button class="btn ghost icon-only" type="button" data-close title="Zamknij (Esc)">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="search-view" id="search-view">
+        <div class="search-box">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="search-input" type="search" placeholder="Szukaj: kapitalizacja, wolumen, AI, DeFi, solana, fear…" autocomplete="off" aria-label="Szukaj wykresów">
+        </div>
+        <div class="search-body">
+          <nav id="search-groups" class="search-groups" aria-label="Kategorie danych"></nav>
+          <div class="search-results">
+            <p id="search-summary" class="muted small"></p>
+            <ul id="search-list" class="result-list"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-view" id="config-view" hidden>
+        <div class="config-form">
+          <button class="btn ghost back" type="button" id="config-back">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+            Wróć do wyszukiwarki
+          </button>
+          <div id="config-meta" class="config-meta"></div>
+          <form id="config-form" autocomplete="off"></form>
+        </div>
+        <div class="config-preview">
+          <p class="muted small">Podgląd</p>
+          <div id="config-preview" class="card preview"></div>
+          <div class="config-actions">
+            <button class="btn ghost" type="button" data-close>Anuluj</button>
+            <button class="btn primary" type="button" id="config-submit">Dodaj do dashboardu</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="/vendor/echarts.min.js"></script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

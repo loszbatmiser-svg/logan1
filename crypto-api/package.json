@@ -1,0 +1,21 @@
+{
+  "name": "crypto-api",
+  "version": "1.0.0",
+  "description": "Konfigurowalny dashboard kryptowalut oparty o CoinMarketCap API",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "demo": "node server/index.js --mock",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "echarts": "^6.1.0",
+    "express": "^5.2.1"
+  }
+}
