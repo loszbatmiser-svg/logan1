@@ -494,10 +494,74 @@ export function renderPayload(container, payload, view, { size = 'm' } = {}) {
   chart.setOption(option);
   const ro = new ResizeObserver(() => chart.resize());
   ro.observe(el);
+  const unsync = payload.type === 'timeseries' && option.xAxis?.type === 'time' ? syncTime(chart, payload) : () => {};
   return {
     dispose() {
+      unsync();
       ro.disconnect();
       chart.dispose();
     },
   };
+}
+
+// ------------------------------------------------------------------ wspólny kursor czasu
+// Najechanie na jeden wykres w czasie pokazuje ten sam moment na wszystkich pozostałych.
+
+const timeCharts = new Set();
+let syncing = false;
+
+function nearestIndex(points, t) {
+  let lo = 0;
+  let hi = points.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid][0] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo > 0 && Math.abs(points[lo - 1][0] - t) <= Math.abs(points[lo][0] - t)) lo--;
+  return lo;
+}
+
+function showMoment(entry, t) {
+  const { chart, series } = entry;
+  const s = series.findIndex((x) => x.points.length);
+  if (s < 0) return;
+  const points = series[s].points;
+  const step = points.length > 1 ? (points.at(-1)[0] - points[0][0]) / (points.length - 1) : 0;
+  if (t < points[0][0] - step || t > points.at(-1)[0] + step) {
+    chart.dispatchAction({ type: 'hideTip' });
+    chart.dispatchAction({ type: 'updateAxisPointer', currTrigger: 'leave' });
+    return;
+  }
+  chart.dispatchAction({ type: 'showTip', seriesIndex: s, dataIndex: nearestIndex(points, t) });
+}
+
+function syncTime(chart, payload) {
+  const entry = { chart, series: payload.series.slice(0, 8) };
+  timeCharts.add(entry);
+  chart.on('updateAxisPointer', (e) => {
+    if (syncing) return;
+    const t = e.axesInfo?.find((a) => a.axisDim === 'x')?.value;
+    if (t == null) return;
+    syncing = true;
+    try {
+      for (const other of timeCharts) if (other !== entry) showMoment(other, t);
+    } finally {
+      syncing = false;
+    }
+  });
+  chart.on('globalout', () => {
+    if (syncing) return;
+    syncing = true;
+    try {
+      for (const other of timeCharts) {
+        if (other === entry) continue;
+        other.chart.dispatchAction({ type: 'hideTip' });
+        other.chart.dispatchAction({ type: 'updateAxisPointer', currTrigger: 'leave' });
+      }
+    } finally {
+      syncing = false;
+    }
+  });
+  return () => timeCharts.delete(entry);
 }
