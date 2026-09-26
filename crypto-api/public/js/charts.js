@@ -305,7 +305,7 @@ function lineOption(payload, t, area) {
     ...baseOption(t),
     grid: {
       left: yLabelWidth(payload.bands ? [0, 100] : series.flatMap((x) => x.points.map((pt) => pt[1])), payload.unit, payload.suffix, t.font) + 12,
-      right: 16, top: multi ? 40 : 12, bottom: 28, containLabel: false,
+      right: 16, top: multi ? 40 : 12, bottom: hasSlider(payload) ? 74 : 28, containLabel: false,
     },
     tooltip: {
       ...baseOption(t).tooltip,
@@ -456,7 +456,34 @@ function isEmpty(payload) {
  * Rysuje dane w kontenerze. Zwraca uchwyt z metodą dispose().
  * view: typ wykresu (hbar, treemap, line…) albo 'table'.
  */
-export function renderPayload(container, payload, view, { size = 'm' } = {}) {
+// Suwak zakresu pod osią czasu – przy wykresach, które mają z czego wybierać.
+const hasSlider = (payload) => payload.type === 'timeseries' && payload.series.some((s) => s.points.length > 20);
+
+function zoomOption(t, zoom, left) {
+  return [
+    {
+      // Daty przy uchwytach wyświetlają się obok suwaka, więc zostawiamy na nie miejsce.
+      type: 'slider', xAxisIndex: 0, bottom: 8, height: 26, left: Math.max(left, 78), right: 78,
+      start: zoom?.start ?? 0, end: zoom?.end ?? 100, filterMode: 'filter',
+      labelFormatter: (v) => formatDate(v),
+      textStyle: { color: t.muted, fontSize: 11 },
+      borderColor: t.axis, backgroundColor: 'transparent',
+      fillerColor: `${t.series[0]}22`,
+      dataBackground: { lineStyle: { color: t.axis, width: 1 }, areaStyle: { color: t.grid, opacity: 0.6 } },
+      selectedDataBackground: { lineStyle: { color: t.series[0], width: 1 }, areaStyle: { color: t.series[0], opacity: 0.15 } },
+      handleStyle: { color: t.surface, borderColor: t.series[0], borderWidth: 1.5 },
+      moveHandleStyle: { color: t.series[0], opacity: 0.35 },
+      emphasis: { handleStyle: { borderColor: t.series[0] }, moveHandleStyle: { opacity: 0.6 } },
+    },
+    // Ctrl + kółko myszy przybliża, przeciąganie po wykresie przesuwa okno.
+    { type: 'inside', xAxisIndex: 0, filterMode: 'filter', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
+  ];
+}
+
+/**
+ * zoom: zapisany zakres suwaka { start, end } w procentach, onZoom: wywoływane po jego zmianie.
+ */
+export function renderPayload(container, payload, view, { size = 'm', zoom = null, onZoom = null } = {}) {
   container.innerHTML = '';
   const note = payload.note ? `<p class="card-note">${escapeHtml(payload.note)}</p>` : '';
 
@@ -490,7 +517,8 @@ export function renderPayload(container, payload, view, { size = 'm' } = {}) {
   const t = tokens();
   const el = document.createElement('div');
   el.className = 'chart';
-  el.style.height = `${chartHeight(payload, view, size)}px`;
+  const slider = hasSlider(payload) && ['line', 'area'].includes(view);
+  el.style.height = `${chartHeight(payload, view, size) + (slider ? 46 : 0)}px`;
   container.appendChild(el);
   if (note) container.insertAdjacentHTML('beforeend', note);
 
@@ -506,8 +534,23 @@ export function renderPayload(container, payload, view, { size = 'm' } = {}) {
       option = payload.type === 'timeseries' ? lineOption(payload, t, false) : hbarOption(payload, t, el.clientWidth);
   }
 
+  if (slider) option.dataZoom = zoomOption(t, zoom, option.grid.left);
+  else if (option.grid && option.xAxis?.type === 'time') option.grid.bottom = 28;
+
   const chart = echarts.init(el, null, { renderer: 'canvas' });
   chart.setOption(option);
+  if (slider) {
+    let zoomTimer = null;
+    const report = () => {
+      const dz = chart.getOption().dataZoom?.[0];
+      if (!dz || !onZoom) return;
+      clearTimeout(zoomTimer);
+      zoomTimer = setTimeout(() => onZoom(dz.start <= 0.01 && dz.end >= 99.99 ? null : { start: dz.start, end: dz.end }), 300);
+    };
+    chart.on('datazoom', report);
+    // Podwójne kliknięcie przywraca cały zakres.
+    chart.getZr().on('dblclick', () => chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 }));
+  }
   const ro = new ResizeObserver(() => chart.resize());
   ro.observe(el);
   const unsync = payload.type === 'timeseries' && option.xAxis?.type === 'time' ? syncTime(chart, payload) : () => {};

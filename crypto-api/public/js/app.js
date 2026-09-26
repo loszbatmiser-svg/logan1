@@ -125,7 +125,14 @@ function drawCard(card) {
     body.innerHTML = errorHtml(card.error);
   } else if (card.payload) {
     const view = card.table ? 'table' : card.widget.chart;
-    card.handle = renderPayload(body, card.payload, view, { size: card.widget.size });
+    card.handle = renderPayload(body, card.payload, view, {
+      size: card.widget.size,
+      zoom: card.widget.zoom,
+      onZoom: (zoom) => {
+        card.widget.zoom = zoom;
+        saveDashboard();
+      },
+    });
     if (card.error) {
       body.insertAdjacentHTML('beforeend', `<p class="card-note">Nie udało się odświeżyć: ${escapeHtml(card.error.message)} Pokazuję ostatnie dane.</p>`);
     }
@@ -189,6 +196,8 @@ function updateWidget(id, changes) {
   const card = state.cards.get(id);
   if (!widget || !card) return;
   Object.assign(widget, changes);
+  // Nowe ustawienia to często inny okres – zaczynamy od pełnego zakresu.
+  widget.zoom = null;
   card.el.className = `card size-${widget.size}`;
   const select = card.el.querySelector('[data-act="chart"]');
   if (select) select.value = widget.chart;
