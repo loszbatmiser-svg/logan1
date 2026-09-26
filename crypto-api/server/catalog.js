@@ -1,6 +1,7 @@
 import { sources } from './sources.js';
 import * as history from './history.js';
 import { stats } from './cmc.js';
+import { EXTERNAL_GROUPS, externalDatasets } from './onchain.js';
 
 // Katalog wszystkich wykresów, które można dodać do dashboardu. Każdy zbiór danych
 // opisuje: skąd bierze dane (endpoint CMC), jakie ma parametry, jakie typy wykresu
@@ -189,7 +190,9 @@ function applyTransform(payload, p) {
     return { ...s, points };
   });
   if (p.transform === 'delta' || p.transform === 'rate_abs') unit = payload.unit;
-  if (p.transform === 'rate' || p.transform === 'rate_abs') suffix = per.short;
+  if (p.transform === 'delta') suffix = payload.suffix || '';
+  if (p.transform === 'rate') suffix = per.short;
+  if (p.transform === 'rate_abs') suffix = `${payload.suffix || ''}${per.short}`;
   if (p.transform === 'accel') suffix = per.short;
   const detail = p.transform === 'change' ? '' : ` (okno ${windowLabel(p.window)}${suffix ? `, ${per.label}` : ''})`;
   return {
@@ -910,11 +913,14 @@ const SPEED_PRESETS = {
   ],
 };
 
+GROUPS.splice(GROUPS.findIndex((g) => g.id === 'history'), 0, ...EXTERNAL_GROUPS);
+DATASETS.push(...externalDatasets({ categorical, timeseries, sortRows, toIndex, options, MODE_OPTIONS }));
+
 for (const ds of DATASETS) {
   if (!ds.speed) continue;
   const timeParams = TIME_PARAMS.map((spec) => ({ ...spec }));
-  // Dane CMC są dzienne, więc okna krótsze niż doba nie mają sensu.
-  if (ds.group === 'historical') timeParams[1].options = WINDOW_OPTIONS.filter((o) => Number(o.value) >= 24);
+  // Poza lokalnymi snapshotami dane są dzienne, więc okna krótsze niż doba nie mają sensu.
+  if (ds.group !== 'history') timeParams[1].options = WINDOW_OPTIONS.filter((o) => Number(o.value) >= 24);
   ds.params = [...ds.params, ...timeParams];
   ds.presets.push(...(SPEED_PRESETS[ds.id] || []));
   const load = ds.load;
@@ -923,6 +929,7 @@ for (const ds of DATASETS) {
 }
 
 const BY_ID = new Map(DATASETS.map((d) => [d.id, d]));
+
 
 export function getDataset(id) {
   return BY_ID.get(id) || null;
@@ -964,6 +971,12 @@ export function resolveParams(dataset, raw = {}) {
       case 'categories':
         out[spec.key] = Array.isArray(value) ? value.filter((v) => typeof v === 'string' && /^[\w-]{1,64}$/.test(v)).slice(0, 8) : spec.default;
         break;
+      case 'multiselect': {
+        const allowed = new Set(spec.options.map((o) => o.value));
+        const list = Array.isArray(value) ? [...new Set(value.map(String).filter((v) => allowed.has(v)))] : [];
+        out[spec.key] = (list.length ? list : spec.default).slice(0, spec.max || 8);
+        break;
+      }
       case 'coin': {
         const n = Number(value);
         out[spec.key] = Number.isInteger(n) && n > 0 ? n : spec.default;

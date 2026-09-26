@@ -167,3 +167,13 @@ test('przekształcenie serii w prędkość dodaje jednostkę i linię zera', asy
   const c7 = raw.rows.find((r) => r.label === '7d').value;
   assert.ok(Math.abs(r7 - c7 / 7) < 1e-9);
 });
+
+test('źródła on-chain: wybór wielu sieci i saldo przepływów giełdowych', async () => {
+  const ds = catalog.getDataset('onchain.series');
+  const p = catalog.resolveParams(ds, { assets: ['btc', 'eth', 'nieistnieje', 'btc', 'ltc', 'doge', 'xrp'], metric: 'FlowNetExUSD' });
+  assert.deepEqual(p.assets, ['btc', 'eth', 'ltc', 'doge'], 'tylko znane sieci, bez duplikatów, max 4');
+  const payload = await ds.load(catalog.resolveParams(ds, { assets: ['btc', 'xrp'], metric: 'FlowNetExUSD' }));
+  assert.equal(payload.series.length, 1, 'XRP nie ma przepływów giełdowych w darmowym planie');
+  assert.match(payload.note, /XRP/);
+  assert.equal(payload.zeroLine, true);
+});

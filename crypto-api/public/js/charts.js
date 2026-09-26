@@ -135,6 +135,17 @@ function labelWidth(labels, font, max = 170) {
   return Math.ceil(Math.min(max, widest + 6));
 }
 
+// Szerokość etykiet osi Y liczona z góry: automatyczne mieszczenie etykiet
+// w ECharts 6 potrafi uciąć pierwszą cyfrę ("800 tys." -> "00 tys.").
+function yLabelWidth(values, unit, suffix, font) {
+  const finite = values.filter((v) => v != null && Number.isFinite(v));
+  if (!finite.length) return 40;
+  const min = Math.min(0, ...finite);
+  const max = Math.max(...finite);
+  const candidates = [min, max, max * 1.25, min * 1.25, (min + max) / 2].map((v) => sfx(formatAxis(v, unit), suffix));
+  return labelWidth(candidates, font, 150);
+}
+
 function hbarOption(payload, t, containerWidth) {
   const rows = payload.rows;
   const width = labelWidth(rows.map((r) => r.label), t.font, Math.min(170, Math.max(60, containerWidth * 0.36)));
@@ -172,7 +183,7 @@ function columnOption(payload, t) {
   const showLabels = rows.length <= 8;
   return {
     ...baseOption(t),
-    grid: { left: 4, right: 8, top: showLabels ? 24 : 10, bottom: 4, containLabel: true },
+    grid: { left: yLabelWidth(rows.map((r) => r.value), payload.unit, payload.suffix, t.font) + 12, right: 8, top: showLabels ? 24 : 10, bottom: 28, containLabel: false },
     tooltip: {
       ...baseOption(t).tooltip,
       trigger: 'axis',
@@ -292,7 +303,10 @@ function lineOption(payload, t, area) {
   const multi = series.length > 1;
   const option = {
     ...baseOption(t),
-    grid: { left: 4, right: 16, top: multi ? 40 : 12, bottom: 4, containLabel: true },
+    grid: {
+      left: yLabelWidth(payload.bands ? [0, 100] : series.flatMap((x) => x.points.map((pt) => pt[1])), payload.unit, payload.suffix, t.font) + 12,
+      right: 16, top: multi ? 40 : 12, bottom: 28, containLabel: false,
+    },
     tooltip: {
       ...baseOption(t).tooltip,
       trigger: 'axis',
@@ -350,7 +364,7 @@ function kpiHtml(p) {
   const delta = dir
     ? `<div class="delta ${dir}">${icon(dir)}${formatValue(change, p.changeUnit || 'pct', { signed: true })} <small>${escapeHtml(p.changeLabel || '')}</small></div>`
     : '';
-  return `<div class="kpi"><div class="kpi-value">${formatValue(p.value, p.unit)}</div>${delta}</div>`;
+  return `<div class="kpi"><div class="kpi-value">${sfx(formatValue(p.value, p.unit, { signed: p.signed }), p.suffix)}</div>${delta}</div>`;
 }
 
 function gaugeHtml(p) {

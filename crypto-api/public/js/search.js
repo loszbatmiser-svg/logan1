@@ -399,6 +399,29 @@ function paramField(spec) {
     f.appendChild(input);
     return f;
   }
+  if (spec.type === 'multiselect') {
+    const fs = fieldWrap(`${spec.label}`, 'fieldset');
+    const wrap = document.createElement('div');
+    wrap.className = 'seg';
+    const selected = new Set(params[spec.key] || spec.default);
+    for (const o of spec.options) {
+      const l = document.createElement('label');
+      l.innerHTML = `<input type="checkbox" value="${escapeHtml(o.value)}" ${selected.has(o.value) ? 'checked' : ''}>${escapeHtml(o.label)}`;
+      const input = l.querySelector('input');
+      input.addEventListener('change', () => {
+        if (input.checked && selected.size >= (spec.max || 8)) {
+          input.checked = false;
+          return;
+        }
+        if (input.checked) selected.add(o.value);
+        else selected.delete(o.value);
+        update(spec.options.map((x) => x.value).filter((v) => selected.has(v)));
+      });
+      wrap.appendChild(l);
+    }
+    fs.appendChild(wrap);
+    return fs;
+  }
   if (spec.type === 'boolean') {
     const l = document.createElement('label');
     l.className = 'check';

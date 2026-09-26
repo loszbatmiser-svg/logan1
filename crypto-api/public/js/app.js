@@ -42,7 +42,10 @@ function sourceLabel(payload, ds, short) {
     return h?.last ? `Snapshoty lokalne · ostatni ${formatTime(h.last)}` : 'Snapshoty lokalne';
   }
   const time = payload?.updatedAt ? ` · ${formatTime(payload.updatedAt)}` : '';
-  return `CMC${short ? '' : ` ${ds.endpoint}`}${time}`;
+  // Endpointy CoinMarketCap zaczynają się od "/", pozostałe źródła mają nazwę na początku.
+  const cmcSource = ds.endpoint.startsWith('/');
+  const source = cmcSource ? 'CMC' : ds.endpoint.split(' ')[0];
+  return `${short ? source : cmcSource ? `CMC ${ds.endpoint}` : ds.endpoint}${time}`;
 }
 
 function createCard(widget) {

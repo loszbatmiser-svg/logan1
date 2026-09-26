@@ -98,6 +98,22 @@ do kilku – więc ich kapitalizacje nie sumują się do całego rynku.
 Jeśli Twój klucz nie obejmuje jakiegoś endpointu, karta pokaże komunikat CMC, a wyszukiwarka oznaczy
 taki wykres jako *niedostępny dla Twojego klucza*.
 
+## Dane on-chain, DeFi i sieci Bitcoin (bez klucza)
+
+Poza CoinMarketCap dashboard korzysta z trzech darmowych API, które nie wymagają klucza:
+
+| Kategoria | Źródło | Przykładowe wykresy |
+|---|---|---|
+| On-chain | [Coin Metrics Community API](https://docs.coinmetrics.io/api/v4) | aktywne adresy, transakcje, MVRV, hashrate, podaż i przepływy na giełdy (BTC, ETH, XRP, ADA, DOGE, LTC, BCH, XLM, TRX), porównanie sieci |
+| DeFi | [DefiLlama](https://defillama.com/docs/api) | TVL w czasie i wg sieci, TVL wg kategorii DeFi, top protokoły, podaż i ranking stablecoinów, wolumen DEX-ów, opłaty protokołów |
+| Sieć Bitcoin | [mempool.space](https://mempool.space/docs/api) | rekomendowane opłaty (sat/vB), mempool, zmiana trudności, hashrate, opłaty i nagrody w blokach, udziały pul wydobywczych |
+
+Glassnode nie ma darmowego API (dostęp do API wymaga płatnego planu), dlatego wskaźniki on-chain pochodzą
+z Coin Metrics. Darmowy zakres Coin Metrics nie obejmuje m.in. NVT, kapitalizacji zrealizowanej ani opłat –
+MVRV jest dostępne. Jeśli wskaźnika nie ma dla danej sieci, wykres to zaznacza.
+
+Wszystkie wykresy w czasie z tych źródeł mają te same tryby co reszta: zmianę, prędkość i przyspieszenie.
+
 ## Historia na darmowym planie
 
 Darmowy plan CoinMarketCap nie daje danych historycznych. Dlatego serwer co godzinę
@@ -146,6 +162,9 @@ server/
   index.js      serwer HTTP (Express) i API dla przeglądarki
   catalog.js    katalog wykresów: kategorie danych, parametry, presety, przekształcanie danych
   sources.js    wszystkie zapytania do CoinMarketCap w jednym miejscu (parametry + czas cache)
+  onchain.js    wykresy z Coin Metrics, DefiLlama i mempool.space
+  external.js   pobieranie z darmowych API (cache, łączenie zapytań)
+  mock-external.js  dane demo dla tych źródeł
   cmc.js        klient CMC: cache, łączenie równoległych zapytań, komunikaty błędów, licznik kredytów
   history.js    lokalne snapshoty rynku (JSON Lines)
   dashboard.js  układ startowy
