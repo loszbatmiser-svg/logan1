@@ -127,3 +127,37 @@ test('snapshot zapisuje dane i daje się odczytać jako seria', async () => {
   const file = path.join(process.env.DATA_DIR, 'snapshots-demo.jsonl');
   assert.ok(fs.readFileSync(file, 'utf8').trim().split('\n').length >= before + 1);
 });
+
+test('prędkość zmiany: okno i przeliczenie na jednostkę czasu', () => {
+  const H = 3_600_000;
+  // Wartość rośnie o 1 na godzinę: 100, 101, …, 148.
+  const points = Array.from({ length: 49 }, (_, i) => [i * H, 100 + i]);
+  const changes = catalog.windowChanges(points, 24 * H, 24 * H);
+  const last = changes.at(-1);
+  assert.equal(last.t, 48 * H);
+  assert.equal(last.delta, 24);
+  assert.ok(Math.abs(last.pct - 24 / 124 * 100) < 1e-9);
+  assert.ok(Math.abs(last.rate - last.pct) < 1e-9, 'okno 24h w przeliczeniu na dzień = zmiana w oknie');
+  const hourly = catalog.windowChanges(points, 24 * H, H).at(-1);
+  assert.ok(Math.abs(hourly.rate - last.pct / 24) < 1e-9, 'na godzinę = 1/24 zmiany dobowej');
+  assert.ok(Math.abs(hourly.rateAbs - 1) < 1e-9, 'wartość rośnie o 1 na godzinę');
+  // Punkty bez danych sprzed okna (z tolerancją 10%) są pomijane.
+  assert.ok(changes[0].t >= 22 * H && changes[0].t <= 24 * H);
+  // Tempo liczone jest z faktycznego odstępu, więc przy 22 h okna nadal wynosi 1 na godzinę.
+  assert.ok(Math.abs(catalog.windowChanges(points, 24 * H, H)[0].rateAbs - 1) < 1e-9);
+});
+
+test('przekształcenie serii w prędkość dodaje jednostkę i linię zera', async () => {
+  const ds = catalog.getDataset('history.global');
+  const payload = await ds.load(catalog.resolveParams(ds, { metric: 'total_market_cap', transform: 'rate', window: '24', per: 'day' }));
+  assert.equal(payload.unit, 'pct');
+  assert.equal(payload.suffix, '/d');
+  assert.equal(payload.zeroLine, true);
+  assert.ok(payload.series[0].points.length > 100);
+  const perf = catalog.getDataset('coin.performance');
+  const speed = await perf.load(catalog.resolveParams(perf, { coin: 1, per: 'day' }));
+  const raw = await perf.load(catalog.resolveParams(perf, { coin: 1 }));
+  const r7 = speed.rows.find((r) => r.label === '7d').value;
+  const c7 = raw.rows.find((r) => r.label === '7d').value;
+  assert.ok(Math.abs(r7 - c7 / 7) < 1e-9);
+});

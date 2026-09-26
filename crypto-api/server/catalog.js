@@ -107,6 +107,100 @@ function toIndex(series) {
   });
 }
 
+// ---------------------------------------------------------------- zmiana i prędkość w czasie
+
+const HOUR = 3_600_000;
+const PER_UNITS = {
+  hour: { label: 'na godzinę', short: '/h', ms: HOUR },
+  day: { label: 'na dzień', short: '/d', ms: 24 * HOUR },
+  week: { label: 'na tydzień', short: '/tydz.', ms: 7 * 24 * HOUR },
+  month: { label: 'na miesiąc (30 dni)', short: '/mies.', ms: 30 * 24 * HOUR },
+  year: { label: 'na rok', short: '/rok', ms: 365 * 24 * HOUR },
+};
+const PER_OPTIONS = Object.entries(PER_UNITS).map(([value, u]) => ({ value, label: u.label }));
+
+const WINDOW_OPTIONS = [
+  { value: '1', label: '1 godzina' }, { value: '4', label: '4 godziny' }, { value: '12', label: '12 godzin' },
+  { value: '24', label: '24 godziny' }, { value: '72', label: '3 dni' }, { value: '168', label: '7 dni' },
+  { value: '720', label: '30 dni' },
+];
+const windowLabel = (hours) => WINDOW_OPTIONS.find((o) => o.value === String(hours))?.label || `${hours} h`;
+
+const TRANSFORMS = {
+  value: { label: 'Wartość' },
+  change: { label: 'Zmiana od początku zakresu (%)', short: 'zmiana od początku' },
+  pct: { label: 'Zmiana w oknie (%)', short: 'zmiana w oknie' },
+  delta: { label: 'Zmiana w oknie (wartość)', short: 'zmiana w oknie' },
+  rate: { label: 'Prędkość zmiany (% na jednostkę czasu)', short: 'prędkość' },
+  rate_abs: { label: 'Prędkość zmiany (wartość na jednostkę czasu)', short: 'prędkość' },
+  accel: { label: 'Przyspieszenie (o ile zmieniła się prędkość w oknie)', short: 'przyspieszenie' },
+};
+
+const TIME_PARAMS = [
+  { key: 'transform', label: 'Pokaż', type: 'select', options: options(TRANSFORMS), default: 'value' },
+  { key: 'window', label: 'Okno pomiaru zmiany', type: 'select', options: WINDOW_OPTIONS, default: '24', showIf: { transform: ['pct', 'delta', 'rate', 'rate_abs', 'accel'] } },
+  { key: 'per', label: 'Prędkość w przeliczeniu', type: 'select', options: PER_OPTIONS, default: 'day', showIf: { transform: ['rate', 'rate_abs', 'accel'] } },
+];
+
+// Dla każdego punktu szuka punktu sprzed `windowMs` (z tolerancją 10%, bo snapshoty
+// nie są idealnie równe) i liczy zmianę oraz jej tempo w przeliczeniu na `perMs`.
+export function windowChanges(points, windowMs, perMs) {
+  const out = [];
+  const tol = windowMs * 0.1;
+  let j = 0;
+  for (let i = 1; i < points.length; i++) {
+    const [t, v] = points[i];
+    const target = t - windowMs;
+    while (j + 1 < i && points[j + 1][0] <= target) j++;
+    // Najbliższy punkt do początku okna: ostatni przed nim albo pierwszy po nim.
+    let k = j;
+    if (j + 1 < i && Math.abs(points[j + 1][0] - target) < Math.abs(points[j][0] - target)) k = j + 1;
+    const [t0, v0] = points[k];
+    if (Math.abs(t0 - target) > tol || !v0) continue;
+    const dt = t - t0;
+    const pct = (v / v0 - 1) * 100;
+    out.push({ t, delta: v - v0, pct, rate: (pct * perMs) / dt, rateAbs: ((v - v0) * perMs) / dt });
+  }
+  return out;
+}
+
+function applyTransform(payload, p) {
+  if (payload.type !== 'timeseries' || !p.transform || p.transform === 'value') return payload;
+  const windowMs = Number(p.window) * HOUR;
+  const per = PER_UNITS[p.per];
+  let unit = 'pct';
+  let suffix = '';
+  const series = payload.series.map((s) => {
+    let points;
+    if (p.transform === 'change') {
+      const base = s.points.find(([, v]) => v)?.[1];
+      points = base ? s.points.map(([t, v]) => [t, (v / base - 1) * 100]) : [];
+    } else {
+      const changes = windowChanges(s.points, windowMs, per.ms);
+      if (p.transform === 'accel') {
+        const rates = changes.map((c) => [c.t, c.rate]);
+        points = windowChanges(rates, windowMs, per.ms).map((c) => [c.t, c.delta]);
+      } else {
+        const key = { pct: 'pct', delta: 'delta', rate: 'rate', rate_abs: 'rateAbs' }[p.transform];
+        points = changes.map((c) => [c.t, c[key]]);
+      }
+    }
+    return { ...s, points };
+  });
+  if (p.transform === 'delta' || p.transform === 'rate_abs') unit = payload.unit;
+  if (p.transform === 'rate' || p.transform === 'rate_abs') suffix = per.short;
+  if (p.transform === 'accel') suffix = per.short;
+  const detail = p.transform === 'change' ? '' : ` (okno ${windowLabel(p.window)}${suffix ? `, ${per.label}` : ''})`;
+  return {
+    ...payload,
+    title: `${payload.title} – ${TRANSFORMS[p.transform].short}${detail}`,
+    unit: p.transform === 'accel' ? 'pp' : unit,
+    suffix,
+    zeroLine: true,
+    series,
+  };
+}
+
 const categorical = (fields) => ({ type: 'categorical', ...fields });
 const timeseries = (fields) => ({ type: 'timeseries', ...fields });
 
@@ -190,8 +284,8 @@ const HISTORY_COIN_METRICS = { price: COIN_METRICS.price, market_cap: COIN_METRI
 const HISTORY_SECTOR_METRICS = { market_cap: SECTOR_METRICS.market_cap, volume: SECTOR_METRICS.volume };
 
 const PERFORMANCE = [
-  ['percent_change_1h', '1h'], ['percent_change_24h', '24h'], ['percent_change_7d', '7d'],
-  ['percent_change_30d', '30d'], ['percent_change_60d', '60d'], ['percent_change_90d', '90d'],
+  ['percent_change_1h', '1h', 1], ['percent_change_24h', '24h', 24], ['percent_change_7d', '7d', 168],
+  ['percent_change_30d', '30d', 720], ['percent_change_60d', '60d', 1440], ['percent_change_90d', '90d', 2160],
 ];
 
 const FNG_PL = {
@@ -498,15 +592,34 @@ const DATASETS = [
     title: 'Wyniki monety w horyzontach',
     description: 'Zmiana ceny wybranej kryptowaluty: 1h, 24h, 7d, 30d, 60d i 90d.',
     endpoint: '/v2/cryptocurrency/quotes/latest', plan: 'free', charts: ['column', 'table'], size: 'm',
-    params: [{ key: 'coin', label: 'Kryptowaluta', type: 'coin', default: 1 }],
-    presets: [{ title: 'Zmiany ceny wybranej monety (1h–90d)', configure: true, keywords: 'performance zwrot return' }],
+    params: [
+      { key: 'coin', label: 'Kryptowaluta', type: 'coin', default: 1 },
+      {
+        key: 'per', label: 'Pokaż', type: 'select', default: 'none',
+        options: [{ value: 'none', label: 'Zmiana w każdym horyzoncie' }, ...PER_OPTIONS.map((o) => ({ value: o.value, label: `Średnie tempo ${o.label}` }))],
+      },
+    ],
+    presets: [
+      { title: 'Zmiany ceny wybranej monety (1h–90d)', configure: true, keywords: 'performance zwrot return' },
+      { title: 'Tempo zmian ceny monety (% na dzień w każdym horyzoncie)', description: 'Czy ruch przyspiesza? Zmiany z 1h–90d przeliczone na % dziennie – działa od razu, bez historii.', configure: true, params: { per: 'day' }, keywords: 'prędkość tempo speed velocity rate dynamika przyspieszenie' },
+    ],
     async load(p) {
       const res = await sources.quotes([p.coin]);
       const coin = Object.values(res.data || {}).flat()[0];
       if (!coin) throw Object.assign(new Error('Nie znaleziono kryptowaluty.'), { httpStatus: 404 });
       const q = usd(coin);
-      const rows = PERFORMANCE.map(([k, label]) => ({ key: k, label, value: num(q[k]) })).filter((r) => r.value != null);
-      return categorical({ title: `${coin.name} (${coin.symbol}) – zmiana ceny`, unit: 'pct', valueLabel: 'Zmiana ceny', polarity: true, rows, updatedAt: res.fetchedAt });
+      const per = PER_UNITS[p.per];
+      const rows = PERFORMANCE.map(([k, label, hours]) => {
+        const change = num(q[k]);
+        const value = per && change != null ? (change * per.ms) / (hours * HOUR) : change;
+        return { key: k, label, value, extra: per ? [{ label: 'Zmiana w horyzoncie', value: change, unit: 'pct' }] : undefined };
+      }).filter((r) => r.value != null);
+      return categorical({
+        title: per ? `${coin.name} (${coin.symbol}) – średnie tempo zmiany ceny ${per.label}` : `${coin.name} (${coin.symbol}) – zmiana ceny`,
+        unit: 'pct', suffix: per?.short || '', valueLabel: per ? `Tempo (${per.short.slice(1)})` : 'Zmiana ceny', polarity: true, rows,
+        note: per ? 'Każdy słupek to zmiana z danego horyzontu podzielona równo na jednostki czasu. Wyższe słupki po lewej = ruch przyspiesza.' : undefined,
+        updatedAt: res.fetchedAt,
+      });
     },
   },
   {
@@ -568,6 +681,7 @@ const DATASETS = [
 
   // ------------------------------------------------ historia z lokalnych snapshotów
   {
+    speed: true,
     id: 'history.global', group: 'history',
     title: 'Rynek globalny w czasie',
     description: 'Kapitalizacja, wolumen lub dominacja w czasie – z lokalnych snapshotów serwera.',
@@ -589,6 +703,7 @@ const DATASETS = [
     },
   },
   {
+    speed: true,
     id: 'history.sectors', group: 'history',
     title: 'Sektory w czasie',
     description: 'Kapitalizacja lub wolumen wybranych sektorów w czasie (do 8 serii) – z lokalnych snapshotów.',
@@ -617,6 +732,7 @@ const DATASETS = [
     },
   },
   {
+    speed: true,
     id: 'history.coins', group: 'history',
     title: 'Kryptowaluty w czasie',
     description: 'Cena, kapitalizacja lub wolumen wybranych monet (top 200) w czasie – z lokalnych snapshotów.',
@@ -643,8 +759,61 @@ const DATASETS = [
     },
   },
 
+  {
+    id: 'history.speed', group: 'history',
+    title: 'Ranking tempa zmian',
+    description: 'Co rośnie lub spada najszybciej: prędkość zmiany sektorów albo monet w wybranym oknie, w przeliczeniu na godzinę, dzień, tydzień…',
+    endpoint: 'snapshoty (/v1/cryptocurrency/categories, /listings/latest)', plan: 'local', charts: ['hbar', 'table'], size: 'm',
+    params: [
+      { key: 'kind', label: 'Co porównać', type: 'select', default: 'sectors', options: [{ value: 'sectors', label: 'Sektory (branże)' }, { value: 'coins', label: 'Kryptowaluty (top 200)' }] },
+      {
+        key: 'metric', label: 'Miara', type: 'select', default: 'market_cap',
+        options: [{ value: 'market_cap', label: 'Kapitalizacja' }, { value: 'volume', label: 'Wolumen 24h' }, { value: 'price', label: 'Cena (tylko monety)' }],
+      },
+      { key: 'window', label: 'Okno pomiaru zmiany', type: 'select', options: WINDOW_OPTIONS, default: '168' },
+      { key: 'per', label: 'Prędkość w przeliczeniu', type: 'select', options: PER_OPTIONS, default: 'day' },
+      { key: 'limit', label: 'Liczba pozycji', type: 'number', min: 3, max: 50, default: 12 },
+      { key: 'order', label: 'Kolejność', type: 'select', options: [{ value: 'desc', label: 'Najszybciej rosnące' }, { value: 'asc', label: 'Najszybciej spadające' }], default: 'desc' },
+    ],
+    presets: [
+      { title: 'Najszybciej rosnące sektory (%/dzień, okno 7 dni)', description: 'Tempo wzrostu kapitalizacji branż – kto przyspiesza.', keywords: 'prędkość tempo speed velocity rate dynamika rotacja' },
+      { title: 'Najszybciej spadające sektory (%/dzień, okno 7 dni)', params: { order: 'asc' }, keywords: 'prędkość tempo spadek' },
+      { title: 'Najszybciej rosnące monety (%/godzinę, okno 24h)', params: { kind: 'coins', metric: 'price', window: '24', per: 'hour' }, keywords: 'prędkość tempo speed momentum' },
+      { title: 'Przyrost wolumenu sektorów (%/dzień)', params: { metric: 'volume', window: '72' }, keywords: 'prędkość tempo wolumen volume' },
+    ],
+    async load(p) {
+      const per = PER_UNITS[p.per];
+      const windowMs = Number(p.window) * HOUR;
+      const isCoins = p.kind === 'coins';
+      const metric = !isCoins && p.metric === 'price' ? 'market_cap' : p.metric;
+      const field = isCoins && metric === 'volume' ? 'volume_24h' : metric;
+      const ids = history.latestIds(isCoins ? 'coins' : 'categories');
+      const range = windowMs * 2.2;
+      const rows = [];
+      for (const id of ids) {
+        const name = isCoins ? history.coinName(id) : history.categoryName(id);
+        if (!isCoins && categoryGroup(name) !== 'sectors') continue;
+        const points = isCoins ? history.coinSeries(id, field, range) : history.categorySeries(id, field, range);
+        const last = windowChanges(points, windowMs, per.ms).at(-1);
+        if (!last) continue;
+        rows.push({
+          key: String(id), label: isCoins ? name.replace(/^.*\((.+)\)$/, '$1') : name, name, value: last.rate,
+          extra: [{ label: `Zmiana w oknie ${windowLabel(p.window)}`, value: last.pct, unit: 'pct' }],
+        });
+      }
+      const label = { market_cap: 'kapitalizacji', volume: 'wolumenu', price: 'ceny' }[metric];
+      return categorical({
+        title: `Tempo zmiany ${label} ${per.label} – okno ${windowLabel(p.window)}`,
+        unit: 'pct', suffix: per.short, valueLabel: `Tempo (${per.short.slice(1)})`, polarity: true,
+        rows: sortRows(rows, p.order, p.limit), history: history.historyStatus(),
+        note: rows.length ? 'Liczone z lokalnych snapshotów: zmiana w oknie podzielona przez jego długość.' : undefined,
+      });
+    },
+  },
+
   // ------------------------------------------------ historia CMC (plan płatny)
   {
+    speed: true,
     id: 'cmc.global_history', group: 'historical',
     title: 'Rynek globalny – historia CMC',
     description: 'Oficjalne dzienne dane historyczne rynku. Wymaga płatnego planu CMC.',
@@ -672,6 +841,7 @@ const DATASETS = [
     },
   },
   {
+    speed: true,
     id: 'cmc.coin_history', group: 'historical',
     title: 'Kryptowaluty – historia CMC',
     description: 'Dzienne notowania wybranych monet (do 5). Wymaga płatnego planu CMC.',
@@ -725,6 +895,31 @@ const DATASETS = [
     },
   },
 ];
+
+const SPEED_PRESETS = {
+  'history.global': [
+    { title: 'Prędkość zmian kapitalizacji rynku (%/dzień)', params: { metric: 'total_market_cap', transform: 'rate', window: '24', per: 'day' }, keywords: 'prędkość tempo speed velocity rate dynamika' },
+    { title: 'Przyspieszenie rynku (zmiana tempa)', description: 'Czy tempo zmian kapitalizacji rośnie, czy hamuje.', params: { metric: 'total_market_cap', transform: 'accel', window: '24', per: 'day' }, keywords: 'przyspieszenie acceleration momentum prędkość' },
+  ],
+  'history.sectors': [
+    { title: 'Prędkość zmian kapitalizacji sektorów (%/dzień)', params: { transform: 'rate', window: '24', per: 'day' }, keywords: 'prędkość tempo speed velocity rate branże' },
+  ],
+  'history.coins': [
+    { title: 'Prędkość zmian ceny BTC i ETH (%/godzinę)', params: { coins: [1, 1027], mode: 'absolute', transform: 'rate', window: '4', per: 'hour' }, keywords: 'prędkość tempo speed velocity rate momentum' },
+  ],
+};
+
+for (const ds of DATASETS) {
+  if (!ds.speed) continue;
+  const timeParams = TIME_PARAMS.map((spec) => ({ ...spec }));
+  // Dane CMC są dzienne, więc okna krótsze niż doba nie mają sensu.
+  if (ds.group === 'historical') timeParams[1].options = WINDOW_OPTIONS.filter((o) => Number(o.value) >= 24);
+  ds.params = [...ds.params, ...timeParams];
+  ds.presets.push(...(SPEED_PRESETS[ds.id] || []));
+  const load = ds.load;
+  ds.load = async (p) => applyTransform(await load(p), p);
+  delete ds.speed;
+}
 
 const BY_ID = new Map(DATASETS.map((d) => [d.id, d]));
 

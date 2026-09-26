@@ -318,7 +318,12 @@ function buildForm() {
   title.appendChild(titleInput);
   form.appendChild(title);
 
-  for (const spec of ds.params) form.appendChild(paramField(spec));
+  for (const spec of ds.params) {
+    const field = paramField(spec);
+    if (spec.showIf) field.dataset.showIf = JSON.stringify(spec.showIf);
+    form.appendChild(field);
+  }
+  updateVisibility();
 
   if (ds.charts.length > 1) {
     form.appendChild(segmented('Typ wykresu', 'chart', ds.charts.map((c) => [c, CHART_LABELS[c] || c, icon(c)]), widget.chart, (v) => {
@@ -329,6 +334,15 @@ function buildForm() {
   form.appendChild(segmented('Rozmiar na dashboardzie', 'size', Object.entries(SIZE_LABELS).map(([k, l]) => [k, l]), widget.size, (v) => {
     widget.size = v;
   }));
+}
+
+// Pola zależne (np. okno pomiaru) pokazujemy tylko, gdy mają znaczenie.
+function updateVisibility() {
+  const params = config?.widget.params || {};
+  document.querySelectorAll('#config-form [data-show-if]').forEach((el) => {
+    const rule = JSON.parse(el.dataset.showIf);
+    el.hidden = !Object.entries(rule).every(([key, values]) => values.includes(String(params[key])));
+  });
 }
 
 function fieldWrap(label, tag = 'label') {
@@ -359,6 +373,7 @@ function paramField(spec) {
   const params = widget.params;
   const update = (value) => {
     params[spec.key] = value;
+    updateVisibility();
     schedulePreview();
   };
 

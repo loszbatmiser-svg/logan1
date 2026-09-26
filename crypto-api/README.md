@@ -57,6 +57,28 @@ Serwer sam przechodzi w tryb demo, gdy w `.env` nie ma klucza.
 > więc nie trafi do repozytorium. CoinMarketCap i tak nie pozwala wołać API bezpośrednio z przeglądarki (CORS),
 > dlatego serwer działa jako pośrednik z cache.
 
+## Zmiana i prędkość w czasie
+
+Każdy wykres w czasie (grupy *Historia* i *Historia CMC*) ma w konfiguratorze pole **Pokaż**:
+
+| Tryb | Co pokazuje | Przykład |
+|---|---|---|
+| Wartość | zwykła wartość w czasie | kapitalizacja w USD |
+| Zmiana od początku zakresu | % względem pierwszego punktu wykresu | +12% od 30 dni temu |
+| Zmiana w oknie (%) / (wartość) | o ile zmieniło się w ostatnim oknie, liczone w każdym punkcie | +3,1% w ciągu 24 h |
+| **Prędkość zmiany** | zmiana w oknie przeliczona na wybraną jednostkę czasu: godzinę, dzień, tydzień, miesiąc, rok | +0,8%/d, +40 mld USD/d |
+| Przyspieszenie | o ile zmieniła się prędkość względem okna wcześniej (czy trend przyspiesza, czy hamuje) | +0,3 p.p./d |
+
+*Okno pomiaru* (1 h – 30 dni) określa, na jakim odcinku mierzona jest zmiana, a *prędkość w przeliczeniu* –
+w jakiej jednostce czasu ją wyrazić. Tempo liczone jest z faktycznego odstępu między punktami.
+
+Dodatkowo:
+- **Ranking tempa zmian** – które sektory lub monety rosną/spadają najszybciej (np. %/dzień w oknie 7 dni);
+- **Tempo zmian ceny monety** – zmiany z horyzontów 1h, 24h, 7d, 30d, 60d, 90d przeliczone na tę samą jednostkę
+  (np. %/dzień). Działa od razu, bez czekania na historię: jeśli słupki krótkich horyzontów są wyższe, ruch przyspiesza.
+
+W wyszukiwarce wpisz `prędkość`, `tempo` albo `przyspieszenie`.
+
 ## Kategorie danych w wyszukiwarce
 
 | Kategoria | Endpointy CMC | Plan | Przykładowe wykresy |

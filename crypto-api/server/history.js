@@ -194,6 +194,13 @@ export function coinName(id) {
   return n ? `${n.name} (${n.symbol})` : `#${id}`;
 }
 
+// Identyfikatory kategorii lub monet z najnowszego snapshotu.
+export function latestIds(kind) {
+  const last = snapshots.at(-1);
+  if (!last) return [];
+  return Object.keys(kind === 'coins' ? last.c : last.s).map((id) => (kind === 'coins' ? Number(id) : id));
+}
+
 export function latestSnapshot() {
   return snapshots.at(-1) || null;
 }

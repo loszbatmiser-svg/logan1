@@ -92,7 +92,7 @@ function tooltipRows(pairs) {
 }
 
 function rowTooltip(row, payload) {
-  const pairs = [[payload.valueLabel || 'Wartość', formatValue(row.value, payload.unit, { signed: payload.polarity })]];
+  const pairs = [[payload.valueLabel || 'Wartość', sfx(formatValue(row.value, payload.unit, { signed: payload.polarity }), payload.suffix)]];
   for (const e of row.extra || []) {
     if (e.label === payload.valueLabel) continue;
     pairs.push([e.label, formatValue(e.value, e.unit, { signed: e.unit === 'pct' && /zmiana/i.test(e.label) })]);
@@ -100,10 +100,13 @@ function rowTooltip(row, payload) {
   return `<div style="font-weight:600;margin-bottom:4px">${escapeHtml(row.name || row.label)}</div>${tooltipRows(pairs)}`;
 }
 
-function valueAxis(t, unit, extra = {}) {
+// Dopisek jednostki czasu przy prędkości, np. "2,4%/d".
+const sfx = (text, suffix) => (!suffix || text === '—' || text === '' ? text : `${text}${suffix}`);
+
+function valueAxis(t, unit, extra = {}, suffix = '') {
   return {
     type: 'value',
-    axisLabel: { color: t.muted, formatter: (v) => formatAxis(v, unit), hideOverlap: true },
+    axisLabel: { color: t.muted, formatter: (v) => sfx(formatAxis(v, unit), suffix), hideOverlap: true },
     splitLine: { lineStyle: { color: t.grid, width: 1 } },
     axisLine: { show: false },
     axisTick: { show: false },
@@ -144,7 +147,7 @@ function hbarOption(payload, t, containerWidth) {
       axisPointer: { type: 'shadow', shadowStyle: { color: t.grid, opacity: 0.5 } },
       formatter: (items) => rowTooltip(rows[items[0].dataIndex], payload),
     },
-    xAxis: valueAxis(t, payload.unit),
+    xAxis: valueAxis(t, payload.unit, {}, payload.suffix),
     yAxis: categoryAxis(t, rows.map((r) => r.label), {
       inverse: true,
       axisLabel: { color: t.text2, fontSize: 12, width, overflow: 'truncate', ellipsis: '…' },
@@ -177,7 +180,7 @@ function columnOption(payload, t) {
       formatter: (items) => rowTooltip(rows[items[0].dataIndex], payload),
     },
     xAxis: categoryAxis(t, rows.map((r) => r.label), { axisLabel: { color: t.text2, interval: 0, width: 90, overflow: 'truncate' } }),
-    yAxis: valueAxis(t, payload.unit),
+    yAxis: valueAxis(t, payload.unit, {}, payload.suffix),
     series: [{
       type: 'bar',
       barMaxWidth: 40,
@@ -192,7 +195,7 @@ function columnOption(payload, t) {
           position: r.value >= 0 ? 'top' : 'bottom',
           color: t.text2,
           fontSize: 11,
-          formatter: () => formatValue(r.value, payload.unit, { signed: payload.polarity }),
+          formatter: () => sfx(formatValue(r.value, payload.unit, { signed: payload.polarity }), payload.suffix),
         },
       })),
     }],
@@ -232,7 +235,7 @@ function treemapOption(payload, t, size) {
           if (!row) return p.name;
           const second = hasChange && payload.unit !== 'pct'
             ? formatValue(row.change, 'pct', { signed: true })
-            : formatValue(row.value, payload.unit, { signed: payload.polarity });
+            : sfx(formatValue(row.value, payload.unit, { signed: payload.polarity }), payload.suffix);
           return `{b|${row.label}}\n${second}`;
         },
         rich: { b: { fontWeight: 600, fontSize: 12, lineHeight: 16 } },
@@ -296,7 +299,7 @@ function lineOption(payload, t, area) {
       axisPointer: { type: 'line', lineStyle: { color: t.axis, width: 1 } },
       formatter: (items) => {
         const time = items[0]?.value?.[0];
-        const pairs = items.map((it) => [it.seriesName, formatValue(it.value[1], payload.unit, { compact: true })]);
+        const pairs = items.map((it) => [it.seriesName, sfx(formatValue(it.value[1], payload.unit, { compact: true, signed: payload.zeroLine }), payload.suffix)]);
         return `<div style="font-weight:600;margin-bottom:4px">${escapeHtml(formatDate(time, true))}</div>${tooltipRows(pairs)}`;
       },
     },
@@ -311,7 +314,7 @@ function lineOption(payload, t, area) {
       axisTick: { show: false },
       splitLine: { show: false },
     },
-    yAxis: valueAxis(t, payload.unit, payload.bands ? { min: 0, max: 100 } : { scale: !area }),
+    yAxis: valueAxis(t, payload.unit, payload.bands ? { min: 0, max: 100 } : { scale: !area && !payload.zeroLine }, payload.suffix),
     series: series.map((s, i) => ({
       type: 'line',
       name: s.name,
@@ -329,11 +332,11 @@ function lineOption(payload, t, area) {
       } : undefined,
     })),
   };
-  if (payload.unit === 'index' && !payload.bands) {
+  if ((payload.unit === 'index' || payload.zeroLine) && !payload.bands && option.series.length) {
     option.series[0].markLine = {
       silent: true, symbol: 'none', label: { show: false },
       lineStyle: { color: t.axis, type: 'solid', width: 1 },
-      data: [{ yAxis: 100 }],
+      data: [{ yAxis: payload.zeroLine ? 0 : 100 }],
     };
   }
   return option;
@@ -379,16 +382,16 @@ export function tableHtml(p) {
   if (p.type === 'categorical') {
     const extraLabels = [...new Set(p.rows.flatMap((r) => (r.extra || []).map((e) => e.label)))].filter((l) => l !== p.valueLabel);
     const head = `<tr><th>#</th><th>Nazwa</th><th>${escapeHtml(p.valueLabel || 'Wartość')}</th>${extraLabels.map((l) => `<th>${escapeHtml(l)}</th>`).join('')}</tr>`;
-    const cell = (value, unit, signed) => {
+    const cell = (value, unit, signed, suffix = '') => {
       const cls = signed && value != null ? (value > 0 ? 'num-pos' : value < 0 ? 'num-neg' : '') : '';
-      return `<td class="${cls}">${formatValue(value, unit, { signed, compact: unit !== 'money' || Math.abs(value) >= 1e9 })}</td>`;
+      return `<td class="${cls}">${sfx(formatValue(value, unit, { signed, compact: unit !== 'money' || Math.abs(value) >= 1e9 }), suffix)}</td>`;
     };
     const body = p.rows.map((r, i) => {
       const extras = extraLabels.map((l) => {
         const e = (r.extra || []).find((x) => x.label === l);
         return e ? cell(e.value, e.unit, e.unit === 'pct' && /zmiana/i.test(l)) : '<td>—</td>';
       }).join('');
-      return `<tr><td>${i + 1}</td><td class="name">${escapeHtml(r.name || r.label)}</td>${cell(r.value, p.unit, p.polarity)}${extras}</tr>`;
+      return `<tr><td>${i + 1}</td><td class="name">${escapeHtml(r.name || r.label)}</td>${cell(r.value, p.unit, p.polarity, p.suffix)}${extras}</tr>`;
     }).join('');
     return `<div class="table-wrap"><table class="data"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
@@ -396,7 +399,7 @@ export function tableHtml(p) {
     const times = [...new Set(p.series.flatMap((s) => s.points.map(([ts]) => ts)))].sort((a, b) => b - a).slice(0, 500);
     const lookup = p.series.map((s) => new Map(s.points));
     const head = `<tr><th>#</th><th>Data</th>${p.series.map((s) => `<th>${escapeHtml(s.name)}</th>`).join('')}</tr>`;
-    const body = times.map((ts, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(formatDate(ts, true))}</td>${lookup.map((m) => `<td>${formatValue(m.get(ts), p.unit)}</td>`).join('')}</tr>`).join('');
+    const body = times.map((ts, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(formatDate(ts, true))}</td>${lookup.map((m) => `<td>${sfx(formatValue(m.get(ts), p.unit, { signed: p.zeroLine }), p.suffix)}</td>`).join('')}</tr>`).join('');
     return `<div class="table-wrap"><table class="data"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
   return '';
