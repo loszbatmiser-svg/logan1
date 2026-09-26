@@ -117,11 +117,11 @@ app.get('/api/dashboard', (req, res) => {
   }
 });
 
-// Zapisany zakres suwaka wykresu w procentach osi czasu.
-function validZoom(z) {
-  const start = Number(z?.start);
-  const end = Number(z?.end);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > 100 || end - start < 0.01) return null;
+// Zakres osi czasu { start, end } w milisekundach.
+function validRange(r) {
+  const start = Number(r?.start);
+  const end = Number(r?.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
   return { start, end };
 }
 
@@ -139,12 +139,14 @@ app.put('/api/dashboard', (req, res) => {
       chart: getDataset(w.dataset).charts.includes(w.chart) ? w.chart : getDataset(w.dataset).charts[0],
       size: ['s', 'm', 'l'].includes(w.size) ? w.size : getDataset(w.dataset).size,
       title: typeof w.title === 'string' ? w.title.slice(0, 120) : '',
-      zoom: validZoom(w.zoom),
+      locked: w.locked === true,
+      zoom: w.locked === true ? validRange(w.zoom) : null,
     }));
   const dashboard = {
     version: 1,
     currency: CURRENCIES.includes(body.currency) ? body.currency : 'USD',
     refreshMinutes: [0, 5, 10, 30, 60].includes(body.refreshMinutes) ? body.refreshMinutes : 10,
+    timeRange: validRange(body.timeRange),
     widgets,
   };
   fs.mkdirSync(config.dataDir, { recursive: true });

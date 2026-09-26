@@ -189,5 +189,8 @@ test('najdłuższa historia: strony indeksu strachu i pełna historia rynku CMC'
   const full = await g.load(catalog.resolveParams(g, { metric: 'total_market_cap', days: '0' }));
   const again = await g.load(catalog.resolveParams(g, { metric: 'total_market_cap', days: '365' }));
   assert.ok(full.series[0].points.length > 4000, 'historia od 2013');
-  assert.ok(again.series[0].points.length <= 366);
+  assert.equal(full.defaultStart, undefined, 'cała historia – bez zawężonego widoku');
+  // Krótszy zakres to tylko widok na start – dane są pełne, żeby suwak mógł je wydłużyć.
+  assert.equal(again.series[0].points.length, full.series[0].points.length);
+  assert.ok(Math.abs(again.defaultStart - (Date.now() - 365 * 86_400_000)) < 60_000);
 });

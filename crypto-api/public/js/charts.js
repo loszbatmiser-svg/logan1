@@ -452,19 +452,27 @@ function isEmpty(payload) {
   return false;
 }
 
-/**
- * Rysuje dane w kontenerze. Zwraca uchwyt z metodą dispose().
- * view: typ wykresu (hbar, treemap, line…) albo 'table'.
- */
 // Suwak zakresu pod osią czasu – przy wykresach, które mają z czego wybierać.
 const hasSlider = (payload) => payload.type === 'timeseries' && payload.series.some((s) => s.points.length > 20);
 
-function zoomOption(t, zoom, left) {
+function extentOf(payload) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const s of payload.series) {
+    if (!s.points.length) continue;
+    min = Math.min(min, s.points[0][0]);
+    max = Math.max(max, s.points.at(-1)[0]);
+  }
+  return [min, max];
+}
+
+function zoomOption(t, range, left) {
+  const window = range ? { startValue: range.start, endValue: range.end } : { start: 0, end: 100 };
   return [
     {
       // Daty przy uchwytach wyświetlają się obok suwaka, więc zostawiamy na nie miejsce.
       type: 'slider', xAxisIndex: 0, bottom: 8, height: 26, left: Math.max(left, 78), right: 78,
-      start: zoom?.start ?? 0, end: zoom?.end ?? 100, filterMode: 'filter',
+      ...window, filterMode: 'filter',
       labelFormatter: (v) => formatDate(v),
       textStyle: { color: t.muted, fontSize: 11 },
       borderColor: t.axis, backgroundColor: 'transparent',
@@ -480,24 +488,30 @@ function zoomOption(t, zoom, left) {
   ];
 }
 
+const noop = { dispose() {}, getRange: () => null, setRange() {}, setLocked() {} };
+
 /**
- * zoom: zapisany zakres suwaka { start, end } w procentach, onZoom: wywoływane po jego zmianie.
+ * Rysuje dane w kontenerze. Zwraca uchwyt: dispose(), getRange(), setRange(range), setLocked(bool).
+ * view: typ wykresu (hbar, treemap, line…) albo 'table'.
+ * range: zakres osi czasu { start, end } w ms albo null = widok domyślny wykresu (payload.defaultStart).
+ * locked: wykres nie reaguje na suwaki innych wykresów. onRange(range): zakres zmieniony przez użytkownika.
+ * sync: udział we wspólnym kursorze i zakresie (podgląd w konfiguratorze – nie).
  */
-export function renderPayload(container, payload, view, { size = 'm', zoom = null, onZoom = null } = {}) {
+export function renderPayload(container, payload, view, { size = 'm', range = null, locked = false, onRange = null, sync = true } = {}) {
   container.innerHTML = '';
   const note = payload.note ? `<p class="card-note">${escapeHtml(payload.note)}</p>` : '';
 
   if (payload.type === 'kpi') {
     container.innerHTML = kpiHtml(payload);
-    return { dispose() {} };
+    return noop;
   }
   if (payload.type === 'gauge') {
     container.innerHTML = gaugeHtml(payload);
-    return { dispose() {} };
+    return noop;
   }
   if (payload.type === 'meters') {
     container.innerHTML = metersHtml(payload);
-    return { dispose() {} };
+    return noop;
   }
   if (isEmpty(payload)) {
     const h = payload.history;
@@ -507,11 +521,11 @@ export function renderPayload(container, payload, view, { size = 'm', zoom = nul
         : 'Snapshoty są wyłączone (SNAPSHOT_INTERVAL_MINUTES=0 w .env).')
       : '';
     container.innerHTML = stateHtml('empty', 'Brak danych do pokazania', detail);
-    return { dispose() {} };
+    return noop;
   }
   if (view === 'table') {
     container.innerHTML = tableHtml(payload) + note;
-    return { dispose() {} };
+    return noop;
   }
 
   const t = tokens();
@@ -534,31 +548,72 @@ export function renderPayload(container, payload, view, { size = 'm', zoom = nul
       option = payload.type === 'timeseries' ? lineOption(payload, t, false) : hbarOption(payload, t, el.clientWidth);
   }
 
-  if (slider) option.dataZoom = zoomOption(t, zoom, option.grid.left);
+  const [minT, maxT] = payload.type === 'timeseries' ? extentOf(payload) : [0, 0];
+  const defaultRange = payload.defaultStart && payload.defaultStart > minT ? { start: payload.defaultStart, end: maxT } : null;
+  if (slider) option.dataZoom = zoomOption(t, range || defaultRange, option.grid.left);
   else if (option.grid && option.xAxis?.type === 'time') option.grid.bottom = 28;
 
   const chart = echarts.init(el, null, { renderer: 'canvas' });
   chart.setOption(option);
-  if (slider) {
-    let zoomTimer = null;
-    const report = () => {
-      const dz = chart.getOption().dataZoom?.[0];
-      if (!dz || !onZoom) return;
-      clearTimeout(zoomTimer);
-      zoomTimer = setTimeout(() => onZoom(dz.start <= 0.01 && dz.end >= 99.99 ? null : { start: dz.start, end: dz.end }), 300);
-    };
-    chart.on('datazoom', report);
-    // Podwójne kliknięcie przywraca cały zakres.
-    chart.getZr().on('dblclick', () => chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 }));
-  }
   const ro = new ResizeObserver(() => chart.resize());
   ro.observe(el);
-  const unsync = payload.type === 'timeseries' && option.xAxis?.type === 'time' ? syncTime(chart, payload) : () => {};
+
+  const isTime = payload.type === 'timeseries' && option.xAxis?.type === 'time';
+  const entry = { chart, series: (payload.series || []).slice(0, 8), slider, locked, defaultRange };
+
+  entry.getRange = () => {
+    if (!slider) return null;
+    const dz = chart.getOption().dataZoom?.[0];
+    if (!dz) return null;
+    const start = dz.startValue ?? minT + ((maxT - minT) * dz.start) / 100;
+    const end = dz.endValue ?? minT + ((maxT - minT) * dz.end) / 100;
+    return { start: Math.round(start), end: Math.round(end) };
+  };
+  entry.setRange = (r) => {
+    if (!slider) return;
+    const target = r || defaultRange;
+    zoomSyncing = true;
+    try {
+      chart.dispatchAction(target ? { type: 'dataZoom', startValue: target.start, endValue: target.end } : { type: 'dataZoom', start: 0, end: 100 });
+    } finally {
+      zoomSyncing = false;
+    }
+  };
+
+  if (slider) {
+    let frame = 0;
+    const userZoom = (r) => {
+      if (entry.locked || !sync) {
+        onRange?.(r);
+        return;
+      }
+      // Wspólny zakres: przesuń wszystkie niezablokowane wykresy w czasie.
+      for (const other of timeCharts) if (other !== entry && !other.locked) other.setRange(r);
+      onRange?.(r);
+    };
+    chart.on('datazoom', () => {
+      if (zoomSyncing) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => userZoom(entry.getRange()));
+    });
+    // Podwójne kliknięcie wraca do widoku domyślnego (dla niezablokowanych – wszystkich).
+    chart.getZr().on('dblclick', () => {
+      entry.setRange(null);
+      userZoom(null);
+    });
+  }
+
+  const unsync = isTime && sync ? syncTime(entry) : () => {};
   return {
     dispose() {
       unsync();
       ro.disconnect();
       chart.dispose();
+    },
+    getRange: entry.getRange,
+    setRange: entry.setRange,
+    setLocked(value) {
+      entry.locked = value;
     },
   };
 }
@@ -568,6 +623,7 @@ export function renderPayload(container, payload, view, { size = 'm', zoom = nul
 
 const timeCharts = new Set();
 let syncing = false;
+let zoomSyncing = false;
 
 function nearestIndex(points, t) {
   let lo = 0;
@@ -595,8 +651,8 @@ function showMoment(entry, t) {
   chart.dispatchAction({ type: 'showTip', seriesIndex: s, dataIndex: nearestIndex(points, t) });
 }
 
-function syncTime(chart, payload) {
-  const entry = { chart, series: payload.series.slice(0, 8) };
+function syncTime(entry) {
+  const { chart } = entry;
   timeCharts.add(entry);
   chart.on('updateAxisPointer', (e) => {
     if (syncing) return;

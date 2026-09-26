@@ -555,7 +555,7 @@ async function renderPreview() {
     if (token !== previewToken || !config) return;
     disposePreview();
     box.innerHTML = `<div class="card-head"><div class="card-titles"><h2>${escapeHtml(config.widget.title || payload.title || config.ds.title)}</h2></div></div><div class="card-body"></div>`;
-    previewHandle = renderPayload(box.querySelector('.card-body'), payload, config.widget.chart, { size: 'm' });
+    previewHandle = renderPayload(box.querySelector('.card-body'), payload, config.widget.chart, { size: 'm', sync: false });
   } catch (err) {
     if (token !== previewToken) return;
     disposePreview();

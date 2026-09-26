@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { renderPayload, loadingHtml, errorHtml } from './charts.js';
-import { escapeHtml, formatTime, formatValue, setCurrency } from './format.js';
+import { escapeHtml, formatDate, formatTime, formatValue, setCurrency } from './format.js';
 import { icon, CHART_LABELS } from './icons.js';
 import { initSearch, openConfigurator, openSearch, setCatalog } from './search.js';
 
@@ -62,6 +62,7 @@ function createCard(widget) {
       <div class="card-tools">
         ${views.length > 1 ? `<select data-act="chart" aria-label="Typ wykresu">${views.map((v) => `<option value="${v}">${CHART_LABELS[v] || v}</option>`).join('')}</select>` : ''}
         ${tableable ? `<button type="button" data-act="table" aria-pressed="false" title="Pokaż dane w tabeli">${icon('table')}</button>` : ''}
+        <button type="button" data-act="lock" aria-pressed="false" hidden>${icon('unlock')}</button>
         <button type="button" data-act="edit" title="Ustawienia wykresu">${icon('sliders')}</button>
         <button type="button" data-act="size" title="Zmień rozmiar">${icon('resize')}</button>
         <button type="button" data-act="remove" title="Usuń z dashboardu">${icon('x')}</button>
@@ -86,6 +87,7 @@ function createCard(widget) {
     card.table = !card.table;
     drawCard(card);
   });
+  el.querySelector('[data-act="lock"]').addEventListener('click', () => toggleLock(card));
   el.querySelector('[data-act="edit"]').addEventListener('click', () => openConfigurator(widget, { mode: 'edit', id: widget.id }));
   el.querySelector('[data-act="size"]').addEventListener('click', () => {
     widget.size = SIZES[(SIZES.indexOf(widget.size) + 1) % SIZES.length];
@@ -109,6 +111,15 @@ function updateHeader(card) {
   const currency = card.payload?.unit === 'money' ? ` · ${state.dashboard.currency}` : '';
   sub.textContent = sourceLabel(card.payload, ds, card.widget.size === 's') + currency;
   sub.title = sourceLabel(card.payload, ds, false) + currency;
+  const lockBtn = card.el.querySelector('[data-act="lock"]');
+  const timeChart = card.payload?.type === 'timeseries' && !card.table && ['line', 'area'].includes(card.widget.chart);
+  lockBtn.hidden = !timeChart;
+  lockBtn.setAttribute('aria-pressed', String(!!card.widget.locked));
+  lockBtn.innerHTML = icon(card.widget.locked ? 'lock' : 'unlock');
+  lockBtn.title = card.widget.locked
+    ? 'Zakres zablokowany – suwaki innych wykresów go nie zmieniają. Kliknij, aby dołączyć do wspólnego zakresu.'
+    : 'Zablokuj zakres tego wykresu (suwaki innych wykresów przestaną go zmieniać)';
+  card.el.classList.toggle('locked', !!card.widget.locked && timeChart);
   const tableBtn = card.el.querySelector('[data-act="table"]');
   if (tableBtn) {
     tableBtn.setAttribute('aria-pressed', String(card.table));
@@ -127,9 +138,14 @@ function drawCard(card) {
     const view = card.table ? 'table' : card.widget.chart;
     card.handle = renderPayload(body, card.payload, view, {
       size: card.widget.size,
-      zoom: card.widget.zoom,
-      onZoom: (zoom) => {
-        card.widget.zoom = zoom;
+      range: card.widget.locked ? card.widget.zoom : state.dashboard.timeRange,
+      locked: !!card.widget.locked,
+      onRange: (range) => {
+        if (card.widget.locked) card.widget.zoom = range;
+        else {
+          state.dashboard.timeRange = range;
+          updateRangeChip();
+        }
         saveDashboard();
       },
     });
@@ -412,10 +428,46 @@ function setupMenu() {
   });
 }
 
+// ------------------------------------------------------------------ wspólny zakres czasu
+
+function toggleLock(card) {
+  const widget = card.widget;
+  if (!widget.locked) {
+    // Zapamiętaj bieżący zakres – od teraz ten wykres go trzyma.
+    widget.locked = true;
+    widget.zoom = card.handle?.getRange() || null;
+    card.handle?.setLocked(true);
+    toast('Zakres wykresu zablokowany');
+  } else {
+    widget.locked = false;
+    widget.zoom = null;
+    card.handle?.setLocked(false);
+    card.handle?.setRange(state.dashboard.timeRange);
+    toast('Wykres wrócił do wspólnego zakresu');
+  }
+  updateHeader(card);
+  saveDashboard();
+}
+
+function updateRangeChip() {
+  const r = state.dashboard.timeRange;
+  const chip = $('#range-chip');
+  chip.hidden = !r;
+  if (r) chip.querySelector('span').textContent = `${formatDate(r.start)} – ${formatDate(r.end)}`;
+}
+
+function resetRange() {
+  state.dashboard.timeRange = null;
+  for (const card of state.cards.values()) if (!card.widget.locked) card.handle?.setRange(null);
+  updateRangeChip();
+  saveDashboard();
+}
+
 function applyDashboardSettings() {
   setCurrency(state.dashboard.currency);
   $('#currency').value = state.dashboard.currency;
   $('#refresh').value = String(state.dashboard.refreshMinutes);
+  updateRangeChip();
   scheduleRefresh();
 }
 
@@ -450,6 +502,7 @@ async function init() {
     saveDashboard();
   });
   $('#btn-refresh').addEventListener('click', refreshAll);
+  $('#range-chip button').addEventListener('click', resetRange);
   $('#btn-add').addEventListener('click', () => openSearch());
   document.querySelectorAll('[data-open-search]').forEach((b) => b.addEventListener('click', () => openSearch()));
   document.addEventListener('keydown', (e) => {

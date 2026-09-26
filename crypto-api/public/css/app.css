@@ -180,6 +180,16 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--series-1
 .brand p { margin: 0; font-size: 12px; }
 .filters { display: flex; gap: 12px; flex-wrap: wrap; }
 .actions { display: flex; align-items: center; gap: 6px; }
+.range-chip {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 4px 0 10px;
+  border-radius: 8px; border: 1px solid var(--series-1); background: color-mix(in srgb, var(--series-1) 10%, transparent);
+  font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.range-chip .icon { width: 16px; height: 16px; color: var(--series-1); }
+.range-chip button { height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: var(--surface); cursor: pointer; font-size: 12px; }
+.range-chip button:hover { background: var(--surface-2); }
+.card.locked { box-shadow: inset 3px 0 0 var(--series-1), var(--shadow); }
+.card-tools button[data-act="lock"][aria-pressed="true"] { color: var(--series-1); opacity: 1; }
 
 .menu { position: relative; }
 .menu-list {

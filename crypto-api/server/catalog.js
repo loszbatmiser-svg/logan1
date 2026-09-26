@@ -948,7 +948,32 @@ const SPEED_PRESETS = {
 GROUPS.splice(GROUPS.findIndex((g) => g.id === 'history'), 0, ...EXTERNAL_GROUPS);
 DATASETS.push(...externalDatasets({ categorical, timeseries, sortRows, toIndex, options, MODE_OPTIONS }));
 
+// Wykresy w czasie zawsze ładują najdłuższą dostępną historię, a wybrany zakres
+// wyznacza tylko widok na start (payload.defaultStart) – suwakiem da się go wydłużyć.
+const FULL_HISTORY = {
+  'history.global': ['range', '0'], 'history.sectors': ['range', '0'], 'history.coins': ['range', '0'],
+  'onchain.series': ['range', '0'], 'defi.tvl_history': ['range', '0'], 'defi.stablecoins_history': ['range', '0'],
+  'defi.volume_history': ['range', '0'], 'cmc.global_history': ['days', '0'], 'sentiment.fng_history': ['days', '0'],
+  // Plan klucza CMC pozwala na 12 miesięcy notowań pojedynczych monet.
+  'cmc.coin_history': ['days', '365'],
+  'btc.hashrate': ['period', 'all'], 'btc.block_fees': ['period', 'all'],
+};
+const PERIOD_DAYS = { '1m': 30, '3m': 90, '6m': 180, '1y': 365, '2y': 730, '3y': 1095, all: 0 };
+const viewDays = (value) => (value in PERIOD_DAYS ? PERIOD_DAYS[value] : Number(value) || 0);
+
 for (const ds of DATASETS) {
+  const full = FULL_HISTORY[ds.id];
+  if (full) {
+    const [key, fullValue] = full;
+    const spec = ds.params.find((x) => x.key === key);
+    spec.label = 'Widok na start (suwakiem wydłużysz do całej historii)';
+    const load = ds.load;
+    ds.load = async (p) => {
+      const payload = await load({ ...p, [key]: fullValue });
+      const days = viewDays(p[key]);
+      return days && payload.type === 'timeseries' ? { ...payload, defaultStart: Date.now() - days * DAY } : payload;
+    };
+  }
   if (!ds.speed) continue;
   const timeParams = TIME_PARAMS.map((spec) => ({ ...spec }));
   // Poza lokalnymi snapshotami dane są dzienne, więc okna krótsze niż doba nie mają sensu.

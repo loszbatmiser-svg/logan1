@@ -21,9 +21,13 @@ Wykresy dodajesz przez wyszukiwarkę podzieloną na kategorie danych, które udo
 - **Konfigurator z podglądem na żywo**: miara, liczba pozycji, kolejność, wybór sektorów/monet, typ wykresu,
   rozmiar karty, własny tytuł.
 - **Karty**: zmiana typu wykresu, widok tabeli, ustawienia, 3 rozmiary, przeciąganie za uchwyt, usuwanie z cofnięciem.
-- **Suwak zakresu** pod każdym wykresem w czasie: przeciągnij końce, żeby zawęzić okres, albo środek, żeby przesunąć okno.
-  Przeciąganie po wykresie też przesuwa okno, Ctrl + kółko myszy przybliża, podwójne kliknięcie wraca do całości.
-  Ustawiony zakres zapisuje się razem z układem.
+- **Suwak zakresu** pod każdym wykresem w czasie, **wspólny dla wszystkich wykresów**: przesunięcie go na jednym
+  przesuwa zakres na pozostałych (po datach, więc działa też między wykresami o różnej długości historii).
+  Wykresy ładują zawsze całą dostępną historię – ustawienie „Widok na start” tylko wybiera początkowy fragment,
+  a suwakiem można go wydłużyć aż do początku danych. Przeciąganie po wykresie przesuwa okno, Ctrl + kółko przybliża,
+  podwójne kliknięcie wraca do widoku startowego. Bieżący wspólny zakres widać w pasku u góry (przycisk „Resetuj”).
+- **Kłódka na karcie**: zablokowany wykres trzyma swój zakres, gdy inne są przesuwane; po odblokowaniu wraca
+  do wspólnego zakresu. Zakresy i blokady zapisują się razem z układem.
 - **Filtry całego dashboardu**: waluta (USD / EUR / PLN) i automatyczne odświeżanie.
 - Motyw jasny / ciemny / automatyczny, układ działa też na telefonie.
 - Eksport i import układu (JSON), przywracanie domyślnego.

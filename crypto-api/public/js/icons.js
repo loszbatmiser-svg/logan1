@@ -17,6 +17,8 @@ const paths = {
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   down: '<path d="M12 5v14M19 12l-7 7-7-7"/>',
   flat: '<path d="M5 12h14"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
   coin: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9h4a1.5 1.5 0 0 1 0 3h-4h4.5a1.5 1.5 0 0 1 0 3h-4.5M11 7.5V9M11 15v1.5"/>',
   layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
 };
