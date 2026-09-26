@@ -140,6 +140,11 @@ function drawCard(card) {
       size: card.widget.size,
       range: card.widget.locked ? card.widget.zoom : state.dashboard.timeRange,
       locked: !!card.widget.locked,
+      yRange: card.widget.yRange,
+      onYRange: (yRange) => {
+        card.widget.yRange = yRange;
+        saveDashboard();
+      },
       onRange: (range) => {
         if (card.widget.locked) card.widget.zoom = range;
         else {
@@ -214,6 +219,7 @@ function updateWidget(id, changes) {
   Object.assign(widget, changes);
   // Nowe ustawienia to często inny okres – zaczynamy od pełnego zakresu.
   widget.zoom = null;
+  widget.yRange = null;
   card.el.className = `card size-${widget.size}`;
   const select = card.el.querySelector('[data-act="chart"]');
   if (select) select.value = widget.chart;

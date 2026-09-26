@@ -141,6 +141,7 @@ app.put('/api/dashboard', (req, res) => {
       title: typeof w.title === 'string' ? w.title.slice(0, 120) : '',
       locked: w.locked === true,
       zoom: w.locked === true ? validRange(w.zoom) : null,
+      yRange: validRange(w.yRange),
     }));
   const dashboard = {
     version: 1,

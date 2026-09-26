@@ -298,6 +298,32 @@ function donutOption(payload, t) {
 
 const FNG_BANDS = [[0, 25], [75, 100]];
 
+const MONTHS_PL = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+
+// Etykiety osi czasu po polsku: rok pogrubiony na początku roku, dalej miesiące, dni, godziny.
+function timeLabel(value) {
+  const d = new Date(value);
+  const pad = (n) => String(n).padStart(2, '0');
+  if (d.getHours() || d.getMinutes()) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (d.getDate() !== 1) return `${d.getDate()} ${MONTHS_PL[d.getMonth()]}`;
+  if (d.getMonth() !== 0) return MONTHS_PL[d.getMonth()];
+  return `{y|${d.getFullYear()}}`;
+}
+
+function monthStarts(payload) {
+  const [min, max] = extentOf(payload);
+  if (!Number.isFinite(min)) return [];
+  const out = [];
+  const d = new Date(min);
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  while (d.getTime() <= max) {
+    if (d.getTime() >= min) out.push(d.getTime());
+    d.setMonth(d.getMonth() + 1);
+  }
+  return out;
+}
+
 function lineOption(payload, t, area) {
   const series = payload.series.slice(0, 8);
   const multi = series.length > 1;
@@ -323,9 +349,10 @@ function lineOption(payload, t, area) {
     } : undefined,
     xAxis: {
       type: 'time',
-      axisLabel: { color: t.muted, hideOverlap: true },
+      axisLabel: { color: t.muted, hideOverlap: true, formatter: timeLabel, rich: { y: { fontWeight: 600, color: t.text2 } } },
       axisLine: { lineStyle: { color: t.axis } },
-      axisTick: { show: false },
+      // Kreska na początku każdego miesiąca – także gdy etykiety pokazują tylko lata.
+      axisTick: { show: true, customValues: monthStarts(payload), length: 4, lineStyle: { color: t.axis } },
       splitLine: { show: false },
     },
     yAxis: valueAxis(t, payload.unit, payload.bands ? { min: 0, max: 100 } : payload.logScale ? { type: 'log', logBase: 10 } : { scale: !area && !payload.zeroLine }, payload.suffix),
@@ -466,6 +493,20 @@ function extentOf(payload) {
   return [min, max];
 }
 
+// Pionowy suwak po lewej: zakres wartości osi Y (od–do).
+function yZoomOption(t, payload, yRange, grid) {
+  return {
+    type: 'slider', yAxisIndex: 0, orient: 'vertical', left: 6, width: 16, top: grid.top + 14, bottom: grid.bottom + 14,
+    filterMode: 'none', showDataShadow: false, brushSelect: false,
+    ...(yRange ? { startValue: yRange.start, endValue: yRange.end } : { start: 0, end: 100 }),
+    labelFormatter: (v) => sfx(formatAxis(v, payload.unit), payload.suffix),
+    textStyle: { color: t.muted, fontSize: 10 },
+    borderColor: t.axis, backgroundColor: 'transparent', fillerColor: `${t.series[0]}22`,
+    handleStyle: { color: t.surface, borderColor: t.series[0], borderWidth: 1.5 },
+    moveHandleStyle: { color: t.series[0], opacity: 0.35 }, moveHandleSize: 5,
+  };
+}
+
 function zoomOption(t, range, left) {
   const window = range ? { startValue: range.start, endValue: range.end } : { start: 0, end: 100 };
   return [
@@ -497,7 +538,7 @@ const noop = { dispose() {}, getRange: () => null, setRange() {}, setLocked() {}
  * locked: wykres nie reaguje na suwaki innych wykresów. onRange(range): zakres zmieniony przez użytkownika.
  * sync: udział we wspólnym kursorze i zakresie (podgląd w konfiguratorze – nie).
  */
-export function renderPayload(container, payload, view, { size = 'm', range = null, locked = false, onRange = null, sync = true } = {}) {
+export function renderPayload(container, payload, view, { size = 'm', range = null, locked = false, onRange = null, yRange = null, onYRange = null, sync = true } = {}) {
   container.innerHTML = '';
   const note = payload.note ? `<p class="card-note">${escapeHtml(payload.note)}</p>` : '';
 
@@ -550,7 +591,10 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
 
   const [minT, maxT] = payload.type === 'timeseries' ? extentOf(payload) : [0, 0];
   const defaultRange = payload.defaultStart && payload.defaultStart > minT ? { start: payload.defaultStart, end: maxT } : null;
-  if (slider) option.dataZoom = zoomOption(t, range || defaultRange, option.grid.left);
+  if (slider) {
+    option.grid.left += 30;
+    option.dataZoom = [...zoomOption(t, range || defaultRange, option.grid.left), yZoomOption(t, payload, yRange, option.grid)];
+  }
   else if (option.grid && option.xAxis?.type === 'time') option.grid.bottom = 28;
 
   const chart = echarts.init(el, null, { renderer: 'canvas' });
@@ -574,7 +618,7 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
     const target = r || defaultRange;
     zoomSyncing = true;
     try {
-      chart.dispatchAction(target ? { type: 'dataZoom', startValue: target.start, endValue: target.end } : { type: 'dataZoom', start: 0, end: 100 });
+      chart.dispatchAction(target ? { type: 'dataZoom', dataZoomIndex: 0, startValue: target.start, endValue: target.end } : { type: 'dataZoom', dataZoomIndex: 0, start: 0, end: 100 });
     } finally {
       zoomSyncing = false;
     }
@@ -591,15 +635,34 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
       for (const other of timeCharts) if (other !== entry && !other.locked) other.setRange(r);
       onRange?.(r);
     };
+    const yOf = () => {
+      const dz = chart.getOption().dataZoom?.[2];
+      if (!dz || (dz.start <= 0.01 && dz.end >= 99.99)) return null;
+      return dz.startValue != null ? { start: dz.startValue, end: dz.endValue } : null;
+    };
+    let lastX = JSON.stringify(entry.getRange());
+    let lastY = JSON.stringify(yOf());
     chart.on('datazoom', () => {
       if (zoomSyncing) return;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => userZoom(entry.getRange()));
+      frame = requestAnimationFrame(() => {
+        const x = entry.getRange();
+        const y = yOf();
+        if (JSON.stringify(x) !== lastX) {
+          lastX = JSON.stringify(x);
+          userZoom(x);
+        }
+        if (JSON.stringify(y) !== lastY) {
+          lastY = JSON.stringify(y);
+          onYRange?.(y);
+        }
+      });
     });
-    // Podwójne kliknięcie wraca do widoku domyślnego (dla niezablokowanych – wszystkich).
+    // Podwójne kliknięcie wraca do widoku domyślnego (czas – dla niezablokowanych wszystkich; wartości – tego wykresu).
     chart.getZr().on('dblclick', () => {
       entry.setRange(null);
       userZoom(null);
+      chart.dispatchAction({ type: 'dataZoom', dataZoomIndex: 2, start: 0, end: 100 });
     });
   }
 
