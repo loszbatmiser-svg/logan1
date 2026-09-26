@@ -92,6 +92,12 @@ test('grupowanie kategorii CMC', () => {
   assert.equal(catalog.categoryGroup('Binance Launchpool'), 'other');
   assert.equal(catalog.categoryGroup('Artificial Intelligence (AI)'), 'sectors');
   assert.equal(catalog.categoryGroup('Real World Assets (RWA)'), 'sectors');
+  // Prawdziwe nazwy z CMC, które nie są branżami.
+  for (const name of ['SEC/CFTC Digital Commodities', '2017/18 Alt season', 'Alleged SEC Securities', 'CMC Crypto Awards 2024', 'CMC Crypto Yearbook 2024-25', 'FTX Bankruptcy Estate ', 'Binance Liquidity Enhancement Program', 'ISO 20022']) {
+    assert.equal(catalog.categoryGroup(name), 'other', name);
+  }
+  assert.equal(catalog.categoryGroup('Real Estate'), 'sectors');
+  assert.equal(catalog.categoryGroup('Decentralized Exchange (DEX) Token'), 'sectors');
 });
 
 test('przeliczanie walut dotyczy tylko kwot', () => {

@@ -11,6 +11,8 @@ const PLAN_CHIP = {
   paid: '<span class="chip paid">plan płatny (Hobbyist+)</span>',
   local: '<span class="chip local">lokalne snapshoty</span>',
 };
+// Plan płatny, ale endpoint już odpowiedział na Twoim kluczu – pokazujemy, że działa.
+const planChip = (ds) => (ds.plan === 'paid' && ds.available ? '<span class="chip free">działa z Twoim kluczem</span>' : PLAN_CHIP[ds.plan] || '');
 const GROUP_KIND_LABEL = { sectors: 'Sektor', ecosystems: 'Ekosystem', portfolios: 'Portfel VC', other: 'Kategoria' };
 const SIZE_LABELS = { s: 'Mały', m: 'Średni', l: 'Pełna szerokość' };
 
@@ -244,7 +246,7 @@ function renderResults() {
         <div class="result-meta">
           ${activeGroup === 'all' ? `<span class="chip">${escapeHtml(groupName(ds.group))}</span>` : ''}
           <span class="chip">${escapeHtml(CHART_LABELS[e.chart] || e.chart)}</span>
-          ${PLAN_CHIP[ds.plan] || ''}${blocked}
+          ${planChip(ds)}${blocked}
           <span class="chip mono">${escapeHtml(ds.endpoint)}</span>
         </div>
       </div>
@@ -295,7 +297,7 @@ export function openConfigurator(widget, { mode = 'add', id = null } = {}) {
     <h3>${escapeHtml(ds.title)}</h3>
     <p>${escapeHtml(ds.description)}</p>
     <div class="result-meta">
-      <span class="chip">${escapeHtml(groupName(ds.group))}</span>${PLAN_CHIP[ds.plan] || ''}
+      <span class="chip">${escapeHtml(groupName(ds.group))}</span>${planChip(ds)}
       <span class="chip mono">${escapeHtml(ds.endpoint)}</span>
     </div>`;
   buildForm();

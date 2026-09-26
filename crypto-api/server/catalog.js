@@ -53,7 +53,8 @@ const DAY = 86_400_000;
 export function categoryGroup(name = '') {
   if (/ecosystem/i.test(name)) return 'ecosystems';
   if (/portfolio/i.test(name)) return 'portfolios';
-  if (/launchpad|launchpool|megadrop|hodler|binance alpha|made in|estate|listing|reserve|\betf\b/i.test(name)) return 'other';
+  // Listy tematyczne CMC, klasyfikacje regulacyjne, launchpady i regiony – to nie są branże.
+  if (/launchpad|launchpool|megadrop|hodler|binance alpha|liquidity enhancement|made in|bankruptcy|listing|reserve|\betf\b|sec\/cftc|\bsec\b|alt ?season|cmc crypto|yearbook|awards|iso 20022/i.test(name)) return 'other';
   return 'sectors';
 }
 
@@ -61,7 +62,7 @@ const CATEGORY_GROUP_OPTIONS = [
   { value: 'sectors', label: 'Sektory (branże)' },
   { value: 'ecosystems', label: 'Ekosystemy blockchain' },
   { value: 'portfolios', label: 'Portfele funduszy VC' },
-  { value: 'other', label: 'Inne (launchpady, regiony…)' },
+  { value: 'other', label: 'Inne (listy CMC, regulacje, launchpady, regiony)' },
   { value: 'all', label: 'Wszystkie kategorie' },
 ];
 const GROUP_NOUN = { sectors: 'sektorów', ecosystems: 'ekosystemów', portfolios: 'portfeli VC', other: 'kategorii', all: 'kategorii' };
@@ -933,6 +934,7 @@ export function publicCatalog(availability = {}) {
     datasets: DATASETS.map(({ load, ...d }) => ({
       ...d,
       unavailable: availability[d.endpoint]?.ok === false ? availability[d.endpoint].message : null,
+      available: availability[d.endpoint]?.ok === true,
     })),
   };
 }
