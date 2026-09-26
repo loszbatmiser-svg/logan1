@@ -28,7 +28,8 @@ Wykresy dodajesz przez wyszukiwarkę podzieloną na kategorie danych, które udo
   podwójne kliknięcie wraca do widoku startowego. Bieżący wspólny zakres widać w pasku u góry (przycisk „Resetuj”).
 - **Pionowy suwak po lewej** każdego wykresu w czasie ustawia zakres wartości osi Y (od–do), np. żeby odciąć
   skrajne wartości z początków historii. Jest osobny dla każdego wykresu i zapisuje się w układzie.
-- **Oś czasu** ma kreski na początku każdego miesiąca i polskie nazwy miesięcy; rok jest pogrubiony.
+- **Oś czasu** ma dłuższe kreski na początku każdego miesiąca, krótsze na początku każdego tygodnia (poniedziałki –
+  gdy widoczny okres ma do ~2 lat, dalej zlewałyby się w pasek) i polskie nazwy miesięcy; rok jest pogrubiony.
 - **Kłódka na karcie**: zablokowany wykres trzyma swój zakres, gdy inne są przesuwane; po odblokowaniu wraca
   do wspólnego zakresu. Zakresy i blokady zapisują się razem z układem.
 - **Filtry całego dashboardu**: waluta (USD / EUR / PLN) i automatyczne odświeżanie.

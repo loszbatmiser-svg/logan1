@@ -310,6 +310,23 @@ function timeLabel(value) {
   return `{y|${d.getFullYear()}}`;
 }
 
+const DAY_MS = 86_400_000;
+// Tygodnie pokazujemy do ~2 lat widocznego okresu – dalej kreski zlewają się w pasek.
+const WEEKS_MAX_SPAN = 2.1 * 365 * DAY_MS;
+
+function weekStarts(start, end) {
+  const out = [];
+  const d = new Date(start);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  while (d.getTime() <= end) {
+    // Poniedziałek, który jest zarazem 1. dniem miesiąca, ma już kreskę miesiąca.
+    if (d.getTime() >= start && d.getDate() !== 1) out.push(d.getTime());
+    d.setDate(d.getDate() + 7);
+  }
+  return out;
+}
+
 function monthStarts(payload) {
   const [min, max] = extentOf(payload);
   if (!Number.isFinite(min)) return [];
@@ -347,14 +364,22 @@ function lineOption(payload, t, area) {
       top: 0, left: 0, type: 'scroll', icon: 'roundRect', itemWidth: 12, itemHeight: 4,
       textStyle: { color: t.text2 }, pageTextStyle: { color: t.text2 },
     } : undefined,
-    xAxis: {
-      type: 'time',
-      axisLabel: { color: t.muted, hideOverlap: true, formatter: timeLabel, rich: { y: { fontWeight: 600, color: t.text2 } } },
-      axisLine: { lineStyle: { color: t.axis } },
-      // Kreska na początku każdego miesiąca – także gdy etykiety pokazują tylko lata.
-      axisTick: { show: true, customValues: monthStarts(payload), length: 4, lineStyle: { color: t.axis } },
-      splitLine: { show: false },
-    },
+    xAxis: [
+      {
+        type: 'time',
+        axisLabel: { color: t.muted, hideOverlap: true, formatter: timeLabel, rich: { y: { fontWeight: 600, color: t.text2 } } },
+        axisLine: { lineStyle: { color: t.axis } },
+        // Dłuższa kreska na początku każdego miesiąca – także gdy etykiety pokazują tylko lata.
+        axisTick: { show: true, interval: 0, customValues: monthStarts(payload), length: 7, lineStyle: { color: t.axis } },
+        splitLine: { show: false },
+      },
+      // Druga, niewidoczna oś tylko na krótkie kreski tygodni (poniedziałki); zakres ustawia refreshWeeks().
+      {
+        type: 'time', position: 'bottom', silent: true, axisPointer: { show: false },
+        axisLine: { show: false }, axisLabel: { show: false }, splitLine: { show: false },
+        axisTick: { show: true, interval: 0, customValues: [], length: 3, lineStyle: { color: t.axis } },
+      },
+    ],
     yAxis: valueAxis(t, payload.unit, payload.bands ? { min: 0, max: 100 } : payload.logScale ? { type: 'log', logBase: 10 } : { scale: !area && !payload.zeroLine }, payload.suffix),
     series: series.map((s, i) => ({
       type: 'line',
@@ -595,14 +620,14 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
     option.grid.left += 30;
     option.dataZoom = [...zoomOption(t, range || defaultRange, option.grid.left), yZoomOption(t, payload, yRange, option.grid)];
   }
-  else if (option.grid && option.xAxis?.type === 'time') option.grid.bottom = 28;
+  else if (option.grid && Array.isArray(option.xAxis)) option.grid.bottom = 28;
 
   const chart = echarts.init(el, null, { renderer: 'canvas' });
   chart.setOption(option);
   const ro = new ResizeObserver(() => chart.resize());
   ro.observe(el);
 
-  const isTime = payload.type === 'timeseries' && option.xAxis?.type === 'time';
+  const isTime = payload.type === 'timeseries' && Array.isArray(option.xAxis);
   const entry = { chart, series: (payload.series || []).slice(0, 8), slider, locked, defaultRange };
 
   entry.getRange = () => {
@@ -613,6 +638,13 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
     const end = dz.endValue ?? minT + ((maxT - minT) * dz.end) / 100;
     return { start: Math.round(start), end: Math.round(end) };
   };
+  // Kreski tygodni dopasowane do widocznego okresu.
+  const refreshWeeks = () => {
+    if (!isTime || !Number.isFinite(minT)) return;
+    const r = entry.getRange() || { start: minT, end: maxT };
+    const weeks = r.end - r.start <= WEEKS_MAX_SPAN ? weekStarts(r.start, r.end) : [];
+    chart.setOption({ xAxis: [{}, { min: r.start, max: r.end, axisTick: { customValues: weeks } }] });
+  };
   entry.setRange = (r) => {
     if (!slider) return;
     const target = r || defaultRange;
@@ -622,7 +654,9 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
     } finally {
       zoomSyncing = false;
     }
+    refreshWeeks();
   };
+  refreshWeeks();
 
   if (slider) {
     let frame = 0;
@@ -650,6 +684,7 @@ export function renderPayload(container, payload, view, { size = 'm', range = nu
         const y = yOf();
         if (JSON.stringify(x) !== lastX) {
           lastX = JSON.stringify(x);
+          refreshWeeks();
           userZoom(x);
         }
         if (JSON.stringify(y) !== lastY) {
@@ -719,7 +754,7 @@ function syncTime(entry) {
   timeCharts.add(entry);
   chart.on('updateAxisPointer', (e) => {
     if (syncing) return;
-    const t = e.axesInfo?.find((a) => a.axisDim === 'x')?.value;
+    const t = e.axesInfo?.find((a) => a.axisDim === 'x' && !a.axisIndex)?.value;
     if (t == null) return;
     syncing = true;
     try {
