@@ -292,7 +292,7 @@ function fngSeries(days) {
   const today = Math.floor(Date.now() / 86_400_000);
   const out = [];
   let v = 50;
-  for (let d = today - 600; d <= today; d++) {
+  for (let d = today - 1185; d <= today; d++) {
     v = Math.min(95, Math.max(5, v + (r() - 0.5) * 9 + (50 - v) * 0.03));
     out.push({ timestamp: String(d * 86_400), value: Math.round(v), value_classification: fngLabel(Math.round(v)) });
   }
@@ -375,8 +375,10 @@ export function mockResponse(endpoint, params = {}) {
       return ok({ value: latest.value, update_time: iso(), value_classification: latest.value_classification });
     }
 
-    case '/v3/fear-and-greed/historical':
-      return ok(fngSeries(Math.min(500, Number(params.limit || 50))));
+    case '/v3/fear-and-greed/historical': {
+      const start = Math.max(1, Number(params.start || 1));
+      return ok(fngSeries(1186).slice(start - 1, start - 1 + Math.min(500, Number(params.limit || 50))));
+    }
 
     case '/v1/key/info':
       return ok({
@@ -400,7 +402,7 @@ export function mockResponse(endpoint, params = {}) {
     }
 
     case '/v1/global-metrics/quotes/historical': {
-      const count = Math.min(400, Number(params.count || 30));
+      const count = Math.min(5000, Number(params.count || 30));
       const g = globalMetrics(state);
       const caps = walkBack(g.quote.USD.total_market_cap, count, 'ghist', 0.05);
       const vols = walkBack(g.quote.USD.total_volume_24h, count, 'ghist-v', 0.25);

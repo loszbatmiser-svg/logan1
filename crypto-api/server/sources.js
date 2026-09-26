@@ -22,14 +22,12 @@ export const sources = {
 
   fearGreed: () => cmc('/v3/fear-and-greed/latest', {}, { ttlMinutes: 60 }),
 
-  fearGreedHistory: (limit) => cmc('/v3/fear-and-greed/historical', { start: 1, limit }, { ttlMinutes: 6 * 60 }),
+  fearGreedHistory: (start, limit) => cmc('/v3/fear-and-greed/historical', { start, limit }, { ttlMinutes: 6 * 60 }),
 
   keyInfo: () => cmc('/v1/key/info', {}, { ttlMinutes: 1 }),
 
   // 2781 = USD w CoinMarketCap. Kurs służy do przeliczania kwot na wybraną walutę.
   fiatRate: (currency) => cmc('/v2/tools/price-conversion', { id: 2781, amount: 1, convert: currency }, { ttlMinutes: 60 }),
-
-  globalHistory: (days) => cmc('/v1/global-metrics/quotes/historical', { interval: 'daily', count: days, convert: 'USD' }, { ttlMinutes: 60 }),
 
   coinHistory: (ids, days) => cmc('/v2/cryptocurrency/quotes/historical', { id: [...new Set(ids)].sort((a, b) => a - b).join(','), interval: 'daily', count: days, convert: 'USD' }, { ttlMinutes: 60 }),
 };

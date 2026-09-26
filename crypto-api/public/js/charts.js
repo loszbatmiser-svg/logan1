@@ -328,11 +328,13 @@ function lineOption(payload, t, area) {
       axisTick: { show: false },
       splitLine: { show: false },
     },
-    yAxis: valueAxis(t, payload.unit, payload.bands ? { min: 0, max: 100 } : { scale: !area && !payload.zeroLine }, payload.suffix),
+    yAxis: valueAxis(t, payload.unit, payload.bands ? { min: 0, max: 100 } : payload.logScale ? { type: 'log', logBase: 10 } : { scale: !area && !payload.zeroLine }, payload.suffix),
     series: series.map((s, i) => ({
       type: 'line',
       name: s.name,
-      data: s.points,
+      // Skala logarytmiczna nie przyjmuje zera ani wartości ujemnych.
+      data: payload.logScale ? s.points.map(([x, v]) => [x, v > 0 ? v : null]) : s.points,
+      sampling: 'lttb',
       color: t.series[i],
       showSymbol: s.points.length < 3,
       symbolSize: 8,

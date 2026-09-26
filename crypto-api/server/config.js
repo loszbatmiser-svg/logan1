@@ -30,5 +30,5 @@ export const config = {
   baseUrl: env.CMC_BASE_URL || 'https://pro-api.coinmarketcap.com',
   cacheTtlMinutes: Math.max(1, num(env.CACHE_TTL_MINUTES, 10)),
   snapshotIntervalMinutes: Math.max(0, num(env.SNAPSHOT_INTERVAL_MINUTES, 60)),
-  snapshotRetentionDays: Math.max(1, num(env.SNAPSHOT_RETENTION_DAYS, 365)),
+  snapshotRetentionDays: Math.max(1, num(env.SNAPSHOT_RETENTION_DAYS, 3650)),
 };

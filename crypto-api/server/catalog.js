@@ -2,6 +2,7 @@ import { sources } from './sources.js';
 import * as history from './history.js';
 import { stats } from './cmc.js';
 import { EXTERNAL_GROUPS, externalDatasets } from './onchain.js';
+import { globalHistoryAll } from './longhistory.js';
 
 // Katalog wszystkich wykresów, które można dodać do dashboardu. Każdy zbiór danych
 // opisuje: skąd bierze dane (endpoint CMC), jakie ma parametry, jakie typy wykresu
@@ -89,6 +90,13 @@ const DAYS_OPTIONS = [
   { value: '180', label: '180 dni' },
   { value: '365', label: '1 rok' },
 ];
+const LONG_DAYS_OPTIONS = [
+  ...DAYS_OPTIONS,
+  { value: '730', label: '2 lata' },
+  { value: '1825', label: '5 lat' },
+  { value: '3650', label: '10 lat' },
+  { value: '0', label: 'Cała historia (od 2013)' },
+];
 
 const MODE_OPTIONS = [
   { value: 'absolute', label: 'Wartości bezwzględne' },
@@ -142,6 +150,10 @@ const TIME_PARAMS = [
   { key: 'transform', label: 'Pokaż', type: 'select', options: options(TRANSFORMS), default: 'value' },
   { key: 'window', label: 'Okno pomiaru zmiany', type: 'select', options: WINDOW_OPTIONS, default: '24', showIf: { transform: ['pct', 'delta', 'rate', 'rate_abs', 'accel'] } },
   { key: 'per', label: 'Prędkość w przeliczeniu', type: 'select', options: PER_OPTIONS, default: 'day', showIf: { transform: ['rate', 'rate_abs', 'accel'] } },
+  {
+    key: 'scale', label: 'Skala osi Y', type: 'select', default: 'linear', showIf: { transform: ['value'] },
+    options: [{ value: 'linear', label: 'Liniowa' }, { value: 'log', label: 'Logarytmiczna – dla długich okresów' }],
+  },
 ];
 
 // Dla każdego punktu szuka punktu sprzed `windowMs` (z tolerancją 10%, bo snapshoty
@@ -167,7 +179,8 @@ export function windowChanges(points, windowMs, perMs) {
 }
 
 function applyTransform(payload, p) {
-  if (payload.type !== 'timeseries' || !p.transform || p.transform === 'value') return payload;
+  if (payload.type !== 'timeseries') return payload;
+  if (!p.transform || p.transform === 'value') return p.scale === 'log' ? { ...payload, logScale: true } : payload;
   const windowMs = Number(p.window) * HOUR;
   const per = PER_UNITS[p.per];
   let unit = 'pct';
@@ -672,14 +685,28 @@ const DATASETS = [
     endpoint: '/v3/fear-and-greed/historical', plan: 'free', charts: ['line', 'area', 'table'], size: 'm',
     params: [{
       key: 'days', label: 'Okres', type: 'select', default: '90',
-      options: [{ value: '30', label: '30 dni' }, { value: '90', label: '90 dni' }, { value: '180', label: '180 dni' }, { value: '365', label: '1 rok' }, { value: '500', label: '500 dni' }],
+      options: [{ value: '30', label: '30 dni' }, { value: '90', label: '90 dni' }, { value: '180', label: '180 dni' }, { value: '365', label: '1 rok' }, { value: '730', label: '2 lata' }, { value: '0', label: 'Cała historia (od 06.2023)' }],
     }],
-    presets: [{ title: 'Fear & Greed – historia', keywords: 'fear greed strach chciwość sentiment history' }],
+    presets: [
+      { title: 'Fear & Greed – historia', keywords: 'fear greed strach chciwość sentiment history' },
+      { title: 'Fear & Greed – cała historia', params: { days: '0' }, keywords: 'fear greed strach chciwość sentiment history long' },
+    ],
     async load(p) {
-      const res = await sources.fearGreedHistory(Number(p.days));
+      // API oddaje maksymalnie 500 dni na stronę – dla dłuższych okresów pobieramy kolejne strony.
+      const wanted = Number(p.days) || Infinity;
+      const rows = [];
+      let fetchedAt = null;
+      for (let start = 1; rows.length < wanted; start += 500) {
+        const res = await sources.fearGreedHistory(start, 500);
+        fetchedAt ??= res.fetchedAt;
+        const page = res.data || [];
+        rows.push(...page);
+        if (page.length < 500) break;
+      }
       const toMs = (t) => (/^\d+$/.test(String(t)) ? Number(t) * 1000 : Date.parse(t));
-      const points = (res.data || []).map((d) => [toMs(d.timestamp), num(d.value)]).filter(([t, v]) => Number.isFinite(t) && v != null).sort((a, b) => a[0] - b[0]);
-      return timeseries({ title: `Fear & Greed – ostatnie ${p.days} dni`, unit: 'index', series: [{ key: 'fng', name: 'Fear & Greed', points }], bands: true, updatedAt: res.fetchedAt });
+      const points = rows.slice(0, wanted).map((d) => [toMs(d.timestamp), num(d.value)]).filter(([t, v]) => Number.isFinite(t) && v != null).sort((a, b) => a[0] - b[0]);
+      const period = Number(p.days) ? `ostatnie ${p.days} dni` : 'cała historia';
+      return timeseries({ title: `Fear & Greed – ${period}`, unit: 'index', series: [{ key: 'fng', name: 'Fear & Greed', points }], bands: true, updatedAt: fetchedAt });
     },
   },
 
@@ -827,28 +854,33 @@ const DATASETS = [
         key: 'metric', label: 'Wskaźnik', type: 'select', default: 'total_market_cap',
         options: options(GLOBAL_METRICS, ['total_market_cap', 'total_volume_24h', 'altcoin_market_cap', 'btc_dominance']),
       },
-      { key: 'days', label: 'Okres', type: 'select', options: DAYS_OPTIONS, default: '30' },
+      { key: 'days', label: 'Okres', type: 'select', options: LONG_DAYS_OPTIONS, default: '365' },
     ],
     presets: [
+      { title: 'Kapitalizacja rynku – cała historia od 2013 (CMC)', params: { metric: 'total_market_cap', days: '0', scale: 'log' }, keywords: 'historical market cap cykle long' },
+      { title: 'Dominacja BTC – cała historia od 2013 (CMC)', params: { metric: 'btc_dominance', days: '0' }, keywords: 'historical dominance altseason' },
       { title: 'Kapitalizacja rynku – historia CMC', params: { metric: 'total_market_cap' }, keywords: 'historical market cap' },
       { title: 'Wolumen rynku – historia CMC', params: { metric: 'total_volume_24h' }, keywords: 'historical volume' },
     ],
     async load(p) {
-      const res = await sources.globalHistory(Number(p.days));
+      const store = await globalHistoryAll();
       const m = GLOBAL_METRICS[p.metric];
-      const quotes = res.data?.quotes || [];
-      const points = quotes
+      const from = Number(p.days) ? Date.now() - Number(p.days) * DAY : 0;
+      const points = store.quotes
         .map((d) => [Date.parse(d.timestamp), num(p.metric === 'btc_dominance' ? d.btc_dominance : usd(d)[p.metric])])
-        .filter(([t, v]) => Number.isFinite(t) && v != null)
-        .sort((a, b) => a[0] - b[0]);
-      return timeseries({ title: `${m.label} – ${p.days} dni (CMC)`, unit: m.unit, series: [{ key: p.metric, name: m.label, points }], updatedAt: res.fetchedAt });
+        .filter(([t, v]) => Number.isFinite(t) && v != null && t >= from);
+      const period = LONG_DAYS_OPTIONS.find((o) => o.value === p.days)?.label.toLowerCase() || `${p.days} dni`;
+      return timeseries({
+        title: `${m.label} – ${period} · CMC`, unit: m.unit, series: [{ key: p.metric, name: m.label, points }], updatedAt: store.fetchedAt,
+        note: 'Pełna historia zapisana na serwerze – przy odświeżeniu dociągane są tylko nowe dni.',
+      });
     },
   },
   {
     speed: true,
     id: 'cmc.coin_history', group: 'historical',
     title: 'Kryptowaluty – historia CMC',
-    description: 'Dzienne notowania wybranych monet (do 5). Wymaga płatnego planu CMC.',
+    description: 'Dzienne notowania wybranych monet (do 5). Plan Twojego klucza obejmuje 12 miesięcy – dłuższą historię ceny (BTC od 2010) daje grupa On-chain (Coin Metrics).',
     endpoint: '/v2/cryptocurrency/quotes/historical', plan: 'paid', charts: ['line', 'area', 'table'], size: 'l',
     params: [
       { key: 'coins', label: 'Kryptowaluty (max 5)', type: 'coins', max: 5, default: [1] },

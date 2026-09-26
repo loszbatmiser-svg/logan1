@@ -114,6 +114,21 @@ MVRV jest dostępne. Jeśli wskaźnika nie ma dla danej sieci, wykres to zaznacz
 
 Wszystkie wykresy w czasie z tych źródeł mają te same tryby co reszta: zmianę, prędkość i przyspieszenie.
 
+## Jak daleko sięga historia
+
+| Dane | Od kiedy | Uwagi |
+|---|---|---|
+| Cena, adresy, transakcje, hashrate BTC (Coin Metrics) | 2009–2010 | ETH od 2015, LTC od 2011 |
+| Rynek globalny CoinMarketCap | 29.04.2013 | pobierany raz (~50 kredytów), zapisany w `data/`, potem dociągane są tylko nowe dni |
+| Notowania pojedynczych monet CMC | 12 miesięcy | limit planu klucza – dłużej: cena z Coin Metrics |
+| Hashrate, opłaty, nagrody w blokach (mempool.space) | 2009 | opcja „Cała historia” |
+| Wolumen DEX-ów / TVL / stablecoiny / opłaty (DefiLlama) | 2014 / 2017 / 2017 / 2018 | opcja „Cała historia” |
+| Indeks strachu i chciwości | 29.06.2023 | początek indeksu CMC, pobierany stronami po 500 dni |
+| Sektory CMC (lokalne snapshoty) | od uruchomienia serwera | CMC nie udostępnia historii kategorii; przechowywane do 10 lat |
+
+Dla długich okresów wybierz w konfiguratorze **Skala osi Y → Logarytmiczna** – wtedy wzrost z 0,1 do 1 USD
+i z 10 000 do 100 000 USD zajmuje tyle samo miejsca.
+
 ## Historia na darmowym planie
 
 Darmowy plan CoinMarketCap nie daje danych historycznych. Dlatego serwer co godzinę
@@ -148,7 +163,7 @@ zwiększ `CACHE_TTL_MINUTES` albo `SNAPSHOT_INTERVAL_MINUTES`.
 | `HOST` | `127.0.0.1` | adres nasłuchu; `0.0.0.0` udostępnia dashboard w sieci lokalnej |
 | `CACHE_TTL_MINUTES` | `10` | cache szybko zmieniających się danych |
 | `SNAPSHOT_INTERVAL_MINUTES` | `60` | co ile minut zapisywać snapshot (0 = wyłączone) |
-| `SNAPSHOT_RETENTION_DAYS` | `365` | ile dni historii trzymać |
+| `SNAPSHOT_RETENTION_DAYS` | `3650` | ile dni historii trzymać (starsze niż 30 dni: 1 punkt dziennie) |
 | `CMC_MOCK` | `0` | `1` = tryb demo |
 | `DATA_DIR` | `./data` | gdzie zapisywać snapshoty i układ dashboardu |
 

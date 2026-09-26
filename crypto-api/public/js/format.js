@@ -52,7 +52,12 @@ export function formatValue(value, unit, { compact = true, signed = false } = {}
 export function formatAxis(value, unit) {
   if (!valid(value)) return '';
   if (unit === 'pct') return `${nf({ maximumFractionDigits: 1 }).format(value)}%`;
-  if (unit === 'money' && Math.abs(value) < 1e6) return money(value, { compact: true });
+  if (unit === 'money' && Math.abs(value) < 1e6) {
+    // Na osi bez zbędnych zer: "10 USD", "0,1 USD", "250 000 USD".
+    const abs = Math.abs(value);
+    const opts = abs >= 1 || abs === 0 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 2 };
+    return nf({ style: 'currency', currency: getCurrency(), ...opts }).format(value);
+  }
   return nf({ notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }
 

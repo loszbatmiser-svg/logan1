@@ -55,8 +55,9 @@ const CM_METRICS = {
 const CM_FETCH = Object.keys(CM_METRICS).filter((k) => !CM_METRICS[k].derived);
 
 async function cmAsset(asset) {
-  const url = `${CM_URL}?assets=${asset}&metrics=${CM_FETCH.join(',')}&frequency=1d&page_size=1830&paging_from=end`;
-  const res = await fetchJson(url, { ttlMinutes: 360, timeoutMs: 45_000 });
+  // Pełna historia (BTC od 2009) mieści się w jednej stronie odpowiedzi (max 10 000 dni).
+  const url = `${CM_URL}?assets=${asset}&metrics=${CM_FETCH.join(',')}&frequency=1d&page_size=10000`;
+  const res = await fetchJson(url, { ttlMinutes: 360, timeoutMs: 90_000 });
   const series = {};
   for (const row of res.data?.data || []) {
     const t = Date.parse(row.time);
@@ -99,6 +100,7 @@ const MEMPOOL = 'https://mempool.space/api';
 const PERIODS = [
   { value: '1m', label: '1 miesiąc' }, { value: '3m', label: '3 miesiące' }, { value: '6m', label: '6 miesięcy' },
   { value: '1y', label: '1 rok' }, { value: '2y', label: '2 lata' }, { value: '3y', label: '3 lata' },
+  { value: 'all', label: 'Cała historia (od 2009)' },
 ];
 const mp = (path, ttlMinutes = 10) => fetchJson(`${MEMPOOL}${path}`, { ttlMinutes });
 
@@ -110,8 +112,9 @@ export function externalDatasets(h) {
   const RANGE = [
     { value: '30', label: '30 dni' }, { value: '90', label: '90 dni' }, { value: '180', label: '180 dni' },
     { value: '365', label: '1 rok' }, { value: '730', label: '2 lata' }, { value: '1825', label: '5 lat' },
+    { value: '3650', label: '10 lat' }, { value: '0', label: 'Cała historia' },
   ];
-  const LLAMA_RANGE = [...RANGE, { value: '0', label: 'Cała historia' }];
+  const LLAMA_RANGE = RANGE;
   const since = (days) => (Number(days) ? Date.now() - Number(days) * DAY : 0);
   const byRange = (points, days) => points.filter(([t]) => t >= since(days));
   const ORDER = [{ value: 'desc', label: 'Od najwyższych' }, { value: 'asc', label: 'Od najniższych' }];
@@ -132,10 +135,12 @@ export function externalDatasets(h) {
       ],
       presets: [
         { title: 'Aktywne adresy BTC i ETH', params: { assets: ['btc', 'eth'], metric: 'AdrActCnt' }, keywords: 'active addresses on-chain aktywność użytkownicy glassnode' },
-        { title: 'MVRV Bitcoina', description: 'Kapitalizacja rynkowa / zrealizowana. Powyżej ~3 rynek historycznie przegrzany, poniżej 1 niedowartościowany.', params: { assets: ['btc'], metric: 'CapMVRVCur', range: '1825' }, keywords: 'mvrv realized cap wycena cykl glassnode' },
+        { title: 'MVRV Bitcoina', description: 'Kapitalizacja rynkowa / zrealizowana. Powyżej ~3 rynek historycznie przegrzany, poniżej 1 niedowartościowany.', params: { assets: ['btc'], metric: 'CapMVRVCur', range: '0' }, keywords: 'mvrv realized cap wycena cykl glassnode' },
         { title: 'Saldo przepływów BTC na giełdy', description: 'Dodatnie = więcej BTC trafia na giełdy (presja sprzedaży), ujemne = odpływ do portfeli.', params: { assets: ['btc'], metric: 'FlowNetExUSD', range: '180' }, keywords: 'exchange flows netflow giełdy przepływy glassnode' },
         { title: 'Podaż BTC i ETH na giełdach', params: { assets: ['btc', 'eth'], metric: 'SplyExNtv', mode: 'index', range: '730' }, keywords: 'exchange balance supply giełdy rezerwy' },
-        { title: 'Hashrate Bitcoina (Coin Metrics)', params: { assets: ['btc'], metric: 'HashRate', range: '1825' }, keywords: 'hashrate mining wydobycie' },
+        { title: 'Hashrate Bitcoina (Coin Metrics)', params: { assets: ['btc'], metric: 'HashRate', range: '0', scale: 'log' }, keywords: 'hashrate mining wydobycie' },
+        { title: 'Cena Bitcoina od 2010 (skala logarytmiczna)', description: 'Pełna historia ceny BTC z Coin Metrics – dłuższa niż pozwala plan CMC.', params: { assets: ['btc'], metric: 'PriceUSD', range: '0', scale: 'log' }, keywords: 'price cena historia long cykle halving' },
+        { title: 'Aktywne adresy BTC – cała historia', params: { assets: ['btc'], metric: 'AdrActCnt', range: '0', scale: 'log' }, keywords: 'active addresses historia long adopcja' },
         { title: 'Liczba transakcji – porównanie sieci (indeks)', params: { assets: ['btc', 'eth', 'ltc', 'doge'], metric: 'TxCnt', mode: 'index' }, keywords: 'transactions transakcje aktywność' },
         { title: 'Tempo wzrostu aktywnych adresów (%/tydzień)', params: { assets: ['btc', 'eth'], metric: 'AdrActCnt', transform: 'rate', window: '720', per: 'week' }, keywords: 'prędkość tempo adresy speed' },
       ],
@@ -516,6 +521,7 @@ export function externalDatasets(h) {
       ],
       presets: [
         { title: 'Hashrate Bitcoina', keywords: 'hashrate mining wydobycie górnicy' },
+        { title: 'Hashrate Bitcoina – cała historia od 2009', params: { period: 'all', scale: 'log' }, keywords: 'hashrate historia long' },
         { title: 'Trudność wydobycia Bitcoina', params: { metric: 'difficulty', period: '2y' }, keywords: 'difficulty trudność' },
       ],
       async load(p) {
@@ -568,7 +574,7 @@ export function externalDatasets(h) {
       endpoint: 'mempool.space /api/v1/mining/pools', plan: 'free', charts: ['hbar', 'donut', 'table'], size: 'm',
       params: [{
         key: 'period', label: 'Okres', type: 'select', default: '1w',
-        options: [{ value: '24h', label: '24 godziny' }, { value: '3d', label: '3 dni' }, { value: '1w', label: '1 tydzień' }, { value: '1m', label: '1 miesiąc' }, { value: '3m', label: '3 miesiące' }],
+        options: [{ value: '24h', label: '24 godziny' }, { value: '3d', label: '3 dni' }, { value: '1w', label: '1 tydzień' }, { value: '1m', label: '1 miesiąc' }, { value: '3m', label: '3 miesiące' }, { value: '1y', label: '1 rok' }, { value: 'all', label: 'Cała historia' }],
       }],
       presets: [{ title: 'Udział pul wydobywczych Bitcoina', keywords: 'mining pools pule foundry antpool decentralizacja' }],
       async load(p) {

@@ -177,3 +177,17 @@ test('źródła on-chain: wybór wielu sieci i saldo przepływów giełdowych', 
   assert.match(payload.note, /XRP/);
   assert.equal(payload.zeroLine, true);
 });
+
+test('najdłuższa historia: strony indeksu strachu i pełna historia rynku CMC', async () => {
+  const fng = catalog.getDataset('sentiment.fng_history');
+  const all = await fng.load(catalog.resolveParams(fng, { days: '0' }));
+  const pts = all.series[0].points;
+  assert.ok(pts.length > 1000, `oczekiwano >1000 dni, jest ${pts.length}`);
+  assert.equal(new Set(pts.map(([t]) => t)).size, pts.length, 'bez duplikatów między stronami');
+
+  const g = catalog.getDataset('cmc.global_history');
+  const full = await g.load(catalog.resolveParams(g, { metric: 'total_market_cap', days: '0' }));
+  const again = await g.load(catalog.resolveParams(g, { metric: 'total_market_cap', days: '365' }));
+  assert.ok(full.series[0].points.length > 4000, 'historia od 2013');
+  assert.ok(again.series[0].points.length <= 366);
+});
