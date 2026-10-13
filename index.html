@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <title>Kalkulator PPM + CAC – Gleba</title>
   <style>
+    /* Strona ma jeden, jasny wygląd. Podgląd artefaktu w ciemnym motywie przełącza kontrolki formularzy
+       na ciemny schemat — tekst w polach robi się wtedy biały na białym tle i wpisane liczby znikają. */
+    html { color-scheme: light !important; }
     body { font-family: system-ui, -apple-system, sans-serif; background: #f0f4f8; padding: 20px; color: #1a202c; margin: 0; line-height: 1.45; }
     .container { max-width: 980px; margin: 0 auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
     h1 { text-align: center; color: #2d3748; margin: 0 0 8px 0; font-size: 1.7rem; }
@@ -18,7 +21,7 @@
     .section h3 { margin: 0 0 12px 0; font-size: 1.05rem; color: #2b6cb0; }
     .input-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin-bottom: 12px; }
     label { font-weight: 600; font-size: 0.84rem; display: block; margin-bottom: 5px; color: #4a5568; }
-    input, select { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; background: #fff; }
+    input, select { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; background: #fff; color: #1a202c; }
     input:focus, select:focus { outline: none; border-color: #3182ce; box-shadow: 0 0 0 3px rgba(49,130,206,0.15); }
     input:disabled { background: #edf2f7; color: #718096; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
@@ -3396,16 +3399,6 @@
       if (s.stage && MEHLICH3_STAGES[s.stage]) window._targetStage = s.stage;
     }
 
-    // Gdy KAŻDE pole liczbowe z wartością domyślną jest puste, to nie jest stan wpisany ręcznie, tylko
-    // nieudane odtworzenie formularza przez podgląd przy podmianie wersji — wracamy do wartości domyślnych.
-    function healBlankedInputs() {
-      const withDefaults = Array.from(document.querySelectorAll('input[type=number][id]'))
-        .filter(el => el.defaultValue !== '' && !el.disabled);
-      if (!withDefaults.length || withDefaults.some(el => el.value !== '')) return false;
-      withDefaults.forEach(el => { el.value = el.defaultValue; });
-      return true;
-    }
-
     // Start strony. Skrypt stoi na końcu <body>, więc wszystkie pola już istnieją — nie czekamy na
     // window.onload, które nie przychodzi, gdy strona jest podmieniana w już załadowanym oknie.
     let pageStarted = false;
@@ -3415,7 +3408,6 @@
       populateProductSelect();
       renderProductsTable();
       try { restorePageState(data && data.page); } catch (e) { /* stan poprzedniej wersji nieczytelny — zostają wartości domyślne */ }
-      if (healBlankedInputs()) window._doseRecipe = null;
       if (!window._doseRecipe) snapshotDoseRecipe();
       syncSatButtons();
       calculatePPM();
@@ -3424,15 +3416,6 @@
       renderSavedPhases();
       renderCompostAll();
       if (window._targetStage !== 'flo') setTargetStage(window._targetStage);
-      // Podgląd może odtworzyć formularz chwilę po starcie strony — sprawdzamy jeszcze raz.
-      setTimeout(() => {
-        if (!healBlankedInputs()) return;
-        snapshotDoseRecipe();
-        syncSatButtons();
-        calculatePPM();
-        calculateCAC();
-        renderCompostAll();
-      }, 1500);
     }
 
     (function bootPage() {
