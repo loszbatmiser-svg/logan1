@@ -207,6 +207,13 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   „auto” i „cel ppm” przeliczają się z tego stanu; ostatnio używana wczytuje się sama przy otwarciu, o ile
   użytkownik niczego jeszcze nie zaczął. Magazyn: w podglądzie artefaktu capability `db` (kolekcja
   `receptury`, te same na każdym urządzeniu), z dysku — `localStorage` (`nawoz_receptury`)
+- `buildRecipeReport()` — migawka receptury przy zapisie: wynik wapnowania (`window._limeResult`, ustawiany
+  wyłącznie przez `calculateLime()`), produkty pogrupowane jak w „2. Targety PPM” (kationy → aniony →
+  mikroelementy), profil końcowy; z niej rysowana jest lista receptur i PDF
+- `paintRecipePdfPages()` / `assemblePdf()` / `offerFile()` — PDF do wydruku bez bibliotek: strony A4 rysowane
+  na płótnie (czcionka systemowa, więc polskie znaki bez osadzania fontów), składane w PDF 1.4 z obrazami
+  Flate (`CompressionStream`, awaryjnie JPEG); zapis przez capability `downloads` w podglądzie artefaktu,
+  z dysku zwykłym linkiem. Nazwa pliku tylko ASCII — z ogonkami przeglądarka potrafi zapisać „download”
 
 **Zakładka Kompost**
 - `getCompostContent()` — zawartość pierwiastka w kompoście, `{min, max}` z dwóch raportów

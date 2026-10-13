@@ -84,6 +84,11 @@
     .status.ok { color: #276749; font-weight: 600; }
     .status.err { color: #c53030; font-weight: 600; }
     #column-buttons { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .recipe-table tr.recipe-head td { background: #edf2f7; border-top: 3px solid #2b6cb0; }
+    .recipe-head-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+    .recipe-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+    .recipe-actions .col-btn { margin: 0; padding: 5px 12px; }
+    .col-btn.danger { background: #c53030; border-color: #c53030; color: #fff; }
   </style>
 </head>
 <body>
@@ -642,11 +647,12 @@
         <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_6', this)"><span class="caret">▾</span> 6. Receptury — zapisz i wczytaj</h2>
         <div class="collapsible-body" id="am_cbody_6">
         <p class="note">
-          Receptura zapamiętuje wszystko, z czego liczy się lista produktów: listę z punktu 5, etap wzrostu,
-          własne targety, wartości startowe gleby z punktu 1, dane z zakładki CAC/Gleba (pH, Ca, Mg, K, Na,
-          wapnowanie, objętość i gęstość gleby) oraz wczytany kompost. Po wczytaniu dawki wychodzą dokładnie
-          takie jak przy zapisie — bez ponownego importu PDF. Ostatnio zapisana lub wczytana receptura
-          wczytuje się sama przy otwarciu strony.
+          Receptura zapamiętuje wszystko, z czego liczy się lista produktów: wapnowanie i dane z zakładki
+          CAC/Gleba (pH, Ca, Mg, K, Na, cel nasycenia Ca, objętość i gęstość gleby), wartości startowe z punktu 1,
+          etap wzrostu, własne targety, wczytany kompost i listę z punktu 5. Po wczytaniu dawki wychodzą dokładnie
+          takie jak przy zapisie — bez ponownego importu PDF. Na liście receptura pokazuje krok 1 (wapnowanie)
+          i krok 2 (produkty w kolejności jak w „2. Targety PPM”: kationy, aniony, mikroelementy). Przycisk „PDF”
+          zapisuje ją do pliku do wydruku. Ostatnio zapisana lub wczytana receptura wczytuje się sama przy otwarciu strony.
         </p>
         <div class="input-group">
           <div>
@@ -3323,6 +3329,11 @@
         document.getElementById('lime_woll_l').innerText = '0';
 
         window._postLime = { ca: d.ca, mg: d.mg, k: d.k, na: d.na, other: d.other, exh: d.exh, ph: d.ph };
+        window._limeResult = {
+          needed: false, reachable: true, currSat: d.satCa, targetSat: null, ph: d.ph, deficitMeq: 0,
+          caIncrease: 0, newCa: d.ca, tcecAfter: d.tcec, volumeL, bd, cce, wollCa, wollCce,
+          perL: { pure: 0, caco3: 0, woll: 0, ca: 0 }
+        };
         if (typeof renderAmendmentsAll === 'function') renderAmendmentsAll();
         return;
       }
@@ -3388,6 +3399,11 @@
       document.getElementById('lime_woll_l').innerText = woll_g_l.toFixed(2);
 
       window._postLime = { ca: newCa, mg: d.mg, k: d.k, na: d.na, other: newOther, exh: newExH, ph: sc.ph };
+      window._limeResult = {
+        needed: true, reachable: sc.reachable, currSat: d.satCa, targetSat, ph: sc.ph, deficitMeq,
+        caIncrease, newCa, tcecAfter: sc.tcec, volumeL, bd, cce, wollCa, wollCce,
+        perL: { pure: pure_g_l, caco3: caco3_g_l, woll: woll_g_l, ca: pureCa_g_l }
+      };
       if (typeof renderAmendmentsAll === 'function') renderAmendmentsAll();
     }
     window.calculateLime = calculateLime;
@@ -3464,6 +3480,7 @@
         savedAt: typeof r.savedAt === 'string' ? r.savedAt : '',
         usedAt: typeof r.usedAt === 'string' ? r.usedAt : '',
         summary: Array.isArray(r.summary) ? r.summary : [],
+        report: r.report && typeof r.report === 'object' && Array.isArray(r.report.groups) ? r.report : null,
         state: Object.assign({}, st, { cart })
       };
     }
@@ -3541,7 +3558,8 @@
         id: existing ? existing.id : newRecipeId(),
         name, savedAt: now, usedAt: now,
         state: collectRecipeState(),
-        summary: summarizeCart()
+        summary: summarizeCart(),
+        report: buildRecipeReport()
       };
       const btn = document.getElementById('recipe_save_btn');
       btn.disabled = true;
@@ -3585,7 +3603,7 @@
       applyRecipe(recipe);
       const when = formatRecipeDate(recipe.savedAt);
       setRecipeStatus((auto ? 'Wczytano automatycznie ostatnią recepturę' : 'Wczytano recepturę')
-        + ` „${recipe.name}”${when ? ` (zapisana ${when})` : ''} — dane gleby, etap i lista produktów odtworzone.`);
+        + ` „${recipe.name}”${when ? ` (zapisana ${when})` : ''} — wapnowanie, dane gleby, etap i lista produktów odtworzone.`);
       if (auto) return;
       // Zapamiętujemy, która receptura była ostatnio używana — ta wczyta się sama przy następnym otwarciu.
       const used = Object.assign({}, recipe, { usedAt: new Date().toISOString() });
@@ -3619,6 +3637,22 @@
       }, null);
     }
 
+    function fmtNum(x, d) {
+      const v = Number(x);
+      return isFinite(v) ? v.toFixed(d) : '—';
+    }
+
+    function limeSummaryHtml(lime) {
+      if (!lime) return '<span class="explain">brak danych o wapnowaniu</span>';
+      if (!lime.needed) return `niepotrzebne — pH gleby ${fmtNum(lime.ph, 1)} (≥ 7)`;
+      const V = Number(lime.volumeL);
+      let html = `węglan wapnia (${fmtNum(lime.cce, 0)}%) <strong>${fmtNum(lime.perL.caco3 * V, 1)} g</strong>`
+        + ` <span class="explain">albo</span> wolastenit <strong>${fmtNum(lime.perL.woll * V, 1)} g</strong>`
+        + ` <span class="explain">· na ${fmtNum(V, 1)} l gleby · Ca ${fmtNum(lime.currSat, 1)}% → ${fmtNum(lime.targetSat, 0)}%, +${fmtNum(lime.caIncrease, 0)} ppm Ca, pH ${fmtNum(lime.ph, 1)}</span>`;
+      if (!lime.reachable) html += ' <span style="color:#c53030; font-weight:600;">cel nieosiągalny przy tym pH</span>';
+      return html;
+    }
+
     function renderRecipes() {
       const box = document.getElementById('recipe_list');
       if (!box) return;
@@ -3628,27 +3662,439 @@
       }
       const last = lastUsedRecipe();
       const sorted = [...window._recipes].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
-      let html = '<table><thead><tr><th>Receptura</th><th>Produkty (dawka przy zapisie)</th><th></th></tr></thead><tbody>';
+      let html = '<table class="recipe-table"><thead><tr><th>Produkt</th><th>Dla pierwiastka</th><th>Dawka</th></tr></thead><tbody>';
       sorted.forEach(r => {
         const f = r.state.fields;
         const stage = MEHLICH3_STAGES[r.state.stage] ? MEHLICH3_STAGES[r.state.stage].label : '—';
-        const soil = `gleba ${escapeHtml(f.lime_volume_l || '—')} l, pH ${escapeHtml(f.cac_ph || '—')}, cel Ca ${escapeHtml(f.lime_target_sat || '—')}%`;
-        const products = r.summary.length
-          ? r.summary.map(p => `${escapeHtml(p.name)}: <strong>${Number(p.grams).toFixed(2)} g</strong>`
-              + (p.ml != null ? ` <span class="explain">(${Number(p.ml).toFixed(0)} ml)</span>` : '')).join('<br>')
-          : '<span class="explain">—</span>';
         const confirming = recipePendingDelete === r.id;
-        html += `<tr><td><strong>${escapeHtml(r.name)}</strong>`
+        const id = escapeHtml(r.id);
+        html += `<tr class="recipe-head"><td colspan="3">`
+          + `<div class="recipe-head-row"><div><strong>${escapeHtml(r.name)}</strong>`
           + (r === last ? ' <span class="badge" style="min-width:0;">otwiera się sama</span>' : '')
-          + `<br><span class="explain">etap: ${escapeHtml(stage)} · ${soil}</span>`
-          + `<br><span class="explain">zapisana ${escapeHtml(formatRecipeDate(r.savedAt))}</span></td>`
-          + `<td>${products}</td>`
-          + `<td style="white-space:nowrap;"><button class="col-btn" style="padding:5px 10px;" onclick="loadRecipe('${escapeHtml(r.id)}')">Wczytaj</button>`
-          + `<button class="col-btn" style="padding:5px 10px;${confirming ? ' background:#c53030; border-color:#c53030; color:#fff;' : ''}" onclick="deleteRecipe('${escapeHtml(r.id)}')">${confirming ? 'Na pewno usunąć?' : 'Usuń'}</button></td></tr>`;
+          + `<br><span class="explain">etap: ${escapeHtml(stage)} · gleba ${escapeHtml(f.lime_volume_l || '—')} l, pH ${escapeHtml(f.cac_ph || '—')}`
+          + ` · zapisana ${escapeHtml(formatRecipeDate(r.savedAt))}</span></div>`
+          + `<div class="recipe-actions"><button class="col-btn" onclick="loadRecipe('${id}')">Wczytaj</button>`
+          + `<button class="col-btn" onclick="downloadRecipePdf('${id}')">PDF</button>`
+          + `<button class="col-btn${confirming ? ' danger' : ''}" onclick="deleteRecipe('${id}')">${confirming ? 'Na pewno usunąć?' : 'Usuń'}</button></div></div>`
+          + `</td></tr>`;
+        if (r.report) {
+          html += `<tr><td colspan="3"><span class="explain">Krok 1 — wapnowanie:</span> ${limeSummaryHtml(r.report.lime)}</td></tr>`;
+          const groups = r.report.groups.filter(g => Array.isArray(g.items) && g.items.length);
+          if (!groups.length) html += '<tr><td colspan="3" class="explain">Krok 2 — brak produktów</td></tr>';
+          groups.forEach((g, gi) => {
+            const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
+            html += `<tr class="${def.cls}"><td colspan="3"><span class="explain">${gi === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
+            g.items.forEach(it => {
+              html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}</td>`
+                + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
+                + `<td style="white-space:nowrap;"><strong>${fmtNum(it.grams, 2)} g</strong>${it.ml != null ? ` <span class="explain">(${fmtNum(it.ml, 0)} ml)</span>` : ''}</td></tr>`;
+            });
+          });
+        } else {
+          // Receptura zapisana przed dodaniem raportu — pokazujemy to, co zapisano wtedy.
+          html += `<tr><td colspan="3">` + (r.summary.length
+            ? r.summary.map(p => `${escapeHtml(p.name)}: <strong>${fmtNum(p.grams, 2)} g</strong>`
+                + (p.ml != null ? ` <span class="explain">(${fmtNum(p.ml, 0)} ml)</span>` : '')).join('<br>')
+            : '<span class="explain">—</span>')
+            + '<br><span class="explain">Wczytaj i zapisz ją ponownie, żeby zobaczyć wapnowanie i podział na kationy, aniony i mikroelementy.</span></td></tr>';
+        }
       });
       html += '</tbody></table>';
       box.innerHTML = html;
     }
+
+    // ===== RAPORT RECEPTURY (lista receptur i PDF) =====
+    // Kolejność i grupy jak w „2. Targety PPM (Mehlich 3)”: najpierw kationy, potem aniony, potem mikroelementy.
+    const ELEMENT_GROUPS = [
+      { key: 'cation', cls: 'el-cation', label: 'Kationy (Ca, Mg, K, Na)', bar: '#3182ce', fill: '#ebf8ff' },
+      { key: 'anion', cls: 'el-anion', label: 'Aniony (N, P, S)', bar: '#dd6b20', fill: '#fffaf0' },
+      { key: 'micro', cls: 'el-micro', label: 'Mikroelementy', bar: '#38a169', fill: '#f0fff4' }
+    ];
+
+    function elementGroupKey(el) {
+      if (CATION_ELEMENTS.includes(el)) return 'cation';
+      if (ANION_ELEMENTS.includes(el)) return 'anion';
+      return 'micro';
+    }
+
+    // Pierwiastek, dla którego produkt jest w recepturze: cel dawki „auto” i „cel ppm”, a przy stałej
+    // dawce — ten, którego produkt zawiera najwięcej.
+    function cartItemElement(item) {
+      if (item.targetElement) return item.targetElement;
+      const product = getAmendment(item.productId);
+      if (!product) return null;
+      return Object.keys(product.pct).sort((a, b) => product.pct[b] - product.pct[a])[0] || null;
+    }
+
+    function cartItemBasisShort(item) {
+      if (item.mode === 'grams') return 'stała dawka';
+      if (item.mode === 'auto') return item.step === 'ratio' ? 'auto, krok 2 — dopłata wg proporcji' : 'auto, krok 1 — do targetu Mehlich 3';
+      return `cel +${Number(item.targetPpm).toFixed(1)} ppm`;
+    }
+
+    const round2 = x => Math.round(Number(x) * 100) / 100;
+
+    // Migawka tego, co widać po wczytaniu receptury — liczona z bieżącego stanu strony.
+    function buildRecipeReport() {
+      const groups = ELEMENT_GROUPS.map(g => ({ key: g.key, items: [] }));
+      window._amendmentCart.forEach((item, idx) => {
+        const product = getAmendment(item.productId);
+        const grams = getCartItemGrams(item, idx);
+        const el = cartItemElement(item);
+        groups.find(g => g.key === elementGroupKey(el)).items.push({
+          product: product ? product.name : item.productId,
+          el, basis: cartItemBasisShort(item), grams: round2(grams), order: idx,
+          ml: product && product.volumeBased ? Math.round(compostMlFromGrams(grams)) : null
+        });
+      });
+      const rank = el => { const i = ELEMENT_ORDER.indexOf(el); return i < 0 ? 99 : i; };
+      groups.forEach(g => g.items.sort((a, b) => (rank(a.el) - rank(b.el)) || (a.order - b.order)));
+
+      const { base, added } = getCurrentTotals();
+      const profile = sortElements(Array.from(new Set([...Object.keys(base), ...Object.keys(added)]))).map(el => {
+        const t = getEffectiveTarget(window._targetStage, el);
+        return { el, start: round2(base[el] || 0), added: round2(added[el] || 0), target: t ? { min: t.min, max: t.max } : null };
+      });
+      const fin = getFinalSoilState(base, added);
+      const num = id => parseFloat(document.getElementById(id).value);
+      return {
+        stage: window._targetStage,
+        soil: {
+          volumeL: num('lime_volume_l'), bd: num('lime_bd'), massKg: round2(getSoilMassKg()),
+          ph: num('cac_ph'), ca: num('cac_ca'), mg: num('cac_mg'), k: num('cac_k'), na: num('cac_na')
+        },
+        lime: window._limeResult ? cloneJson(window._limeResult) : null,
+        groups, profile,
+        final: fin ? { tcec: fin.tcec, ph: fin.ph, satCa: fin.satCa, satMg: fin.satMg, satK: fin.satK, satNa: fin.satNa } : null
+      };
+    }
+
+    // ===== PDF RECEPTURY =====
+    // Strony rysujemy na płótnie (czcionka systemowa, więc polskie znaki i CaCO₃ wychodzą bez osadzania
+    // fontów) i składamy z nich PDF bez zewnętrznych bibliotek — działa też offline z pliku na dysku.
+    const PDF_PAGE_W = 595.28, PDF_PAGE_H = 841.89;  // A4 w punktach
+    const PDF_SCALE = 2.5;                             // pikseli na punkt ≈ 180 dpi, ostre przy wydruku
+    const PDF_COLORS = { text: '#1a202c', muted: '#718096', head: '#2d3748', accent: '#2b6cb0', rule: '#e2e8f0', warn: '#c53030' };
+
+    const plNum = (x, d) => { const v = Number(x); return isFinite(v) ? v.toFixed(d).replace('.', ',') : '—'; };
+
+    function paintRecipePdfPages(recipe) {
+      const r = recipe.report;
+      const W = PDF_PAGE_W, H = PDF_PAGE_H, M = 40, CW = W - 2 * M, C = PDF_COLORS;
+      const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+      const pages = [];
+      let ctx, y;
+
+      function newPage() {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(W * PDF_SCALE);
+        canvas.height = Math.round(H * PDF_SCALE);
+        ctx = canvas.getContext('2d');
+        ctx.scale(PDF_SCALE, PDF_SCALE);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, W, H);
+        pages.push(canvas);
+        y = M;
+      }
+      const font = (size, weight) => { ctx.font = `${weight || 400} ${size}px ${FONT}`; };
+      const ensure = h => { if (y + h > H - M - 14) { newPage(); return true; } return false; };
+      function wrap(text, maxW) {
+        const lines = [];
+        String(text).split('\n').forEach(par => {
+          let line = '';
+          par.split(/\s+/).forEach(word => {
+            const t = line ? line + ' ' + word : word;
+            if (line && ctx.measureText(t).width > maxW) { lines.push(line); line = word; } else line = t;
+          });
+          lines.push(line);
+        });
+        return lines;
+      }
+      function paragraph(text, size, color, weight) {
+        font(size || 9.5, weight);
+        const lh = (size || 9.5) * 1.4;
+        wrap(text, CW).forEach(line => {
+          ensure(lh);
+          ctx.fillStyle = color || C.text;
+          ctx.textAlign = 'left';
+          ctx.fillText(line, M, y + lh * 0.75);
+          y += lh;
+        });
+      }
+      // Nagłówek nie zostaje sam na dole strony — przechodzi razem z początkiem tabeli pod nim.
+      function heading(text) {
+        ensure(110);
+        y += 8;
+        font(12.5, 700);
+        ctx.fillStyle = C.accent;
+        ctx.textAlign = 'left';
+        ctx.fillText(text, M, y + 12);
+        y += 17;
+        ctx.fillStyle = '#bee3f8';
+        ctx.fillRect(M, y, CW, 1.5);
+        y += 8;
+      }
+      // cols: [{label, w, align}], rows: [{group: {label, bar, fill}} | {cells, bar, fill, bold}]
+      function table(cols, rows) {
+        const pad = 5, lh = 11.5;
+        const cellText = (t, x, yy, c) => {
+          if (c.align === 'right') { ctx.textAlign = 'right'; ctx.fillText(t, x + c.w - pad, yy); }
+          else { ctx.textAlign = 'left'; ctx.fillText(t, x + pad, yy); }
+        };
+        const header = () => {
+          font(8.5, 600);
+          ctx.fillStyle = C.head;
+          ctx.fillRect(M, y, CW, 18);
+          ctx.fillStyle = '#fff';
+          let x = M;
+          cols.forEach(c => { cellText(c.label, x, y + 12.3, c); x += c.w; });
+          y += 18;
+        };
+        ensure(18 + 22);
+        header();
+        rows.forEach(row => {
+          if (row.group) {
+            if (ensure(17 + 22)) header();
+            ctx.fillStyle = row.group.fill; ctx.fillRect(M, y, CW, 17);
+            ctx.fillStyle = row.group.bar; ctx.fillRect(M, y, 3, 17);
+            font(8.8, 700); ctx.fillStyle = C.text; ctx.textAlign = 'left';
+            ctx.fillText(row.group.label, M + 9, y + 12);
+            y += 17;
+            return;
+          }
+          font(9, row.bold ? 700 : 400);
+          const lines = cols.map((c, i) => wrap(row.cells[i] == null ? '' : row.cells[i], c.w - 2 * pad));
+          const h = Math.max(...lines.map(l => l.length)) * lh + 2 * pad - 1;
+          if (ensure(h)) header();
+          if (row.fill) { ctx.fillStyle = row.fill; ctx.fillRect(M, y, CW, h); }
+          if (row.bar) { ctx.fillStyle = row.bar; ctx.fillRect(M, y, 3, h); }
+          ctx.fillStyle = row.color || C.text;
+          let x = M;
+          cols.forEach((c, i) => {
+            lines[i].forEach((ln, k) => cellText(ln, x, y + pad + 8.3 + k * lh, c));
+            x += c.w;
+          });
+          y += h;
+          ctx.fillStyle = C.rule;
+          ctx.fillRect(M, y - 0.5, CW, 0.5);
+        });
+        y += 8;
+      }
+      const colsW = fr => fr.map(f => f * CW);
+
+      newPage();
+      // Nagłówek
+      font(17, 700); ctx.fillStyle = C.text; ctx.textAlign = 'left';
+      ctx.fillText(`Receptura: ${recipe.name}`, M, y + 16);
+      y += 26;
+      const stageLabel = MEHLICH3_STAGES[r.stage] ? MEHLICH3_STAGES[r.stage].label : '—';
+      paragraph(`Etap: ${stageLabel}   ·   zapisana ${formatRecipeDate(recipe.savedAt)}   ·   wydruk ${formatRecipeDate(new Date().toISOString())}`, 9, C.muted);
+      const s = r.soil || {};
+      paragraph(`Gleba: ${plNum(s.volumeL, 1)} l, gęstość nasypowa ${plNum(s.bd, 2)} g/cm³, masa ${plNum(s.massKg, 2)} kg.   `
+        + `Test glebowy (Value Found): pH ${plNum(s.ph, 1)}, Ca ${plNum(s.ca, 0)}, Mg ${plNum(s.mg, 0)}, K ${plNum(s.k, 0)}, Na ${plNum(s.na, 0)} ppm.`, 9, C.muted);
+
+      // Krok 1 — wapnowanie
+      heading('Krok 1 — Wapnowanie (zakładka CAC / Gleba)');
+      const L = r.lime;
+      if (!L) {
+        paragraph('Brak danych o wapnowaniu w tej recepturze.', 9.5, C.muted);
+      } else if (!L.needed) {
+        paragraph(`Wapnowanie niepotrzebne — pH gleby ${plNum(L.ph, 1)} (≥ 7). Nasycenie Ca ${plNum(L.currSat, 1)}%.`, 9.5);
+      } else {
+        if (!L.reachable) paragraph(`Uwaga: cel ${plNum(L.targetSat, 0)}% nasycenia wapniem jest nieosiągalny przy pH ${plNum(L.ph, 1)} — dawki poniżej liczone do granicy.`, 9.5, C.warn, 600);
+        table(colsW([0.62, 0.38]).map((w, i) => ({ w, label: i ? 'Wartość' : 'Parametr', align: i ? 'right' : 'left' })), [
+          { cells: ['Nasycenie Ca — aktualne → docelowe', `${plNum(L.currSat, 1)}% → ${plNum(L.targetSat, 0)}%`] },
+          { cells: ['pH gleby przypisane do celu', plNum(L.ph, 1)] },
+          { cells: ['Brakuje wapnia', `+${plNum(L.caIncrease, 0)} ppm Ca (${plNum(L.deficitMeq, 2)} meq/100 g)`] },
+          { cells: ['Ca po wapnowaniu', `${plNum(L.newCa, 0)} ppm`] },
+          { cells: ['TCEC po wapnowaniu', `${plNum(L.tcecAfter, 2)} meq/100 g`] }
+        ]);
+        const V = Number(L.volumeL);
+        paragraph(`Dawka na ${plNum(V, 1)} l gleby — wybierz jeden z produktów:`, 9.5, C.text, 600);
+        y += 3;
+        table([{ label: 'Produkt', w: CW * 0.52 }, { label: `Na ${plNum(V, 1)} l`, w: CW * 0.24, align: 'right' }, { label: 'Na 1 l', w: CW * 0.24, align: 'right' }], [
+          { cells: [`Węglan wapnia CaCO₃ (czystość ${plNum(L.cce, 0)}%)`, `${plNum(L.perL.caco3 * V, 1)} g`, `${plNum(L.perL.caco3, 2)} g/l`], bold: true },
+          { cells: [`Wolastenit (Ca ${plNum(L.wollCa, 1)}%, efektywność ${plNum(L.wollCce, 0)}%)`, `${plNum(L.perL.woll * V, 1)} g`, `${plNum(L.perL.woll, 2)} g/l`], bold: true },
+          { cells: ['Czysty CaCO₃ (100%) — dla porównania', `${plNum(L.perL.pure * V, 1)} g`, `${plNum(L.perL.pure, 2)} g/l`], color: C.muted },
+          { cells: ['Czysty wapń (Ca) dostarczony', `${plNum(L.perL.ca * V, 1)} g`, `${plNum(L.perL.ca, 2)} g/l`], color: C.muted }
+        ]);
+      }
+
+      // Krok 2 — produkty w grupach
+      heading('Krok 2 — Nawożenie: kationy, aniony, mikroelementy');
+      const prodRows = [];
+      r.groups.forEach(g => {
+        if (!g.items || !g.items.length) return;
+        const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
+        prodRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
+        g.items.forEach(it => prodRows.push({
+          cells: [it.product, ELEMENT_LABELS[it.el] || it.el || '—', it.basis || '',
+                  `${plNum(it.grams, 2)} g` + (it.ml != null ? `\n(${plNum(it.ml, 0)} ml)` : '')],
+          bar: def.bar
+        }));
+      });
+      if (prodRows.length) {
+        table([{ label: 'Produkt', w: CW * 0.36 }, { label: 'Dla pierwiastka', w: CW * 0.18 },
+               { label: 'Podstawa dawki', w: CW * 0.28 }, { label: 'Dawka', w: CW * 0.18, align: 'right' }], prodRows);
+        paragraph(`Dawki na ${plNum(s.volumeL, 1)} l gleby (${plNum(s.massKg, 2)} kg), liczone od stanu po wapnowaniu.`, 8.5, C.muted);
+      } else {
+        paragraph('Brak produktów w recepturze.', 9.5, C.muted);
+      }
+
+      // Profil końcowy
+      heading(`Profil gleby po nawożeniu — cel: ${stageLabel} (Mehlich 3)`);
+      const profRows = [];
+      ELEMENT_GROUPS.forEach(def => {
+        const items = (r.profile || []).filter(p => elementGroupKey(p.el) === def.key);
+        if (!items.length) return;
+        profRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
+        items.forEach(p => {
+          const t = p.target;
+          const tgt = !t ? '—' : t.max == null ? `≥ ${plNum(t.min, 1)}` : t.max === t.min ? plNum(t.min, 1) : `${plNum(t.min, 1)}–${plNum(t.max, 1)}`;
+          profRows.push({ cells: [ELEMENT_LABELS[p.el] || p.el, plNum(p.start, 1), `+${plNum(p.added, 1)}`, plNum(p.start + p.added, 1), tgt], bar: def.bar });
+        });
+      });
+      table([{ label: 'Pierwiastek', w: CW * 0.28 }, { label: 'Start (ppm)', w: CW * 0.16, align: 'right' },
+             { label: 'Dodane', w: CW * 0.16, align: 'right' }, { label: 'Razem', w: CW * 0.16, align: 'right' },
+             { label: 'Cel', w: CW * 0.24, align: 'right' }], profRows);
+      if (r.final) {
+        const F = r.final;
+        paragraph(`TCEC ${plNum(F.tcec, 2)} meq/100 g · pH ${plNum(F.ph, 2)} · nasycenie: Ca ${plNum(F.satCa, 1)}% (cel 68–75), `
+          + `Mg ${plNum(F.satMg, 1)}% (10–15), K ${plNum(F.satK, 1)}% (3–5), Na ${plNum(F.satNa, 1)}% (< 2)`, 9, C.text, 600);
+      }
+
+      // Stopki z numerami stron
+      pages.forEach((canvas, i) => {
+        const c = canvas.getContext('2d');
+        c.font = `400 7.5px ${FONT}`;
+        c.fillStyle = C.muted;
+        c.textAlign = 'left';
+        c.fillText(`Kalkulator PPM + CAC — receptura „${recipe.name}”`, M, H - 24);
+        c.textAlign = 'right';
+        c.fillText(`Strona ${i + 1} z ${pages.length}`, W - M, H - 24);
+      });
+      return pages;
+    }
+
+    async function canvasToPdfImage(canvas) {
+      const w = canvas.width, h = canvas.height;
+      if (typeof CompressionStream === 'function') {
+        const rgba = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+        const rgb = new Uint8Array(w * h * 3);
+        for (let i = 0, j = 0; i < rgba.length; i += 4) { rgb[j++] = rgba[i]; rgb[j++] = rgba[i + 1]; rgb[j++] = rgba[i + 2]; }
+        const stream = new Blob([rgb]).stream().pipeThrough(new CompressionStream('deflate'));
+        return { w, h, filter: 'FlateDecode', data: new Uint8Array(await new Response(stream).arrayBuffer()) };
+      }
+      // Starsze przeglądarki bez CompressionStream: JPEG, który PDF przyjmuje wprost.
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
+      return { w, h, filter: 'DCTDecode', data: new Uint8Array(await blob.arrayBuffer()) };
+    }
+
+    // Minimalny PDF 1.4: każda strona to jeden obraz na całą kartkę A4.
+    function assemblePdf(images, title) {
+      const enc = new TextEncoder();
+      const chunks = [], offsets = [];
+      let pos = 0;
+      const push = part => { const b = typeof part === 'string' ? enc.encode(part) : part; chunks.push(b); pos += b.length; };
+      const obj = (id, body, stream) => {
+        offsets[id] = pos;
+        push(`${id} 0 obj\n${body}\n`);
+        if (stream) { push('stream\n'); push(stream); push('\nendstream\n'); }
+        push('endobj\n');
+      };
+      push(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));  // %PDF-1.4 + bajty binarne
+      const n = images.length;
+      const pageId = i => 3 + i * 3;
+      const infoId = 3 + n * 3;
+      obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+      obj(2, `<< /Type /Pages /Kids [${images.map((_, i) => pageId(i) + ' 0 R').join(' ')}] /Count ${n} >>`);
+      images.forEach((img, i) => {
+        const pid = pageId(i);
+        const content = `q ${PDF_PAGE_W} 0 0 ${PDF_PAGE_H} 0 0 cm /Im0 Do Q`;
+        obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_W} ${PDF_PAGE_H}] `
+          + `/Resources << /XObject << /Im0 ${pid + 2} 0 R >> >> /Contents ${pid + 1} 0 R >>`);
+        obj(pid + 1, `<< /Length ${content.length} >>`, enc.encode(content));
+        obj(pid + 2, `<< /Type /XObject /Subtype /Image /Width ${img.w} /Height ${img.h} /ColorSpace /DeviceRGB `
+          + `/BitsPerComponent 8 /Filter /${img.filter} /Length ${img.data.length} >>`, img.data);
+      });
+      const hex = Array.from(title).map(ch => ch.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+      obj(infoId, `<< /Title <FEFF${hex}> /Producer (Kalkulator PPM + CAC) >>`);
+      const xref = pos;
+      let tail = `xref\n0 ${infoId + 1}\n0000000000 65535 f \n`;
+      for (let id = 1; id <= infoId; id++) tail += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+      tail += `trailer\n<< /Size ${infoId + 1} /Root 1 0 R /Info ${infoId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+      push(tail);
+      return new Blob(chunks, { type: 'application/pdf' });
+    }
+
+    // W podglądzie artefaktu plik oddaje capability „downloads” (podgląd pyta o zgodę na zapis);
+    // otwarte z dysku — zwykły link do pobrania.
+    async function offerFile(blob, filename) {
+      const rt = window.claude;
+      if (rt && typeof rt.use === 'function') {
+        const dl = await rt.use('downloads');
+        if (!dl) return 'unavailable';
+        try {
+          await dl.save({ filename, data: blob });
+          return 'saved';
+        } catch (e) {
+          const code = e && e.code;
+          if (code === 'declined') return 'declined';
+          if (code === 'rate_limited') return 'busy';
+          return 'unavailable';
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      return 'saved';
+    }
+
+    // Nazwa pliku tylko ze znaków ASCII — z ogonkami albo półpauzą przeglądarka potrafi zapisać plik jako „download”.
+    function asciiFilename(name) {
+      return name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L')
+        .replace(/[^A-Za-z0-9 ._-]+/g, '-').replace(/-{2,}/g, '-').replace(/\s{2,}/g, ' ').trim() || 'receptura';
+    }
+
+    async function buildRecipePdf(recipe) {
+      const pages = paintRecipePdfPages(recipe);
+      const images = [];
+      for (const canvas of pages) images.push(await canvasToPdfImage(canvas));
+      return assemblePdf(images, `Receptura: ${recipe.name}`);
+    }
+
+    async function downloadRecipePdf(id) {
+      const stored = window._recipes.find(r => r.id === id);
+      if (!stored) return;
+      let recipe = stored;
+      if (!recipe.report) {
+        // Receptura sprzed raportu: wczytujemy ją, żeby policzyć wapnowanie i grupy produktów.
+        applyRecipe(recipe);
+        recipe = Object.assign({}, recipe, { report: buildRecipeReport() });
+      }
+      setRecipeStatus(`Przygotowuję PDF receptury „${recipe.name}”…`);
+      try {
+        const blob = await buildRecipePdf(recipe);
+        const filename = `Receptura - ${asciiFilename(recipe.name)}.pdf`;
+        const result = await offerFile(blob, filename);
+        const msgs = {
+          saved: `PDF gotowy: „${filename}” — otwórz go i wydrukuj.`,
+          declined: 'Zapis PDF anulowany.',
+          busy: 'Okno zapisu jest już otwarte — dokończ albo zamknij je i spróbuj ponownie.',
+          unavailable: 'Ten widok nie pozwala zapisywać plików. Otwórz kalkulator w przeglądarce na claude.ai albo z pliku na dysku.'
+        };
+        setRecipeStatus(msgs[result], result !== 'saved');
+      } catch (e) {
+        console.error(e);
+        setRecipeStatus('Nie udało się przygotować PDF: ' + (e && e.message ? e.message : e), true);
+      }
+    }
+    window.downloadRecipePdf = downloadRecipePdf;
 
     // Sama wczytuje ostatnią recepturę przy otwarciu strony — ale tylko gdy użytkownik jeszcze niczego
     // nie zaczął (lista pusta, nic nie wpisane w CAC/Nawożeniu/Kompoście), żeby nie nadpisać jego pracy.
