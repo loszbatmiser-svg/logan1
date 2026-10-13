@@ -224,6 +224,11 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   siarczanów; gdy doniczek jest więcej niż partii — ostrzeżenie. Ostrzeżenie też przy > 3 g soli/l. Krok 3
   pokazuje też, ile produktów na sucho (i wapna) wypada na doniczkę — tę samą dawkę co w partii, przeliczoną
   na doniczkę, z uwagą, żeby nie dodawać jej drugi raz
+- `buildRecipePdf()` / `importRecipeFromPdf()` — PDF receptury ma w sobie osadzony plik `receptura.json`
+  (`/EmbeddedFiles`, bez kompresji): pełną recepturę w zapisanej objętości i objętość wydruku. Wczytanie
+  szuka go najpierw wprost w bajtach pliku, a gdy inny program przepakował PDF — przez `getAttachments()`
+  z pdf.js. Ta sama receptura już na liście → tylko wczytanie; inna treść albo zajęta nazwa → nowa pozycja
+  „(z PDF)”. Starsze PDF-y (sprzed tej funkcji) to same obrazy stron — nie da się z nich nic odczytać
 - `overwriteRecipe()` / `recipeChanges()` / `renderCurrentRecipeBar()` — nadpisywanie receptury bieżącym stanem
   strony (lista produktów, dane gleby, etap, targety, kompost; nazwa, doniczki i skład zostają), w dwóch
   kliknięciach. Pasek „Bieżąca receptura” porównuje stronę z ostatnio wczytaną/zapisaną recepturą

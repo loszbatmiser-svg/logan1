@@ -79,7 +79,8 @@
     .col-btn.selected { background: #3182ce; color: #fff; }
     .file-label { display: inline-block; padding: 10px 18px; background: #2b6cb0; color: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; margin-bottom: 12px; }
     .file-label:hover { background: #2c5282; }
-    #pdf-file, #komp-m3-file, #komp-sp-file { display: none; }
+    #pdf-file, #komp-m3-file, #komp-sp-file, #recipe-pdf-file { display: none; }
+    .col-btn.file-btn { display: inline-block; font-size: 0.85rem; padding: 8px 14px; }
     .status { font-size: 0.9rem; margin: 8px 0; min-height: 1.2em; }
     .status.ok { color: #276749; font-weight: 600; }
     .status.err { color: #c53030; font-weight: 600; }
@@ -683,7 +684,8 @@
           etap wzrostu, własne targety, wczytany kompost i listę z punktu 5. Po wczytaniu dawki wychodzą dokładnie
           takie jak przy zapisie — bez ponownego importu PDF. Na liście receptura pokazuje krok 1 (wapnowanie)
           i krok 2 (produkty w kolejności jak w „2. Targety PPM”: kationy, aniony, mikroelementy). Przycisk „PDF”
-          zapisuje ją do pliku do wydruku. Ostatnio zapisana lub wczytana receptura wczytuje się sama przy otwarciu strony.
+          zapisuje ją do pliku do wydruku — taki PDF ma w sobie dane receptury, więc „Wczytaj recepturę z PDF…”
+          odtworzy ją na innym urządzeniu albo po usunięciu z listy. Ostatnio zapisana lub wczytana receptura wczytuje się sama przy otwarciu strony.
         </p>
         <div class="input-group">
           <div>
@@ -693,6 +695,8 @@
           </div>
         </div>
         <button class="col-btn selected" id="recipe_save_btn" onclick="saveRecipe()">Zapisz recepturę</button>
+        <label class="col-btn file-btn" for="recipe-pdf-file" title="PDF zapisany przyciskiem „PDF” przy recepturze">Wczytaj recepturę z PDF…</label>
+        <input type="file" id="recipe-pdf-file" accept="application/pdf,.pdf" onchange="importRecipeFromPdf(event)">
         <div id="recipe_status" class="explain" style="margin-top:6px;"></div>
         <div id="recipe_current"></div>
         <div id="recipe_list" style="margin-top:16px;"></div>
@@ -4707,8 +4711,10 @@
       return { w, h, filter: 'DCTDecode', data: new Uint8Array(await blob.arrayBuffer()) };
     }
 
-    // Minimalny PDF 1.4: każda strona to jeden obraz na całą kartkę A4.
-    function assemblePdf(images, title) {
+    // Minimalny PDF 1.4: każda strona to jeden obraz na całą kartkę A4. Opcjonalny załącznik (attachment:
+    // {filename, bytes}) trafia jako plik osadzony — widać go w panelu załączników czytnika PDF, a kalkulator
+    // czyta z niego recepturę z powrotem. Zapisany bez kompresji, więc da się go znaleźć prostym wyszukaniem.
+    function assemblePdf(images, title, attachment) {
       const enc = new TextEncoder();
       const chunks = [], offsets = [];
       let pos = 0;
@@ -4723,7 +4729,12 @@
       const n = images.length;
       const pageId = i => 3 + i * 3;
       const infoId = 3 + n * 3;
-      obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+      const efId = infoId + 1, fsId = infoId + 2;
+      const lastId = attachment ? fsId : infoId;
+      const pdfHex = str => '<FEFF' + Array.from(str).map(ch => ch.charCodeAt(0).toString(16).padStart(4, '0')).join('') + '>';
+      obj(1, attachment
+        ? `<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [(${attachment.filename}) ${fsId} 0 R] >> >> >>`
+        : '<< /Type /Catalog /Pages 2 0 R >>');
       obj(2, `<< /Type /Pages /Kids [${images.map((_, i) => pageId(i) + ' 0 R').join(' ')}] /Count ${n} >>`);
       images.forEach((img, i) => {
         const pid = pageId(i);
@@ -4734,12 +4745,17 @@
         obj(pid + 2, `<< /Type /XObject /Subtype /Image /Width ${img.w} /Height ${img.h} /ColorSpace /DeviceRGB `
           + `/BitsPerComponent 8 /Filter /${img.filter} /Length ${img.data.length} >>`, img.data);
       });
-      const hex = Array.from(title).map(ch => ch.charCodeAt(0).toString(16).padStart(4, '0')).join('');
-      obj(infoId, `<< /Title <FEFF${hex}> /Producer (Kalkulator PPM + CAC) >>`);
+      obj(infoId, `<< /Title ${pdfHex(title)} /Producer (Kalkulator PPM + CAC) >>`);
+      if (attachment) {
+        const len = attachment.bytes.length;
+        obj(efId, `<< /Type /EmbeddedFile /Subtype /application#2Fjson /Length ${len} /Params << /Size ${len} >> >>`, attachment.bytes);
+        obj(fsId, `<< /Type /Filespec /F (${attachment.filename}) /UF ${pdfHex(attachment.filename)} /EF << /F ${efId} 0 R >> `
+          + `/Desc ${pdfHex('Dane receptury do wczytania w kalkulatorze')} >>`);
+      }
       const xref = pos;
-      let tail = `xref\n0 ${infoId + 1}\n0000000000 65535 f \n`;
-      for (let id = 1; id <= infoId; id++) tail += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
-      tail += `trailer\n<< /Size ${infoId + 1} /Root 1 0 R /Info ${infoId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+      let tail = `xref\n0 ${lastId + 1}\n0000000000 65535 f \n`;
+      for (let id = 1; id <= lastId; id++) tail += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+      tail += `trailer\n<< /Size ${lastId + 1} /Root 1 0 R /Info ${infoId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
       push(tail);
       return new Blob(chunks, { type: 'application/pdf' });
     }
@@ -4778,11 +4794,18 @@
         .replace(/[^A-Za-z0-9 ._-]+/g, '-').replace(/-{2,}/g, '-').replace(/\s{2,}/g, ' ').trim() || 'receptura';
     }
 
-    async function buildRecipePdf(recipe) {
+    const RECIPE_PDF_FORMAT = 'kalkulator-ppm-cac/receptura';
+    const RECIPE_PDF_ATTACHMENT = 'receptura.json';
+
+    // payload — dane do osadzenia: pełna receptura w zapisanej objętości + objętość, dla której zrobiono wydruk.
+    async function buildRecipePdf(recipe, payload) {
       const pages = paintRecipePdfPages(recipe);
       const images = [];
       for (const canvas of pages) images.push(await canvasToPdfImage(canvas));
-      return assemblePdf(images, `Receptura: ${recipe.name}`);
+      const attachment = payload
+        ? { filename: RECIPE_PDF_ATTACHMENT, bytes: new TextEncoder().encode(JSON.stringify(Object.assign({ format: RECIPE_PDF_FORMAT, version: 1 }, payload))) }
+        : null;
+      return assemblePdf(images, `Receptura: ${recipe.name}`, attachment);
     }
 
     async function downloadRecipePdf(id) {
@@ -4794,10 +4817,11 @@
         applyRecipe(recipe);
         recipe = Object.assign({}, recipe, { report: buildRecipeReport() });
       }
+      const payload = { recipe: cloneJson(recipe), viewVolume: recipeVolume(stored) };
       recipe = Object.assign({}, recipe, { report: scaleReport(recipe.report, recipeVolume(stored)) });
       setRecipeStatus(`Przygotowuję PDF receptury „${recipe.name}”…`);
       try {
-        const blob = await buildRecipePdf(recipe);
+        const blob = await buildRecipePdf(recipe, payload);
         const filename = `Receptura - ${asciiFilename(recipe.name)}.pdf`;
         const result = await offerFile(blob, filename);
         const msgs = {
@@ -4813,6 +4837,80 @@
       }
     }
     window.downloadRecipePdf = downloadRecipePdf;
+
+    // Dane receptury z PDF: najpierw szybkie wyszukanie nieskompresowanego załącznika w bajtach pliku;
+    // gdy plik przeszedł przez inny program, który skompresował strumienie — przez pdf.js i jego listę załączników.
+    function extractRecipeJsonRaw(bytes) {
+      const text = new TextDecoder('latin1').decode(bytes);  // jeden znak = jeden bajt, pozycje się zgadzają
+      const start = text.indexOf('{"format":"' + RECIPE_PDF_FORMAT + '"');
+      if (start < 0) return null;
+      const end = text.indexOf('\nendstream', start);
+      if (end < 0) return null;
+      return new TextDecoder('utf-8').decode(bytes.subarray(start, end));
+    }
+
+    async function extractRecipeJsonPdfjs(bytes) {
+      if (!ensurePdfjs()) return null;
+      const doc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      const attachments = await doc.getAttachments();
+      if (!attachments) return null;
+      const entry = Object.values(attachments).find(a => a && a.filename === RECIPE_PDF_ATTACHMENT);
+      return entry ? new TextDecoder('utf-8').decode(entry.content) : null;
+    }
+
+    function uniqueRecipeName(base) {
+      const taken = new Set(window._recipes.map(r => r.name.toLowerCase()));
+      if (!taken.has(base.toLowerCase())) return base;
+      for (let i = 2; ; i++) if (!taken.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
+    }
+
+    async function importRecipeFromPdf(ev) {
+      const file = ev.target.files[0];
+      if (!file) return;
+      clearFileInput(ev.target);
+      if (recipeStoreMode === 'connecting') {
+        setRecipeStatus('Chwila — łączę się z magazynem receptur. Spróbuj za moment.', true);
+        return;
+      }
+      setRecipeStatus(`Czytam „${file.name}”…`);
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const json = extractRecipeJsonRaw(bytes) || await extractRecipeJsonPdfjs(bytes);
+        if (!json) {
+          setRecipeStatus('W tym PDF nie ma danych receptury. Wczytać można tylko PDF zapisany przyciskiem „PDF” przy recepturze '
+            + 'w tym kalkulatorze — od wersji z wczytywaniem z PDF; starszy wydruk wygeneruj ponownie.', true);
+          return;
+        }
+        const data = JSON.parse(json);
+        let r = data && data.format === RECIPE_PDF_FORMAT && data.recipe ? sanitizeRecipe(data.recipe.id, data.recipe) : null;
+        if (!r) throw new Error('dane receptury są uszkodzone albo w nieznanym formacie');
+
+        const sameId = window._recipes.find(x => x.id === r.id);
+        if (sameId && stableStringify(sameId.state) === stableStringify(r.state)
+            && stableStringify(sameId.pots) === stableStringify(r.pots) && stableStringify(sameId.mix) === stableStringify(r.mix)) {
+          if (data.viewVolume > 0) recipeViewVolume[sameId.id] = data.viewVolume;
+          await loadRecipe(sameId.id);
+          setRecipeStatus(`Receptura „${sameId.name}” z tego PDF jest już na liście — wczytano ją.`);
+          return;
+        }
+        // Inna treść pod tym samym id albo zajęta nazwa — dodajemy jako nową, nie nadpisujemy istniejącej.
+        if (sameId || window._recipes.some(x => x.name.toLowerCase() === r.name.toLowerCase())) {
+          r = Object.assign({}, r, { id: newRecipeId(), name: uniqueRecipeName(`${r.name} (z PDF)`) });
+        }
+        r.usedAt = new Date().toISOString();
+        await storeRecipe(r);
+        if (!window._recipes.some(x => x.id === r.id)) window._recipes = window._recipes.concat([r]);  // magazyn odpowie za chwilę
+        if (data.viewVolume > 0) recipeViewVolume[r.id] = data.viewVolume;
+        renderRecipes();
+        await loadRecipe(r.id);
+        setRecipeStatus(`Wczytano recepturę „${r.name}” z pliku PDF i dodano ją do listy — wapnowanie, dane gleby, etap, lista produktów`
+          + `${r.pots && r.pots.enabled ? ', doniczki' : ''}${r.mix && r.mix.length ? ', skład podłoża' : ''} odtworzone.`);
+      } catch (e) {
+        console.error(e);
+        setRecipeStatus('Nie udało się wczytać receptury z PDF: ' + (e && e.message ? e.message : e), true);
+      }
+    }
+    window.importRecipeFromPdf = importRecipeFromPdf;
 
     // Sama wczytuje ostatnią recepturę przy otwarciu strony — ale tylko gdy użytkownik jeszcze niczego
     // nie zaczął (lista pusta, nic nie wpisane w CAC/Nawożeniu/Kompoście), żeby nie nadpisać jego pracy.
