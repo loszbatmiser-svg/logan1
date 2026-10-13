@@ -3928,7 +3928,7 @@
         const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
         prodRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
         g.items.forEach(it => prodRows.push({
-          cells: [it.product, ELEMENT_LABELS[it.el] || it.el || '—', it.basis || '',
+          cells: [it.product, ELEMENT_LABELS[it.el] || it.el || '—', (it.basis || '').replace(/(\d)\.(\d)/g, '$1,$2'),
                   `${plNum(it.grams, 2)} g` + (it.ml != null ? `\n(${plNum(it.ml, 0)} ml)` : '')],
           bar: def.bar
         }));
