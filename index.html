@@ -97,6 +97,13 @@
     .recipe-vol { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px 0 0; font-weight: 600; font-size: 0.84rem; color: #4a5568; }
     .recipe-vol input { width: 80px; padding: 5px 7px; }
     .recipe-vol .explain { margin: 0 0 0 4px; }
+    .recipe-table tr.recipe-pots-row td { background: #edf2f7; padding-top: 0; }
+    .recipe-pot-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 0 12px 0 36px; font-weight: 600; font-size: 0.84rem; color: #2b6cb0; cursor: pointer; }
+    .recipe-pot-toggle input { width: auto; }
+    .recipe-pot-inputs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 0.84rem; color: #4a5568; }
+    .recipe-pot-inputs input { padding: 4px 6px; }
+    .recipe-table tr.recipe-pots td { background: #faf5ff; }
+    .recipe-table tr.recipe-pots-first td { border-top: 2px solid #9f7aea; }
   </style>
 </head>
 <body>
@@ -1158,13 +1165,16 @@
     };
     const MACRO_ELEMENTS = ['Ca', 'Mg', 'K', 'N', 'P', 'S'];
 
+    // sol — orientacyjna rozpuszczalność w wodzie w 20 °C (g produktu na litr wody), celowo zaniżona względem
+    // danych tablicowych postaci uwodnionych. Produkty bez sol (gips ~2 g/l, siarka, fosforany, wapno, organiczne)
+    // nie nadają się do roztworu — w trybie doniczek idą na sucho.
     const AMENDMENTS = [
       { id: 'kompost', name: 'Kompost Logan Labs (z raportu)', group: 'Organiczne', pct: {}, volumeBased: true },
       { id: 'fishbone', name: 'Kość rybia (Fish bone)', group: 'Organiczne', pct: { N: 0.04, P: 0.09, Ca: 0.19, Mg: 0.003 } },
       { id: 'fishmeal', name: 'Mączka rybna (Fish meal)', group: 'Organiczne', pct: { N: 0.10, P: 0.02, S: 0.006, Ca: 0.23, Mg: 0.003 } },
       { id: 'crabshell', name: 'Skorupy kraba (Crab shell)', group: 'Organiczne', pct: { S: 0.006 } },
       { id: 'bonemeal', name: 'Mączka kostna (Bone meal)', group: 'Organiczne', pct: { N: 0.03, P: 0.066, Ca: 0.20, Mg: 0.004 } },
-      { id: 'aminos', name: 'Aminokwasy (Aminos)', group: 'Organiczne', pct: { N: 0.13 } },
+      { id: 'aminos', name: 'Aminokwasy (Aminos)', group: 'Organiczne', pct: { N: 0.13 }, sol: 200 },
       { id: 'batguano_plagron', name: 'Guano nietoperzy Plagron', group: 'Organiczne', pct: { N: 0.03, P: 0.066, K: 0.033 } },
       { id: 'batguano_guanokan', name: 'Guano nietoperzy Guanokan', group: 'Organiczne', pct: { N: 0.01, P: 0.026, Ca: 0.10 } },
       { id: 'frass', name: 'Fras owadzi (Frass)', group: 'Organiczne', pct: { N: 0.04, P: 0.01, K: 0.02 } },
@@ -1177,19 +1187,19 @@
       { id: 'aglime', name: 'Wapno rolnicze CaCO₃ (Ag Lime)', group: 'Mineralne', pct: { Ca: 0.40, Mg: 0.03 }, note: 'Wg tabeli Mg 1–5%, do obliczeń przyjęto 3%.' },
       { id: 'dolomite', name: 'Dolomit (Dolomite Lime)', group: 'Mineralne', pct: { Ca: 0.22, Mg: 0.13 } },
       { id: 'gypsum', name: 'Gips (Gypsum)', group: 'Mineralne', pct: { S: 0.16, Ca: 0.22 } },
-      { id: 'epsom', name: 'Sól gorzka (Epsom Salt)', group: 'Mineralne', pct: { S: 0.14, Mg: 0.10 } },
-      { id: 'ksulfate', name: 'Siarczan potasu (K Sulfate)', group: 'Mineralne', pct: { K: 0.42, S: 0.175 } },
+      { id: 'epsom', name: 'Sól gorzka (Epsom Salt)', group: 'Mineralne', pct: { S: 0.14, Mg: 0.10 }, sol: 700 },
+      { id: 'ksulfate', name: 'Siarczan potasu (K Sulfate)', group: 'Mineralne', pct: { K: 0.42, S: 0.175 }, sol: 110 },
       { id: 'sulfur', name: 'Siarka (Sulfur)', group: 'Mineralne', pct: { S: 0.80 } },
-      { id: 'borax', name: 'Boraks (Borax)', group: 'Mikroelementy', pct: { B: 0.09 } },
-      { id: 'mn', name: 'Siarczan manganu (Mn)', group: 'Mikroelementy', pct: { Mn: 0.32, S: 0.19 } },
-      { id: 'cu', name: 'Siarczan miedzi (Cu)', group: 'Mikroelementy', pct: { Cu: 0.25, S: 0.13 } },
-      { id: 'fe_chel', name: 'Żelazo chelatowane 6%', group: 'Mikroelementy', pct: { Fe: 0.06 } },
-      { id: 'zn', name: 'Siarczan cynku (Zn)', group: 'Mikroelementy', pct: { Zn: 0.22, S: 0.11 } },
-      { id: 'fe2', name: 'Żelazo Fe²⁺ (siarczan żelaza)', group: 'Mikroelementy', pct: { Fe: 0.20, S: 0.11 } },
+      { id: 'borax', name: 'Boraks (Borax)', group: 'Mikroelementy', pct: { B: 0.09 }, sol: 25 },
+      { id: 'mn', name: 'Siarczan manganu (Mn)', group: 'Mikroelementy', pct: { Mn: 0.32, S: 0.19 }, sol: 500 },
+      { id: 'cu', name: 'Siarczan miedzi (Cu)', group: 'Mikroelementy', pct: { Cu: 0.25, S: 0.13 }, sol: 300 },
+      { id: 'fe_chel', name: 'Żelazo chelatowane 6%', group: 'Mikroelementy', pct: { Fe: 0.06 }, sol: 50 },
+      { id: 'zn', name: 'Siarczan cynku (Zn)', group: 'Mikroelementy', pct: { Zn: 0.22, S: 0.11 }, sol: 900 },
+      { id: 'fe2', name: 'Żelazo Fe²⁺ (siarczan żelaza)', group: 'Mikroelementy', pct: { Fe: 0.20, S: 0.11 }, sol: 250 },
       { id: 'fe3', name: 'Żelazo Fe³⁺', group: 'Mikroelementy', pct: { Fe: 0.30 } },
-      { id: 'mo', name: 'Molibden (Mo)', group: 'Mikroelementy', pct: { Mo: 0.39 } },
-      { id: 'co', name: 'Kobalt (Co)', group: 'Mikroelementy', pct: { Co: 0.25 } },
-      { id: 'se', name: 'Selen (Se)', group: 'Mikroelementy', pct: { Se: 0.41 } },
+      { id: 'mo', name: 'Molibden (Mo)', group: 'Mikroelementy', pct: { Mo: 0.39 }, sol: 500 },
+      { id: 'co', name: 'Kobalt (Co)', group: 'Mikroelementy', pct: { Co: 0.25 }, sol: 300 },
+      { id: 'se', name: 'Selen (Se)', group: 'Mikroelementy', pct: { Se: 0.41 }, sol: 300 },
     ];
 
     window._amendmentCart = [];
@@ -3528,7 +3538,20 @@
         usedAt: typeof r.usedAt === 'string' ? r.usedAt : '',
         summary: Array.isArray(r.summary) ? r.summary : [],
         report: r.report && typeof r.report === 'object' && Array.isArray(r.report.groups) ? r.report : null,
+        pots: sanitizePots(r.pots),
         state: Object.assign({}, st, { cart })
+      };
+    }
+
+    const POTS_DEFAULT = { enabled: false, potL: 2, count: 30, waterMl: 200 };
+    function sanitizePots(p) {
+      if (!p || typeof p !== 'object') return null;
+      const potL = Number(p.potL), count = Math.round(Number(p.count)), waterMl = Number(p.waterMl);
+      return {
+        enabled: p.enabled === true,
+        potL: potL > 0 ? potL : POTS_DEFAULT.potL,
+        count: count >= 1 ? count : POTS_DEFAULT.count,
+        waterMl: waterMl > 0 ? waterMl : POTS_DEFAULT.waterMl
       };
     }
 
@@ -3718,7 +3741,99 @@
       return v > 0 ? v : null;
     }
     function recipeVolume(r) {
+      if (r.pots && r.pots.enabled) return r.pots.potL * r.pots.count;
       return recipeViewVolume[r.id] > 0 ? recipeViewVolume[r.id] : recipeSavedVolume(r);
+    }
+
+    // ===== DAWKOWANIE DO DONICZEK =====
+    // Rozpuszczalne produkty idą do jednego roztworu (woda na doniczkę × liczba doniczek) i każda doniczka
+    // dostaje tę samą porcję — tak drobne dawki rozkładają się równo, czego nie da się zrobić odważając
+    // setne części grama osobno. Reszta (i wapnowanie) — na sucho, porcja na doniczkę.
+    const SOLUTION_SAFETY = 0.5;      // trzymamy każdy produkt do połowy rozpuszczalności: mieszanina soli i chłodna woda
+    const SALT_ROOT_WARN_GL = 3;      // powyżej ok. 3 g soli na litr roztwór może przypalić korzenie rosnących roślin
+
+    function productForReportItem(it) {
+      return (it.productId && getAmendment(it.productId)) || AMENDMENTS.find(a => a.name === it.product) || null;
+    }
+
+    function buildPotPlan(rep, pots) {
+      const n = pots.count, waterL = (pots.waterMl * n) / 1000;
+      const solution = [], dry = [];
+      rep.groups.forEach(g => (g.items || []).forEach(it => {
+        const prod = productForReportItem(it);
+        const entry = { product: it.product, total: Number(it.grams), perPot: Number(it.grams) / n, ml: it.ml != null ? Number(it.ml) : null };
+        if (prod && prod.sol) {
+          entry.sol = prod.sol;
+          entry.conc = entry.total / waterL;
+          entry.status = entry.conc <= prod.sol * SOLUTION_SAFETY ? 'ok' : entry.conc <= prod.sol ? 'near' : 'over';
+          solution.push(entry);
+        } else {
+          dry.push(entry);
+        }
+      }));
+      const L = rep.lime;
+      const lime = L && L.needed ? [
+        { product: `Węglan wapnia CaCO₃ (${fmtNum(L.cce, 0)}%)`, total: L.perL.caco3 * L.volumeL, perPot: (L.perL.caco3 * L.volumeL) / n },
+        { product: `albo wolastenit (Ca ${fmtNum(L.wollCa, 0)}%)`, total: L.perL.woll * L.volumeL, perPot: (L.perL.woll * L.volumeL) / n }
+      ] : [];
+      const minWaterL = solution.reduce((m, e) => Math.max(m, e.total / (e.sol * SOLUTION_SAFETY)), 0);
+      const saltTotal = solution.reduce((sum, e) => sum + e.total, 0);
+      return {
+        n, potL: pots.potL, waterMl: pots.waterMl, waterL, soilL: pots.potL * n, solution, dry, lime,
+        minWaterPerPotMl: (minWaterL / n) * 1000, saltConc: waterL > 0 ? saltTotal / waterL : 0
+      };
+    }
+
+    const POT_STATUS = { ok: '✓', near: 'blisko granicy rozpuszczalności — dolej wody', over: 'nie rozpuści się — za mało wody' };
+
+    function potPlanHtml(plan) {
+      const g = x => fmtNum(x, x < 1 ? 3 : 2);
+      let html = `<tr class="recipe-pots recipe-pots-first"><td colspan="4"><strong>Krok 3 — do doniczek:</strong> ${plan.n} × ${fmtNum(plan.potL, plan.potL % 1 ? 1 : 0)} l`
+        + ` = ${fmtNum(plan.soilL, 1)} l gleby · woda ${plan.n} × ${fmtNum(plan.waterMl, 0)} ml = <strong>${fmtNum(plan.waterL, 2)} l</strong></td></tr>`;
+      if (plan.solution.length) {
+        html += `<tr class="recipe-pots"><td colspan="4"><span class="explain">Roztwór — rozpuść w ${fmtNum(plan.waterL, 2)} l wody i wlej po ${fmtNum(plan.waterMl, 0)} ml do każdej doniczki:</span></td></tr>`;
+        plan.solution.forEach(e => {
+          const warn = e.status !== 'ok';
+          html += `<tr class="recipe-pots"><td>${escapeHtml(e.product)}</td><td>razem <strong>${g(e.total)} g</strong></td>`
+            + `<td>${g(e.perPot)} g / doniczkę</td>`
+            + `<td style="white-space:nowrap;${warn ? ' color:#c53030; font-weight:600;' : ''}">${fmtNum(e.conc, e.conc < 0.1 ? 3 : 1)} g/l ${e.status === 'ok' ? '✓' : ''}`
+            + `<br><span class="explain">max ok. ${fmtNum(e.sol, 0)} g/l${warn ? ' · ' + POT_STATUS[e.status] : ''}</span></td></tr>`;
+        });
+        const tooLittle = plan.minWaterPerPotMl > plan.waterMl + 1e-9;
+        html += `<tr class="recipe-pots"><td colspan="4"><span class="explain">`
+          + (tooLittle
+            ? `<span style="color:#c53030; font-weight:600;">Za mało wody: żeby wszystko się rozpuściło, daj co najmniej ${fmtNum(Math.ceil(plan.minWaterPerPotMl / 10) * 10, 0)} ml na doniczkę.</span> `
+            : `Woda wystarcza (minimum ok. ${fmtNum(Math.ceil(plan.minWaterPerPotMl), 0)} ml na doniczkę). `)
+          + `Łącznie ${fmtNum(plan.saltConc, 1)} g soli na litr`
+          + (plan.saltConc > SALT_ROOT_WARN_GL ? ' — jeśli w doniczkach już rosną rośliny, to mocny roztwór: podziel dawkę na kilka podlewań albo daj więcej wody.' : '.')
+          + `</span></td></tr>`;
+      }
+      if (plan.lime.length || plan.dry.length) {
+        html += `<tr class="recipe-pots"><td colspan="4"><span class="explain">Na sucho — wymieszaj z ziemią w każdej doniczce:</span></td></tr>`;
+        plan.lime.forEach((e, i) => {
+          html += `<tr class="recipe-pots"><td>${i === 0 ? 'Wapnowanie: ' : ''}${escapeHtml(e.product)}</td><td>razem <strong>${g(e.total)} g</strong></td>`
+            + `<td>${g(e.perPot)} g / doniczkę</td><td><span class="explain">${i === 0 ? 'wybierz jeden' : ''}</span></td></tr>`;
+        });
+        plan.dry.forEach(e => {
+          html += `<tr class="recipe-pots"><td>${escapeHtml(e.product)}</td><td>razem <strong>${g(e.total)} g</strong></td>`
+            + `<td>${g(e.perPot)} g / doniczkę${e.ml != null ? ` <span class="explain">(${fmtNum(e.ml / plan.n, 0)} ml)</span>` : ''}</td><td></td></tr>`;
+        });
+      }
+      return html;
+    }
+
+    function potsControlsHtml(r) {
+      const id = escapeHtml(r.id);
+      const pots = r.pots && r.pots.enabled ? r.pots : null;
+      let html = `<label class="recipe-pot-toggle"><input type="checkbox" id="recipe_pots_on_${id}" ${pots ? 'checked' : ''}`
+        + ` onchange="toggleRecipePots('${id}', this.checked)"> Dawkowanie do doniczek</label>`;
+      if (pots) {
+        const inp = (key, val, step, min, w) => `<input type="number" id="recipe_pot_${key}_${id}" value="${val}" step="${step}" min="${min}" style="width:${w}px;"`
+          + ` oninput="setRecipePots('${id}')" onchange="saveRecipePots('${id}')">`;
+        html += `<span class="recipe-pot-inputs">doniczka ${inp('l', pots.potL, 0.1, 0.1, 70)} l × ${inp('n', pots.count, 1, 1, 70)} szt.`
+          + ` · woda ${inp('w', pots.waterMl, 10, 10, 80)} ml na doniczkę</span>`;
+      }
+      return html;
     }
 
     // Dawki liczone są w ppm na masę gleby, więc przy innej objętości (ta sama gęstość) gramy produktów
@@ -3759,15 +3874,20 @@
         + (it.elGrams != null ? `<br><span class="explain">= ${fmtNum(it.elGrams, 2)} g ${sym}</span>` : '');
     }
 
-    function recipeCollapsedLine(rep) {
+    function recipeCollapsedLine(rep, r) {
       const count = rep.groups.reduce((n, g) => n + (g.items ? g.items.length : 0), 0);
       const L = rep.lime;
       const lime = !L ? '' : !L.needed ? ' · wapnowanie niepotrzebne'
         : ` · wapnowanie: ${fmtNum(L.perL.caco3 * L.volumeL, 1)} g CaCO₃ albo ${fmtNum(L.perL.woll * L.volumeL, 1)} g wolastenitu`;
-      return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}`;
+      const pots = r && r.pots && r.pots.enabled ? ` · ${r.pots.count} doniczek × ${fmtNum(r.pots.potL, r.pots.potL % 1 ? 1 : 0)} l` : '';
+      return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}${pots}`;
     }
 
     function recipeBodyHtml(r, rep) {
+      return recipeStepsHtml(rep) + (r.pots && r.pots.enabled ? potPlanHtml(buildPotPlan(rep, r.pots)) : '');
+    }
+
+    function recipeStepsHtml(rep) {
       let html = `<tr><td colspan="4"><span class="explain">Krok 1 — wapnowanie:</span> ${limeSummaryHtml(rep.lime)}</td></tr>`;
       const groups = rep.groups.filter(g => Array.isArray(g.items) && g.items.length);
       if (!groups.length) html += '<tr><td colspan="4" class="explain">Krok 2 — brak produktów</td></tr>';
@@ -3813,16 +3933,18 @@
           + `<div><strong>${escapeHtml(r.name)}</strong>`
           + (r === last ? ' <span class="badge" style="min-width:0;">otwiera się sama</span>' : '')
           + `<br><span class="explain">etap: ${escapeHtml(stage)} · pH ${escapeHtml(f.cac_ph || '—')} · zapisana ${escapeHtml(formatRecipeDate(r.savedAt))}</span>`
-          + (collapsed && rep ? `<br><span class="explain" id="recipe_line_${id}">${recipeCollapsedLine(rep)}</span>` : '')
+          + (collapsed && rep ? `<br><span class="explain" id="recipe_line_${id}">${recipeCollapsedLine(rep, r)}</span>` : '')
           + `</div></div>`
           + `<div class="recipe-actions">`
           + (savedV ? `<label class="recipe-vol">gleba <input type="number" id="recipe_vol_${id}" min="0.1" step="1" value="${fmtNum(V, V % 1 ? 1 : 0)}"`
-              + ` oninput="setRecipeVolume('${id}', this.value)"> l`
+              + ` oninput="setRecipeVolume('${id}', this.value)"${r.pots && r.pots.enabled ? ' disabled title="Liczona z doniczek"' : ''}> l`
               + `<span class="explain" id="recipe_volhint_${id}">${recipeVolumeHint(V, savedV)}</span></label>` : '')
           + `<button class="col-btn" onclick="loadRecipe('${id}')">Wczytaj</button>`
           + `<button class="col-btn" onclick="downloadRecipePdf('${id}')">PDF</button>`
           + `<button class="col-btn${confirming ? ' danger' : ''}" onclick="deleteRecipe('${id}')">${confirming ? 'Na pewno usunąć?' : 'Usuń'}</button></div></div>`
-          + `</td></tr></tbody><tbody id="recipe_body_${id}">`;
+          + `</td></tr>`
+          + (rep ? `<tr class="recipe-pots-row"><td colspan="4">${potsControlsHtml(r)}</td></tr>` : '')
+          + `</tbody><tbody id="recipe_body_${id}">`;
         if (!collapsed) {
           if (rep) {
             html += recipeBodyHtml(r, rep);
@@ -3838,7 +3960,13 @@
         html += '</tbody>';
       });
       html += '</table>';
+      // Zapis w magazynie przerysowuje listę — kursor wraca do pola, w którym był.
+      const focusedId = box.contains(document.activeElement) ? document.activeElement.id : null;
       box.innerHTML = html;
+      if (focusedId) {
+        const el = document.getElementById(focusedId);
+        if (el) el.focus();
+      }
     }
 
     function recipeVolumeHint(V, savedV) {
@@ -3858,10 +3986,45 @@
       const hint = document.getElementById('recipe_volhint_' + id);
       if (hint) hint.innerHTML = recipeVolumeHint(V, recipeSavedVolume(r));
       const line = document.getElementById('recipe_line_' + id);
-      if (line) line.textContent = recipeCollapsedLine(rep);
+      if (line) line.textContent = recipeCollapsedLine(rep, r);
       const body = document.getElementById('recipe_body_' + id);
       if (body && !recipeCollapsed.has(id)) body.innerHTML = recipeBodyHtml(r, rep);
     }
+
+    // Pola doniczek: przy wpisywaniu odświeżamy widok w miejscu, zapis — dopiero po zmianie pola (change).
+    function setRecipePots(id) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r || !r.pots) return;
+      const val = key => parseFloat(document.getElementById(`recipe_pot_${key}_${id}`).value);
+      const potL = val('l'), count = Math.round(val('n')), waterMl = val('w');
+      if (!(potL > 0) || !(count >= 1) || !(waterMl > 0)) return;  // pole w trakcie wpisywania
+      r.pots = Object.assign({}, r.pots, { potL, count, waterMl });
+      const V = recipeVolume(r);
+      const vol = document.getElementById('recipe_vol_' + id);
+      if (vol) vol.value = fmtNum(V, V % 1 ? 1 : 0);
+      setRecipeVolume(id, String(V));
+    }
+    window.setRecipePots = setRecipePots;
+
+    async function saveRecipePots(id) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r) return;
+      try {
+        await storeRecipe(r);
+      } catch (e) {
+        setRecipeStatus('Nie udało się zapisać ustawień doniczek — ' + recipeErrorText(e), true);
+      }
+    }
+    window.saveRecipePots = saveRecipePots;
+
+    function toggleRecipePots(id, on) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r) return;
+      r.pots = Object.assign({}, POTS_DEFAULT, r.pots, { enabled: on });
+      renderRecipes();
+      saveRecipePots(id);
+    }
+    window.toggleRecipePots = toggleRecipePots;
     window.setRecipeVolume = setRecipeVolume;
 
     function toggleRecipe(id) {
@@ -4048,7 +4211,7 @@
           font(9, row.bold ? 700 : 400);
           const lines = cols.map((c, i) => wrap(row.cells[i] == null ? '' : row.cells[i], c.w - 2 * pad));
           const h = Math.max(...lines.map(l => l.length)) * lh + 2 * pad - 1;
-          if (ensure(h)) header();
+          if (ensure(h)) { header(); font(9, row.bold ? 700 : 400); }  // nagłówek na nowej stronie zmienia czcionkę
           if (row.fill) { ctx.fillStyle = row.fill; ctx.fillRect(M, y, CW, h); }
           if (row.bar) { ctx.fillStyle = row.bar; ctx.fillRect(M, y, 3, h); }
           ctx.fillStyle = row.color || C.text;
@@ -4129,6 +4292,39 @@
         paragraph(`Dawki na ${plNum(s.volumeL, 1)} l gleby (${plNum(s.massKg, 2)} kg), liczone od stanu po wapnowaniu.`, 8.5, C.muted);
       } else {
         paragraph('Brak produktów w recepturze.', 9.5, C.muted);
+      }
+
+      // Krok 3 — doniczki
+      if (recipe.pots && recipe.pots.enabled) {
+        const plan = buildPotPlan(r, recipe.pots);
+        const g = x => plNum(x, x < 1 ? 3 : 2);
+        heading(`Krok 3 — Do doniczek: ${plan.n} × ${plNum(plan.potL, plan.potL % 1 ? 1 : 0)} l`);
+        paragraph(`Gleba razem ${plNum(plan.soilL, 1)} l. Woda: ${plan.n} × ${plNum(plan.waterMl, 0)} ml = ${plNum(plan.waterL, 2)} l.`, 9.5);
+        if (plan.solution.length) {
+          paragraph(`Roztwór — rozpuść w ${plNum(plan.waterL, 2)} l wody, mieszaj i wlej po ${plNum(plan.waterMl, 0)} ml do każdej doniczki:`, 9.5, C.text, 600);
+          y += 3;
+          table([{ label: 'Produkt', w: CW * 0.36 }, { label: 'Razem', w: CW * 0.16, align: 'right' },
+                 { label: 'Na doniczkę', w: CW * 0.16, align: 'right' }, { label: 'Stężenie / maks.', w: CW * 0.32, align: 'right' }],
+            plan.solution.map(e => ({
+              cells: [e.product, `${g(e.total)} g`, `${g(e.perPot)} g`,
+                      `${plNum(e.conc, e.conc < 0.1 ? 3 : 1)} / ${plNum(e.sol, 0)} g/l` + (e.status !== 'ok' ? `\n${POT_STATUS[e.status]}` : '')],
+              color: e.status !== 'ok' ? C.warn : null
+            })));
+          const tooLittle = plan.minWaterPerPotMl > plan.waterMl + 1e-9;
+          if (tooLittle) paragraph(`Za mało wody: żeby wszystko się rozpuściło, daj co najmniej ${plNum(Math.ceil(plan.minWaterPerPotMl / 10) * 10, 0)} ml na doniczkę.`, 9.5, C.warn, 600);
+          paragraph(`Łącznie ${plNum(plan.saltConc, 1)} g soli na litr.`
+            + (plan.saltConc > SALT_ROOT_WARN_GL ? ' Jeśli w doniczkach już rosną rośliny, to mocny roztwór — podziel dawkę na kilka podlewań albo daj więcej wody.' : ''), 9, C.muted);
+          paragraph('Rozpuszczaj produkty po kolei, każdy do końca; boraks najlepiej osobno w ciepłej wodzie. Roztwór zużyj od razu '
+            + '(siarczan żelaza utlenia się i brązowieje) i zamieszaj przed każdym nalaniem.', 9, C.muted);
+          y += 4;
+        }
+        if (plan.lime.length || plan.dry.length) {
+          paragraph('Na sucho — wymieszaj z ziemią w każdej doniczce:', 9.5, C.text, 600);
+          y += 3;
+          table([{ label: 'Produkt', w: CW * 0.52 }, { label: 'Razem', w: CW * 0.24, align: 'right' }, { label: 'Na doniczkę', w: CW * 0.24, align: 'right' }],
+            plan.lime.map((e, i) => ({ cells: [(i === 0 ? 'Wapnowanie: ' : '') + e.product + (i === 0 ? ' — wybierz jeden' : ''), `${g(e.total)} g`, `${g(e.perPot)} g`], bold: true }))
+              .concat(plan.dry.map(e => ({ cells: [e.product, `${g(e.total)} g`, `${g(e.perPot)} g` + (e.ml != null ? `\n(${plNum(e.ml / plan.n, 0)} ml)` : '')] }))));
+        }
       }
 
       // Profil końcowy
@@ -4320,8 +4516,11 @@
       recipeStoreMode = 'db';
       setRecipeStorageNote();
       db.collection(RECIPE_COLLECTION).onSnapshot(snap => {
-        window._recipes = snap.docs.map(d => sanitizeRecipe(d.id, d.data())).filter(Boolean);
-        renderRecipes();
+        const next = snap.docs.map(d => sanitizeRecipe(d.id, d.data())).filter(Boolean);
+        // Własny zapis wraca z magazynu bez zmian — wtedy nie przerysowujemy listy (zostaje kursor i zaznaczenie w polu).
+        const same = JSON.stringify(next) === JSON.stringify(window._recipes);
+        window._recipes = next;
+        if (!same) renderRecipes();
         // Pusta odpowiedź z pamięci podręcznej to jeszcze nie odpowiedź serwera — czekamy na właściwą.
         if (!(snap.metadata.fromCache && snap.empty)) maybeAutoLoadRecipe();
       }, () => {

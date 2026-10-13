@@ -216,6 +216,10 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 - `scaleReport()` / `setRecipeVolume()` — receptura pokazana dla innej objętości gleby: dawki są w ppm na masę
   gleby, więc gramy produktów i wapna skalują się liniowo, a ppm zostają; „Wczytaj” przy zmienionej objętości
   ustawia ją w CAC i skaluje stałe dawki w gramach, więc wynik zgadza się z listą
+- `buildPotPlan()` — dawkowanie do doniczek (opcja receptury, zapisywana z nią w polu `pots`): gleba = doniczka ×
+  liczba doniczek; produkty z `sol` w `AMENDMENTS` (orientacyjna rozpuszczalność w 20 °C, celowo zaniżona) idą
+  do jednego roztworu (woda na doniczkę × liczba doniczek) i trzymamy je do połowy rozpuszczalności
+  (`SOLUTION_SAFETY`), reszta i wapnowanie — na sucho, porcja na doniczkę; ostrzeżenie przy > 3 g soli/l
 - `paintRecipePdfPages()` / `assemblePdf()` / `offerFile()` — PDF do wydruku bez bibliotek: strony A4 rysowane
   na płótnie (czcionka systemowa, więc polskie znaki bez osadzania fontów), składane w PDF 1.4 z obrazami
   Flate (`CompressionStream`, awaryjnie JPEG); zapis przez capability `downloads` w podglądzie artefaktu,
