@@ -809,9 +809,17 @@
       el.className = 'status ' + (isErr ? 'err' : 'ok');
     }
 
+    // Plik już mamy w ręku, więc pole wyboru czyścimy. Pole ze ścieżką pliku wysypuje przenoszenie stanu
+    // formularza przy aktualizacji strony (przeglądarka nie pozwala wpisać ścieżki z powrotem), a przy okazji
+    // ponowny wybór tego samego pliku znów go wczytuje.
+    function clearFileInput(input) {
+      try { input.value = ''; } catch (e) { /* bez znaczenia dla wczytywania */ }
+    }
+
     async function handlePdfUpload(ev) {
       const file = ev.target.files[0];
       if (!file) return;
+      clearFileInput(ev.target);
       setStatus('Wczytywanie PDF…');
       document.getElementById('column-buttons').innerHTML = '';
       document.getElementById('pdf-info').innerText = '';
@@ -2551,6 +2559,7 @@
     async function handleCompostPdf(ev, kind) {
       const file = ev.target.files[0];
       if (!file) return;
+      clearFileInput(ev.target);
       const statusEl = document.getElementById('komp-' + kind + '-status');
       const btnBox = document.getElementById('komp-' + kind + '-buttons');
       const setSt = (msg, err) => { statusEl.textContent = msg; statusEl.className = 'status ' + (err ? 'err' : 'ok'); };
@@ -3387,6 +3396,16 @@
       if (s.stage && MEHLICH3_STAGES[s.stage]) window._targetStage = s.stage;
     }
 
+    // Gdy KAŻDE pole liczbowe z wartością domyślną jest puste, to nie jest stan wpisany ręcznie, tylko
+    // nieudane odtworzenie formularza przez podgląd przy podmianie wersji — wracamy do wartości domyślnych.
+    function healBlankedInputs() {
+      const withDefaults = Array.from(document.querySelectorAll('input[type=number][id]'))
+        .filter(el => el.defaultValue !== '' && !el.disabled);
+      if (!withDefaults.length || withDefaults.some(el => el.value !== '')) return false;
+      withDefaults.forEach(el => { el.value = el.defaultValue; });
+      return true;
+    }
+
     // Start strony. Skrypt stoi na końcu <body>, więc wszystkie pola już istnieją — nie czekamy na
     // window.onload, które nie przychodzi, gdy strona jest podmieniana w już załadowanym oknie.
     let pageStarted = false;
@@ -3396,6 +3415,7 @@
       populateProductSelect();
       renderProductsTable();
       try { restorePageState(data && data.page); } catch (e) { /* stan poprzedniej wersji nieczytelny — zostają wartości domyślne */ }
+      if (healBlankedInputs()) window._doseRecipe = null;
       if (!window._doseRecipe) snapshotDoseRecipe();
       syncSatButtons();
       calculatePPM();
@@ -3404,9 +3424,20 @@
       renderSavedPhases();
       renderCompostAll();
       if (window._targetStage !== 'flo') setTargetStage(window._targetStage);
+      // Podgląd może odtworzyć formularz chwilę po starcie strony — sprawdzamy jeszcze raz.
+      setTimeout(() => {
+        if (!healBlankedInputs()) return;
+        snapshotDoseRecipe();
+        syncSatButtons();
+        calculatePPM();
+        calculateCAC();
+        renderCompostAll();
+      }, 1500);
     }
 
     (function bootPage() {
+      // W podglądzie artefaktu strona jest opakowana w cudzy szkielet bez lang — polski zapis liczb w polach.
+      if (!document.documentElement.lang) document.documentElement.lang = 'pl';
       const hot = window.claude && window.claude.hot;
       try {
         if (hot && typeof hot.snapshot === 'function') hot.snapshot(() => ({ page: collectPageState() }));

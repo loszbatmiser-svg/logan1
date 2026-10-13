@@ -11,6 +11,9 @@ Plik zawiera w sobie bibliotekę [pdf.js](https://mozilla.github.io/pdf.js/) zak
 (dwa bloki `<script type="text/plain">` pod koniec pliku), więc wczytywanie raportów PDF też
 działa bez internetu.
 
+Do publikacji jako artefakt claude.ai służy `python3 tools/build_artifact.py` — zdejmuje własny
+szkielet dokumentu (`<!DOCTYPE>`, `<html>`, `<head>`, `<body>`), bo podgląd artefaktu dokłada swój.
+
 ## Co to robi
 
 Cztery zakładki, które razem prowadzą od testu glebowego do konkretnej dawki w gramach/mililitrach:
