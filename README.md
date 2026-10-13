@@ -210,6 +210,12 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 - `buildRecipeReport()` — migawka receptury przy zapisie: wynik wapnowania (`window._limeResult`, ustawiany
   wyłącznie przez `calculateLime()`), produkty pogrupowane jak w „2. Targety PPM” (kationy → aniony →
   mikroelementy), profil końcowy; z niej rysowana jest lista receptur i PDF
+- `getCartItemDose()` — jedno miejsce liczenia pozycji listy produktów: gramy, poziom ppm, do którego prowadzi
+  (krok 1 — target Mehlich 3, krok 2 — wymóg proporcji), i ile ppm dodaje; z niej korzystają lista w punkcie 5,
+  raport receptury i PDF (`getCartItemGrams()` to tylko skrót do `.grams`)
+- `scaleReport()` / `setRecipeVolume()` — receptura pokazana dla innej objętości gleby: dawki są w ppm na masę
+  gleby, więc gramy produktów i wapna skalują się liniowo, a ppm zostają; „Wczytaj” przy zmienionej objętości
+  ustawia ją w CAC i skaluje stałe dawki w gramach, więc wynik zgadza się z listą
 - `paintRecipePdfPages()` / `assemblePdf()` / `offerFile()` — PDF do wydruku bez bibliotek: strony A4 rysowane
   na płótnie (czcionka systemowa, więc polskie znaki bez osadzania fontów), składane w PDF 1.4 z obrazami
   Flate (`CompressionStream`, awaryjnie JPEG); zapis przez capability `downloads` w podglądzie artefaktu,

@@ -89,6 +89,14 @@
     .recipe-actions { display: flex; flex-wrap: wrap; gap: 4px; }
     .recipe-actions .col-btn { margin: 0; padding: 5px 12px; }
     .col-btn.danger { background: #c53030; border-color: #c53030; color: #fff; }
+    .recipe-tools { display: flex; gap: 6px; margin-bottom: 6px; }
+    .recipe-tools .col-btn { margin: 0; padding: 5px 12px; }
+    .recipe-title { display: flex; align-items: flex-start; gap: 8px; }
+    .recipe-toggle { border: 1px solid #cbd5e0; background: #fff; color: #2b6cb0; border-radius: 6px; width: 28px; height: 28px;
+      cursor: pointer; font-size: 0.9rem; flex-shrink: 0; padding: 0; }
+    .recipe-vol { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px 0 0; font-weight: 600; font-size: 0.84rem; color: #4a5568; }
+    .recipe-vol input { width: 80px; padding: 5px 7px; }
+    .recipe-vol .explain { margin: 0 0 0 4px; }
   </style>
 </head>
 <body>
@@ -1855,35 +1863,47 @@
       return totals;
     }
 
-    function getCartItemGrams(item, idx) {
-      if (item.mode === 'grams') return item.grams;
+    // Dawka pozycji listy: gramy produktu, poziom ppm, do którego pozycja prowadzi pierwiastek (krok 1 —
+    // target Mehlich 3, krok 2 — wymóg proporcji), i ile ppm tego pierwiastka dodaje.
+    function getCartItemDose(item, idx) {
       const product = getAmendment(item.productId);
       const soilKg = getSoilMassKg();
-      if (!product || soilKg <= 0) return 0;
+      if (item.mode === 'grams') {
+        const el = cartItemElement(item);
+        const pct = product && el ? product.pct[el] : 0;
+        return { grams: item.grams, toLevel: null, addPpm: soilKg > 0 && pct ? (item.grams * pct * 1000) / soilKg : 0 };
+      }
+      const none = { grams: 0, toLevel: null, addPpm: 0 };
+      if (!product || soilKg <= 0) return none;
       const pct = product.pct[item.targetElement];
-      if (!pct) return 0;
+      if (!pct) return none;
       if (item.mode === 'auto') {
         const totalBefore = getTotalsUpToIndex(idx);
         const t = getEffectiveTarget(window._targetStage, item.targetElement);
-        if (!t) return 0;
+        if (!t) return none;
         const baseTarget = t.max != null ? t.max : t.min;
         const current = totalBefore[item.targetElement] || 0;
-        let delta;
+        let delta, toLevel;
         if (item.step === 'ratio') {
           // Krok 2: tylko nadwyżka ponad target Mehlich 3 wymagana przez proporcje —
           // liczona na profilu po kroku 1, tak samo jak w tabeli propozycji.
           const postTarget = getPostTargetTotals(totalBefore);
           const afterTarget = postTarget[item.targetElement] || 0;
           const binding = getBindingRatioNeed(item.targetElement, postTarget);
-          const ratioNeed = binding && binding.need != null ? binding.need : afterTarget;
-          delta = Math.max(0, ratioNeed - afterTarget);
+          toLevel = binding && binding.need != null ? binding.need : afterTarget;
+          delta = Math.max(0, toLevel - afterTarget);
         } else {
           // Krok 1: dojście do targetu Mehlich 3 wybranego etapu.
+          toLevel = baseTarget;
           delta = Math.max(0, baseTarget - current);
         }
-        return (delta * soilKg) / 1000 / pct;
+        return { grams: (delta * soilKg) / 1000 / pct, toLevel, addPpm: delta };
       }
-      return (item.targetPpm * soilKg) / 1000 / pct;
+      return { grams: (item.targetPpm * soilKg) / 1000 / pct, toLevel: null, addPpm: item.targetPpm };
+    }
+
+    function getCartItemGrams(item, idx) {
+      return getCartItemDose(item, idx).grams;
     }
 
     function autoAddToCart(idx) {
@@ -1928,12 +1948,15 @@
         let html = '<table><thead><tr><th>Produkt</th><th>Podstawa dawki</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
         window._amendmentCart.forEach((item, idx) => {
           const product = getAmendment(item.productId);
-          const grams = getCartItemGrams(item, idx);
+          const dose = getCartItemDose(item, idx);
+          const grams = dose.grams;
+          const elName = ELEMENT_LABELS[item.targetElement] || item.targetElement;
+          const level = dose.toLevel != null ? `: ${dose.toLevel.toFixed(1)} ppm` : '';
           let basis;
           if (item.mode === 'grams') basis = 'stała dawka';
           else if (item.mode === 'auto') basis = item.step === 'ratio'
-            ? `auto krok 2: dopłata wg proporcji dla ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z etapem i masą gleby)`
-            : `auto krok 1: do targetu Mehlich 3 dla ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z etapem i masą gleby)`;
+            ? `auto krok 2: dopłata wg proporcji dla ${elName}${dose.toLevel != null ? ` do ${dose.toLevel.toFixed(1)} ppm` : ''} (przelicza się z etapem i masą gleby)`
+            : `auto krok 1: do targetu Mehlich 3 dla ${elName}${level} (przelicza się z etapem i masą gleby)`;
           else basis = `cel: +${item.targetPpm.toFixed(1)} ppm ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z masą gleby)`;
           const amount = product && product.volumeBased
             ? `${grams.toFixed(2)} g <span class="explain">= ${compostMlFromGrams(grams).toFixed(0)} ml</span>`
@@ -3575,8 +3598,18 @@
     }
     window.saveRecipe = saveRecipe;
 
-    function applyRecipe(recipe) {
-      const st = recipe.state;
+    // volumeL — objętość gleby inna niż w zapisie: dawki „auto” i „cel ppm” przeliczą się same z nowej masy
+    // gleby, a stałe dawki w gramach skalujemy, żeby dawały te same ppm.
+    function applyRecipe(recipe, volumeL) {
+      let st = recipe.state;
+      const savedV = parseFloat(st.fields.lime_volume_l);
+      if (volumeL > 0 && savedV > 0 && Math.abs(volumeL - savedV) > 1e-9) {
+        const f = volumeL / savedV;
+        st = Object.assign({}, st, {
+          fields: Object.assign({}, st.fields, { lime_volume_l: String(volumeL) }),
+          cart: st.cart.map(it => it.mode === 'grams' ? Object.assign({}, it, { grams: it.grams * f }) : it)
+        });
+      }
       RECIPE_FIELDS.forEach(id => {
         if (st.fields[id] != null) document.getElementById(id).value = st.fields[id];
       });
@@ -3600,10 +3633,13 @@
       const recipe = window._recipes.find(r => r.id === id);
       if (!recipe) return;
       recipeAutoLoadDone = true;
-      applyRecipe(recipe);
+      const savedV = recipeSavedVolume(recipe);
+      const V = auto ? savedV : recipeVolume(recipe);
+      applyRecipe(recipe, V);
       const when = formatRecipeDate(recipe.savedAt);
+      const scaled = V && savedV && Math.abs(V - savedV) > 1e-9 ? ` — przeliczona z ${fmtNum(savedV, 1)} l na ${fmtNum(V, 1)} l gleby` : '';
       setRecipeStatus((auto ? 'Wczytano automatycznie ostatnią recepturę' : 'Wczytano recepturę')
-        + ` „${recipe.name}”${when ? ` (zapisana ${when})` : ''} — wapnowanie, dane gleby, etap i lista produktów odtworzone.`);
+        + ` „${recipe.name}”${when ? ` (zapisana ${when})` : ''}${scaled} — wapnowanie, dane gleby, etap i lista produktów odtworzone.`);
       if (auto) return;
       // Zapamiętujemy, która receptura była ostatnio używana — ta wczyta się sama przy następnym otwarciu.
       const used = Object.assign({}, recipe, { usedAt: new Date().toISOString() });
@@ -3642,6 +3678,44 @@
       return isFinite(v) ? v.toFixed(d) : '—';
     }
 
+    // Objętość gleby, dla której pokazujemy recepturę (domyślnie ta z zapisu) i zwinięte receptury —
+    // wygoda tego widoku, nie część receptury.
+    const recipeViewVolume = {};
+    const RECIPE_COLLAPSED_KEY = 'nawoz_receptury_zwiniete';
+    const recipeCollapsed = new Set((() => {
+      try { return JSON.parse(localStorage.getItem(RECIPE_COLLAPSED_KEY) || '[]'); } catch (e) { return []; }
+    })());
+    function persistRecipeCollapsed() {
+      try { localStorage.setItem(RECIPE_COLLAPSED_KEY, JSON.stringify([...recipeCollapsed])); } catch (e) { /* tylko wygoda */ }
+    }
+
+    function recipeSavedVolume(r) {
+      const v = r.report && r.report.soil ? Number(r.report.soil.volumeL) : parseFloat(r.state.fields.lime_volume_l);
+      return v > 0 ? v : null;
+    }
+    function recipeVolume(r) {
+      return recipeViewVolume[r.id] > 0 ? recipeViewVolume[r.id] : recipeSavedVolume(r);
+    }
+
+    // Dawki liczone są w ppm na masę gleby, więc przy innej objętości (ta sama gęstość) gramy produktów
+    // i wapna zmieniają się proporcjonalnie, a profil ppm zostaje ten sam.
+    function scaleReport(report, newV) {
+      const savedV = report && report.soil ? Number(report.soil.volumeL) : 0;
+      if (!(newV > 0) || !(savedV > 0) || Math.abs(newV - savedV) < 1e-9) return report;
+      const f = newV / savedV;
+      const r = cloneJson(report);
+      r.soil.volumeL = newV;
+      r.soil.massKg = Number(report.soil.massKg) * f;
+      if (r.lime) r.lime.volumeL = newV;
+      r.groups.forEach(g => (g.items || []).forEach(it => {
+        it.grams = Number(it.grams) * f;
+        if (it.ml != null) it.ml = Number(it.ml) * f;
+        if (it.elGrams != null) it.elGrams = Number(it.elGrams) * f;
+      }));
+      r.scaledFrom = savedV;
+      return r;
+    }
+
     function limeSummaryHtml(lime) {
       if (!lime) return '<span class="explain">brak danych o wapnowaniu</span>';
       if (!lime.needed) return `niepotrzebne — pH gleby ${fmtNum(lime.ph, 1)} (≥ 7)`;
@@ -3650,6 +3724,38 @@
         + ` <span class="explain">albo</span> wolastenit <strong>${fmtNum(lime.perL.woll * V, 1)} g</strong>`
         + ` <span class="explain">· na ${fmtNum(V, 1)} l gleby · Ca ${fmtNum(lime.currSat, 1)}% → ${fmtNum(lime.targetSat, 0)}%, +${fmtNum(lime.caIncrease, 0)} ppm Ca, pH ${fmtNum(lime.ph, 1)}</span>`;
       if (!lime.reachable) html += ' <span style="color:#c53030; font-weight:600;">cel nieosiągalny przy tym pH</span>';
+      return html;
+    }
+
+    function recipeAddsHtml(it) {
+      if (it.addPpm == null) return '<span class="explain">—</span>';
+      const sym = it.el || '';
+      return `+${fmtNum(it.addPpm, 1)} ppm ${escapeHtml(sym)}`
+        + (it.elGrams != null ? `<br><span class="explain">= ${fmtNum(it.elGrams, 2)} g ${escapeHtml(sym)}</span>` : '');
+    }
+
+    function recipeCollapsedLine(rep) {
+      const count = rep.groups.reduce((n, g) => n + (g.items ? g.items.length : 0), 0);
+      const L = rep.lime;
+      const lime = !L ? '' : !L.needed ? ' · wapnowanie niepotrzebne'
+        : ` · wapnowanie: ${fmtNum(L.perL.caco3 * L.volumeL, 1)} g CaCO₃ albo ${fmtNum(L.perL.woll * L.volumeL, 1)} g wolastenitu`;
+      return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}`;
+    }
+
+    function recipeBodyHtml(r, rep) {
+      let html = `<tr><td colspan="4"><span class="explain">Krok 1 — wapnowanie:</span> ${limeSummaryHtml(rep.lime)}</td></tr>`;
+      const groups = rep.groups.filter(g => Array.isArray(g.items) && g.items.length);
+      if (!groups.length) html += '<tr><td colspan="4" class="explain">Krok 2 — brak produktów</td></tr>';
+      groups.forEach((g, gi) => {
+        const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
+        html += `<tr class="${def.cls}"><td colspan="4"><span class="explain">${gi === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
+        g.items.forEach(it => {
+          html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}</td>`
+            + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
+            + `<td style="white-space:nowrap;">${recipeAddsHtml(it)}</td>`
+            + `<td style="white-space:nowrap;"><strong>${fmtNum(it.grams, 2)} g</strong>${it.ml != null ? `<br><span class="explain">${fmtNum(it.ml, 0)} ml</span>` : ''}</td></tr>`;
+        });
+      });
       return html;
     }
 
@@ -3662,46 +3768,88 @@
       }
       const last = lastUsedRecipe();
       const sorted = [...window._recipes].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
-      let html = '<table class="recipe-table"><thead><tr><th>Produkt</th><th>Dla pierwiastka</th><th>Dawka</th></tr></thead><tbody>';
+      let html = '<div class="recipe-tools"><button class="col-btn" onclick="setAllRecipesCollapsed(true)">Zwiń wszystkie</button>'
+        + '<button class="col-btn" onclick="setAllRecipesCollapsed(false)">Rozwiń wszystkie</button></div>';
+      html += '<table class="recipe-table"><thead><tr><th>Produkt</th><th>Dla pierwiastka</th><th>Dodaje</th><th>Dawka</th></tr></thead>';
       sorted.forEach(r => {
         const f = r.state.fields;
         const stage = MEHLICH3_STAGES[r.state.stage] ? MEHLICH3_STAGES[r.state.stage].label : '—';
         const confirming = recipePendingDelete === r.id;
+        const collapsed = recipeCollapsed.has(r.id);
         const id = escapeHtml(r.id);
-        html += `<tr class="recipe-head"><td colspan="3">`
-          + `<div class="recipe-head-row"><div><strong>${escapeHtml(r.name)}</strong>`
+        const savedV = recipeSavedVolume(r);
+        const V = recipeVolume(r);
+        const rep = r.report ? scaleReport(r.report, V) : null;
+        html += `<tbody><tr class="recipe-head"><td colspan="4">`
+          + `<div class="recipe-head-row"><div class="recipe-title">`
+          + `<button class="recipe-toggle" onclick="toggleRecipe('${id}')" aria-expanded="${!collapsed}" title="${collapsed ? 'Rozwiń' : 'Zwiń'}">${collapsed ? '▸' : '▾'}</button>`
+          + `<div><strong>${escapeHtml(r.name)}</strong>`
           + (r === last ? ' <span class="badge" style="min-width:0;">otwiera się sama</span>' : '')
-          + `<br><span class="explain">etap: ${escapeHtml(stage)} · gleba ${escapeHtml(f.lime_volume_l || '—')} l, pH ${escapeHtml(f.cac_ph || '—')}`
-          + ` · zapisana ${escapeHtml(formatRecipeDate(r.savedAt))}</span></div>`
-          + `<div class="recipe-actions"><button class="col-btn" onclick="loadRecipe('${id}')">Wczytaj</button>`
+          + `<br><span class="explain">etap: ${escapeHtml(stage)} · pH ${escapeHtml(f.cac_ph || '—')} · zapisana ${escapeHtml(formatRecipeDate(r.savedAt))}</span>`
+          + (collapsed && rep ? `<br><span class="explain" id="recipe_line_${id}">${recipeCollapsedLine(rep)}</span>` : '')
+          + `</div></div>`
+          + `<div class="recipe-actions">`
+          + (savedV ? `<label class="recipe-vol">gleba <input type="number" id="recipe_vol_${id}" min="0.1" step="1" value="${fmtNum(V, V % 1 ? 1 : 0)}"`
+              + ` oninput="setRecipeVolume('${id}', this.value)"> l`
+              + `<span class="explain" id="recipe_volhint_${id}">${recipeVolumeHint(V, savedV)}</span></label>` : '')
+          + `<button class="col-btn" onclick="loadRecipe('${id}')">Wczytaj</button>`
           + `<button class="col-btn" onclick="downloadRecipePdf('${id}')">PDF</button>`
           + `<button class="col-btn${confirming ? ' danger' : ''}" onclick="deleteRecipe('${id}')">${confirming ? 'Na pewno usunąć?' : 'Usuń'}</button></div></div>`
-          + `</td></tr>`;
-        if (r.report) {
-          html += `<tr><td colspan="3"><span class="explain">Krok 1 — wapnowanie:</span> ${limeSummaryHtml(r.report.lime)}</td></tr>`;
-          const groups = r.report.groups.filter(g => Array.isArray(g.items) && g.items.length);
-          if (!groups.length) html += '<tr><td colspan="3" class="explain">Krok 2 — brak produktów</td></tr>';
-          groups.forEach((g, gi) => {
-            const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
-            html += `<tr class="${def.cls}"><td colspan="3"><span class="explain">${gi === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
-            g.items.forEach(it => {
-              html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}</td>`
-                + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
-                + `<td style="white-space:nowrap;"><strong>${fmtNum(it.grams, 2)} g</strong>${it.ml != null ? ` <span class="explain">(${fmtNum(it.ml, 0)} ml)</span>` : ''}</td></tr>`;
-            });
-          });
-        } else {
-          // Receptura zapisana przed dodaniem raportu — pokazujemy to, co zapisano wtedy.
-          html += `<tr><td colspan="3">` + (r.summary.length
-            ? r.summary.map(p => `${escapeHtml(p.name)}: <strong>${fmtNum(p.grams, 2)} g</strong>`
-                + (p.ml != null ? ` <span class="explain">(${fmtNum(p.ml, 0)} ml)</span>` : '')).join('<br>')
-            : '<span class="explain">—</span>')
-            + '<br><span class="explain">Wczytaj i zapisz ją ponownie, żeby zobaczyć wapnowanie i podział na kationy, aniony i mikroelementy.</span></td></tr>';
+          + `</td></tr></tbody><tbody id="recipe_body_${id}">`;
+        if (!collapsed) {
+          if (rep) {
+            html += recipeBodyHtml(r, rep);
+          } else {
+            // Receptura zapisana przed dodaniem raportu — pokazujemy to, co zapisano wtedy.
+            html += `<tr><td colspan="4">` + (r.summary.length
+              ? r.summary.map(p => `${escapeHtml(p.name)}: <strong>${fmtNum(p.grams, 2)} g</strong>`
+                  + (p.ml != null ? ` <span class="explain">(${fmtNum(p.ml, 0)} ml)</span>` : '')).join('<br>')
+              : '<span class="explain">—</span>')
+              + '<br><span class="explain">Wczytaj i zapisz ją ponownie, żeby zobaczyć wapnowanie i podział na kationy, aniony i mikroelementy.</span></td></tr>';
+          }
         }
+        html += '</tbody>';
       });
-      html += '</tbody></table>';
+      html += '</table>';
       box.innerHTML = html;
     }
+
+    function recipeVolumeHint(V, savedV) {
+      return Math.abs(V - savedV) > 1e-9 ? `zapisana dla ${fmtNum(savedV, savedV % 1 ? 1 : 0)} l` : '&nbsp;';
+    }
+
+    // Przy wpisywaniu odświeżamy tylko dawki tej receptury — pełne przerysowanie listy zabrałoby kursor z pola.
+    function setRecipeVolume(id, raw) {
+      const v = parseFloat(raw);
+      const r = window._recipes.find(x => x.id === id);
+      if (!r) return;
+      if (v > 0) recipeViewVolume[id] = v;
+      else delete recipeViewVolume[id];  // puste pole — liczymy dla objętości z zapisu
+      if (!r.report) return;
+      const V = recipeVolume(r);
+      const rep = scaleReport(r.report, V);
+      const hint = document.getElementById('recipe_volhint_' + id);
+      if (hint) hint.innerHTML = recipeVolumeHint(V, recipeSavedVolume(r));
+      const line = document.getElementById('recipe_line_' + id);
+      if (line) line.textContent = recipeCollapsedLine(rep);
+      const body = document.getElementById('recipe_body_' + id);
+      if (body && !recipeCollapsed.has(id)) body.innerHTML = recipeBodyHtml(r, rep);
+    }
+    window.setRecipeVolume = setRecipeVolume;
+
+    function toggleRecipe(id) {
+      if (recipeCollapsed.has(id)) recipeCollapsed.delete(id); else recipeCollapsed.add(id);
+      persistRecipeCollapsed();
+      renderRecipes();
+    }
+    window.toggleRecipe = toggleRecipe;
+
+    function setAllRecipesCollapsed(collapse) {
+      window._recipes.forEach(r => { if (collapse) recipeCollapsed.add(r.id); else recipeCollapsed.delete(r.id); });
+      persistRecipeCollapsed();
+      renderRecipes();
+    }
+    window.setAllRecipesCollapsed = setAllRecipesCollapsed;
 
     // ===== RAPORT RECEPTURY (lista receptur i PDF) =====
     // Kolejność i grupy jak w „2. Targety PPM (Mehlich 3)”: najpierw kationy, potem aniony, potem mikroelementy.
@@ -3726,25 +3874,35 @@
       return Object.keys(product.pct).sort((a, b) => product.pct[b] - product.pct[a])[0] || null;
     }
 
-    function cartItemBasisShort(item) {
+    function cartItemBasisShort(item, dose) {
       if (item.mode === 'grams') return 'stała dawka';
-      if (item.mode === 'auto') return item.step === 'ratio' ? 'auto, krok 2 — dopłata wg proporcji' : 'auto, krok 1 — do targetu Mehlich 3';
+      if (item.mode === 'auto') {
+        const level = dose && dose.toLevel != null ? dose.toLevel.toFixed(1) + ' ppm' : null;
+        return item.step === 'ratio'
+          ? 'auto, krok 2 — dopłata wg proporcji' + (level ? ` do ${level}` : '')
+          : 'auto, krok 1 — do targetu Mehlich 3' + (level ? `: ${level}` : '');
+      }
       return `cel +${Number(item.targetPpm).toFixed(1)} ppm`;
     }
 
     const round2 = x => Math.round(Number(x) * 100) / 100;
+    const round4 = x => Math.round(Number(x) * 10000) / 10000;
 
     // Migawka tego, co widać po wczytaniu receptury — liczona z bieżącego stanu strony.
     function buildRecipeReport() {
       const groups = ELEMENT_GROUPS.map(g => ({ key: g.key, items: [] }));
       window._amendmentCart.forEach((item, idx) => {
         const product = getAmendment(item.productId);
-        const grams = getCartItemGrams(item, idx);
+        const dose = getCartItemDose(item, idx);
         const el = cartItemElement(item);
+        const pct = product && el ? product.pct[el] || 0 : 0;
+        // Gramy zapisane z zapasem miejsc po przecinku — przy przeliczaniu na inną objętość
+        // zaokrąglenie nie może się mnożyć.
         groups.find(g => g.key === elementGroupKey(el)).items.push({
-          product: product ? product.name : item.productId,
-          el, basis: cartItemBasisShort(item), grams: round2(grams), order: idx,
-          ml: product && product.volumeBased ? Math.round(compostMlFromGrams(grams)) : null
+          productId: item.productId, product: product ? product.name : item.productId,
+          el, basis: cartItemBasisShort(item, dose), grams: round4(dose.grams), order: idx,
+          addPpm: round4(dose.addPpm), elGrams: round4(dose.grams * pct), toLevel: dose.toLevel,
+          ml: product && product.volumeBased ? round2(compostMlFromGrams(dose.grams)) : null
         });
       });
       const rank = el => { const i = ELEMENT_ORDER.indexOf(el); return i < 0 ? 99 : i; };
@@ -3779,7 +3937,7 @@
     const plNum = (x, d) => { const v = Number(x); return isFinite(v) ? v.toFixed(d).replace('.', ',') : '—'; };
 
     function paintRecipePdfPages(recipe) {
-      const r = recipe.report;
+      const r = recipe.report;  // już przeliczony na objętość wybraną na liście
       const W = PDF_PAGE_W, H = PDF_PAGE_H, M = 40, CW = W - 2 * M, C = PDF_COLORS;
       const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
       const pages = [];
@@ -3889,6 +4047,7 @@
       y += 26;
       const stageLabel = MEHLICH3_STAGES[r.stage] ? MEHLICH3_STAGES[r.stage].label : '—';
       paragraph(`Etap: ${stageLabel}   ·   zapisana ${formatRecipeDate(recipe.savedAt)}   ·   wydruk ${formatRecipeDate(new Date().toISOString())}`, 9, C.muted);
+      if (r.scaledFrom) paragraph(`Przeliczona z ${plNum(r.scaledFrom, 1)} l na ${plNum(r.soil.volumeL, 1)} l gleby — gramy zmienione proporcjonalnie, ppm bez zmian.`, 9, C.accent, 600);
       const s = r.soil || {};
       paragraph(`Gleba: ${plNum(s.volumeL, 1)} l, gęstość nasypowa ${plNum(s.bd, 2)} g/cm³, masa ${plNum(s.massKg, 2)} kg.   `
         + `Test glebowy (Value Found): pH ${plNum(s.ph, 1)}, Ca ${plNum(s.ca, 0)}, Mg ${plNum(s.mg, 0)}, K ${plNum(s.k, 0)}, Na ${plNum(s.na, 0)} ppm.`, 9, C.muted);
@@ -3929,13 +4088,15 @@
         prodRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
         g.items.forEach(it => prodRows.push({
           cells: [it.product, ELEMENT_LABELS[it.el] || it.el || '—', (it.basis || '').replace(/(\d)\.(\d)/g, '$1,$2'),
+                  it.addPpm != null ? `+${plNum(it.addPpm, 1)} ppm` + (it.elGrams != null ? `\n${plNum(it.elGrams, 2)} g ${it.el}` : '') : '—',
                   `${plNum(it.grams, 2)} g` + (it.ml != null ? `\n(${plNum(it.ml, 0)} ml)` : '')],
           bar: def.bar
         }));
       });
       if (prodRows.length) {
-        table([{ label: 'Produkt', w: CW * 0.36 }, { label: 'Dla pierwiastka', w: CW * 0.18 },
-               { label: 'Podstawa dawki', w: CW * 0.28 }, { label: 'Dawka', w: CW * 0.18, align: 'right' }], prodRows);
+        table([{ label: 'Produkt', w: CW * 0.28 }, { label: 'Pierwiastek', w: CW * 0.15 },
+               { label: 'Podstawa dawki', w: CW * 0.27 }, { label: 'Dodaje', w: CW * 0.15, align: 'right' },
+               { label: 'Dawka', w: CW * 0.15, align: 'right' }], prodRows);
         paragraph(`Dawki na ${plNum(s.volumeL, 1)} l gleby (${plNum(s.massKg, 2)} kg), liczone od stanu po wapnowaniu.`, 8.5, C.muted);
       } else {
         paragraph('Brak produktów w recepturze.', 9.5, C.muted);
@@ -4077,6 +4238,7 @@
         applyRecipe(recipe);
         recipe = Object.assign({}, recipe, { report: buildRecipeReport() });
       }
+      recipe = Object.assign({}, recipe, { report: scaleReport(recipe.report, recipeVolume(stored)) });
       setRecipeStatus(`Przygotowuję PDF receptury „${recipe.name}”…`);
       try {
         const blob = await buildRecipePdf(recipe);
