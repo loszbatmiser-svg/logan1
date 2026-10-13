@@ -119,6 +119,7 @@
     .mix-row .col-btn { margin: 0; padding: 4px 10px; }
     .mix-liters { min-width: 190px; font-weight: 600; color: #4a5568; }
     .recipe-table tr.recipe-pots-first td { border-top: 2px solid #9f7aea; }
+    .recipe-table tr.recipe-pots-dry td { border-top: 1px dashed #d6bcfa; }
   </style>
 </head>
 <body>
@@ -3910,10 +3911,14 @@
     // potsRep — raport przeliczony na objętość doniczek; batchL — partia mieszanki, z której je napełniasz.
     function buildPotPlan(potsRep, pots, batchL) {
       const n = pots.count, waterL = (pots.waterMl * n) / 1000;
-      const solution = [];
+      const solution = [], dry = [];
       potsRep.groups.forEach(g => (g.items || []).forEach(it => {
         const prod = productForReportItem(it);
-        if (!prod || !prod.sol) return;  // nierozpuszczalne idą na sucho do całej partii (krok 1 i 2)
+        if (!prod || !prod.sol) {
+          // Na sucho dawka idzie do całej partii (krok 1 i 2) — tu tylko jej przeliczenie na doniczkę.
+          dry.push({ product: it.product, total: Number(it.grams), perPot: Number(it.grams) / n, ml: it.ml != null ? Number(it.ml) : null });
+          return;
+        }
         const total = Number(it.grams);
         const conc = total / waterL;
         solution.push({
@@ -3921,13 +3926,29 @@
           status: conc <= prod.sol * SOLUTION_SAFETY ? 'ok' : conc <= prod.sol ? 'near' : 'over'
         });
       }));
+      const L = potsRep.lime;
+      const lime = L && L.needed ? [
+        { product: `Wapnowanie: węglan wapnia CaCO₃ (${fmtNum(L.cce, 0)}%)`, total: L.perL.caco3 * L.volumeL, perPot: L.perL.caco3 * pots.potL, choose: true },
+        { product: `albo wolastenit (Ca ${fmtNum(L.wollCa, 0)}%)`, total: L.perL.woll * L.volumeL, perPot: L.perL.woll * pots.potL }
+      ] : [];
       const minWaterL = solution.reduce((m, e) => Math.max(m, e.total / (e.sol * SOLUTION_SAFETY)), 0);
       const saltTotal = solution.reduce((sum, e) => sum + e.total, 0);
       const soilL = pots.potL * n;
       return {
-        n, potL: pots.potL, waterMl: pots.waterMl, waterL, soilL, batchL, leftoverL: batchL - soilL, solution,
+        n, potL: pots.potL, waterMl: pots.waterMl, waterL, soilL, batchL, leftoverL: batchL - soilL, solution, dry, lime,
         minWaterPerPotMl: (minWaterL / n) * 1000, saltConc: waterL > 0 ? saltTotal / waterL : 0
       };
+    }
+
+    // „na 1 doniczkę”, „na 32 doniczki”, „na 20 doniczek” — polska odmiana po liczebniku.
+    function potsWord(n) {
+      if (n === 1) return 'doniczkę';
+      const d = n % 10, dd = n % 100;
+      return d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? 'doniczki' : 'doniczek';
+    }
+    // Po liczbie w mianowniku („32 doniczki × 2 l”, „1 doniczka”).
+    function potsWordNom(n) {
+      return n === 1 ? 'doniczka' : potsWord(n);
     }
 
     function potBatchText(plan, fmt) {
@@ -3966,6 +3987,17 @@
       }
       if (!plan.solution.length) {
         html += '<tr class="recipe-pots"><td colspan="4"><span class="explain">W recepturze nie ma produktów rozpuszczalnych — nic nie idzie do roztworu.</span></td></tr>';
+      }
+      if (plan.lime.length || plan.dry.length) {
+        const potL = fmtNum(plan.potL, plan.potL % 1 ? 1 : 0);
+        html += `<tr class="recipe-pots recipe-pots-dry"><td colspan="4"><strong>Na sucho — ile wypada na doniczkę (${potL} l):</strong>`
+          + ` <span class="explain">to ta sama dawka co w kroku 1 i 2, przeliczona na doniczkę. Jeśli wsypałeś ją już do całej partii mieszanki, nie dodawaj jej drugi raz.</span></td></tr>`;
+        plan.lime.concat(plan.dry).forEach(e => {
+          html += `<tr class="recipe-pots"><td>${escapeHtml(e.product)}</td>`
+            + `<td><strong>${g(e.perPot)} g</strong> / doniczkę${e.ml != null ? ` <span class="explain">(${fmtNum(e.ml / plan.n, 0)} ml)</span>` : ''}</td>`
+            + `<td>razem ${g(e.total)} g na ${plan.n} ${potsWord(plan.n)}</td>`
+            + `<td><span class="explain">${e.choose ? 'wybierz jeden z dwóch' : ''}</span></td></tr>`;
+        });
       }
       return html;
     }
@@ -4118,7 +4150,7 @@
       const lime = !L ? '' : !L.needed ? ' · wapnowanie niepotrzebne'
         : ` · wapnowanie: ${fmtNum(L.perL.caco3 * L.volumeL, 1)} g CaCO₃ albo ${fmtNum(L.perL.woll * L.volumeL, 1)} g wolastenitu`;
       const pots = r && r.pots && r.pots.enabled
-        ? ` · ${r.pots.count} doniczek × ${fmtNum(r.pots.potL, r.pots.potL % 1 ? 1 : 0)} l (${fmtNum(r.pots.count * r.pots.potL, 1)} l z partii ${fmtNum(rep.soil.volumeL, 1)} l)` : '';
+        ? ` · ${r.pots.count} ${potsWordNom(r.pots.count)} × ${fmtNum(r.pots.potL, r.pots.potL % 1 ? 1 : 0)} l (${fmtNum(r.pots.count * r.pots.potL, 1)} l z partii ${fmtNum(rep.soil.volumeL, 1)} l)` : '';
       const mix = r && r.mix && r.mix.length ? ` · podłoże: ${r.mix.map(c => `${c.name || '?'} ${fmtPct(c.pct)}%`).join(', ')}` : '';
       return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}${pots}${mix}`;
     }
@@ -4611,6 +4643,19 @@
           y += 4;
         }
         if (!plan.solution.length) paragraph('W recepturze nie ma produktów rozpuszczalnych — nic nie idzie do roztworu.', 9.5, C.muted);
+        if (plan.lime.length || plan.dry.length) {
+          y += 4;
+          paragraph(`Na sucho — ile wypada na doniczkę (${plNum(plan.potL, plan.potL % 1 ? 1 : 0)} l):`, 9.5, C.text, 600);
+          paragraph('To ta sama dawka co w kroku 1 i 2, przeliczona na doniczkę. Jeśli wsypałeś ją już do całej partii mieszanki, nie dodawaj jej drugi raz.', 8.5, C.muted);
+          y += 3;
+          table([{ label: 'Produkt', w: CW * 0.46 }, { label: 'Na doniczkę', w: CW * 0.22, align: 'right' },
+                 { label: `Razem na ${plan.n} ${potsWord(plan.n)}`, w: CW * 0.32, align: 'right' }],
+            plan.lime.concat(plan.dry).map(e => ({
+              cells: [e.product + (e.choose ? ' — wybierz jeden z dwóch' : ''),
+                      `${g(e.perPot)} g` + (e.ml != null ? `\n(${plNum(e.ml / plan.n, 0)} ml)` : ''), `${g(e.total)} g`],
+              bold: !!e.choose || e.product.startsWith('albo wolastenit')
+            })));
+        }
       }
 
       // Profil końcowy

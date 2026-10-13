@@ -221,7 +221,9 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   w doniczkach (doniczka × liczba, `recipePotsVolume()`) — na nią liczą się produkty z `sol` w `AMENDMENTS`
   (orientacyjna rozpuszczalność w 20 °C, celowo zaniżona), podawane w jednym roztworze (woda na doniczkę ×
   liczba doniczek) i trzymane do połowy rozpuszczalności (`SOLUTION_SAFETY`). Reszta partii zostaje bez
-  siarczanów; gdy doniczek jest więcej niż partii — ostrzeżenie. Ostrzeżenie też przy > 3 g soli/l
+  siarczanów; gdy doniczek jest więcej niż partii — ostrzeżenie. Ostrzeżenie też przy > 3 g soli/l. Krok 3
+  pokazuje też, ile produktów na sucho (i wapna) wypada na doniczkę — tę samą dawkę co w partii, przeliczoną
+  na doniczkę, z uwagą, żeby nie dodawać jej drugi raz
 - `overwriteRecipe()` / `recipeChanges()` / `renderCurrentRecipeBar()` — nadpisywanie receptury bieżącym stanem
   strony (lista produktów, dane gleby, etap, targety, kompost; nazwa, doniczki i skład zostają), w dwóch
   kliknięciach. Pasek „Bieżąca receptura” porównuje stronę z ostatnio wczytaną/zapisaną recepturą
