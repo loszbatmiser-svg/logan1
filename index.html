@@ -90,6 +90,11 @@
     .recipe-actions .col-btn { margin: 0; padding: 5px 12px; }
     .col-btn.danger { background: #c53030; border-color: #c53030; color: #fff; }
     .recipe-tools { display: flex; gap: 6px; margin-bottom: 6px; }
+    .recipe-current { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px;
+      padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 0.9rem; }
+    .recipe-current.changed { border-color: #f6ad55; background: #fffaf0; }
+    .recipe-current .col-btn { margin: 0; }
+    .recipe-current-changes { color: #9c4221; font-weight: 600; }
     .recipe-tools .col-btn { margin: 0; padding: 5px 12px; }
     .recipe-title { display: flex; align-items: flex-start; gap: 8px; }
     .recipe-toggle { border: 1px solid #cbd5e0; background: #fff; color: #2b6cb0; border-radius: 6px; width: 28px; height: 28px;
@@ -688,6 +693,7 @@
         </div>
         <button class="col-btn selected" id="recipe_save_btn" onclick="saveRecipe()">Zapisz recepturę</button>
         <div id="recipe_status" class="explain" style="margin-top:6px;"></div>
+        <div id="recipe_current"></div>
         <div id="recipe_list" style="margin-top:16px;"></div>
         <datalist id="mix_components"></datalist>
         <p id="recipe_storage_note" class="note"></p>
@@ -2014,6 +2020,7 @@
       }
       renderSummary();
       renderAutoDoseTable();
+      if (typeof renderCurrentRecipeBar === 'function') renderCurrentRecipeBar();
     }
 
     function getCartTotals() {
@@ -3496,6 +3503,8 @@
     let recipeAutoLoadDone = false;
     let recipeUserTouched = false;
     let recipePendingDelete = null;
+    let recipePendingOverwrite = null;
+    let currentRecipeId = null;   // receptura ostatnio wczytana albo zapisana — do porównania i nadpisania
 
     function cloneJson(x) { return x == null ? x : JSON.parse(JSON.stringify(x)); }
 
@@ -3658,8 +3667,10 @@
       btn.disabled = true;
       try {
         await storeRecipe(recipe);
+        currentRecipeId = recipe.id;
         nameInput.value = '';
         setRecipeStatus(existing ? `Zaktualizowano recepturę „${name}”.` : `Zapisano recepturę „${name}”.`);
+        renderCurrentRecipeBar();
       } catch (e) {
         setRecipeStatus(recipeErrorText(e), true);
       } finally {
@@ -3710,6 +3721,8 @@
       const scaled = V && savedV && Math.abs(V - savedV) > 1e-9 ? ` — przeliczona z ${fmtNum(savedV, 1)} l na ${fmtNum(V, 1)} l gleby` : '';
       setRecipeStatus((auto ? 'Wczytano automatycznie ostatnią recepturę' : 'Wczytano recepturę')
         + ` „${recipe.name}”${when ? ` (zapisana ${when})` : ''}${scaled} — wapnowanie, dane gleby, etap i lista produktów odtworzone.`);
+      currentRecipeId = recipe.id;
+      renderCurrentRecipeBar();
       if (auto) return;
       // Zapamiętujemy, która receptura była ostatnio używana — ta wczyta się sama przy następnym otwarciu.
       const used = Object.assign({}, recipe, { usedAt: new Date().toISOString() });
@@ -3729,12 +3742,116 @@
       const recipe = window._recipes.find(r => r.id === id);
       try {
         await removeRecipe(id);
+        if (currentRecipeId === id) currentRecipeId = null;
         setRecipeStatus(`Usunięto recepturę „${recipe ? recipe.name : ''}”.`);
+        renderCurrentRecipeBar();
       } catch (e) {
         setRecipeStatus('Nie udało się usunąć receptury — spróbuj ponownie.', true);
       }
     }
     window.deleteRecipe = deleteRecipe;
+
+    // JSON z kluczami w stałej kolejności — magazyn potrafi zwrócić obiekty z kluczami posortowanymi inaczej.
+    function stableStringify(x) {
+      if (Array.isArray(x)) return '[' + x.map(stableStringify).join(',') + ']';
+      if (x && typeof x === 'object') return '{' + Object.keys(x).sort().map(k => JSON.stringify(k) + ':' + stableStringify(x[k])).join(',') + '}';
+      return JSON.stringify(x === undefined ? null : x);
+    }
+
+    const RECIPE_FIELD_GROUPS = [
+      { label: 'test glebowy', test: id => id.startsWith('cac_') },
+      { label: 'objętość lub gęstość gleby', test: id => id === 'lime_volume_l' || id === 'lime_bd' },
+      { label: 'wapnowanie', test: id => id.startsWith('lime_') && id !== 'lime_volume_l' && id !== 'lime_bd' },
+      { label: 'wartości startowe (punkt 1)', test: id => id.startsWith('am_base_') },
+      { label: 'gęstość kompostu', test: id => id === 'komp_bd' }
+    ];
+
+    // Co na stronie różni się od zapisanej receptury — lista krótkich opisów (pusta = bez zmian).
+    function recipeChanges(r) {
+      const cur = collectRecipeState();
+      const saved = r.state;
+      const parts = [];
+      const prodName = id => { const p = getAmendment(id); return p ? p.name : id; };
+      const countBy = list => list.reduce((m, it) => { m[it.productId] = (m[it.productId] || 0) + 1; return m; }, {});
+      const before = countBy(saved.cart), now = countBy(cur.cart);
+      const added = Object.keys(now).filter(k => now[k] > (before[k] || 0)).map(prodName);
+      const removed = Object.keys(before).filter(k => before[k] > (now[k] || 0)).map(prodName);
+      if (added.length) parts.push('dodane: ' + added.join(', '));
+      if (removed.length) parts.push('usunięte: ' + removed.join(', '));
+      if (!added.length && !removed.length && stableStringify(cur.cart) !== stableStringify(saved.cart)) parts.push('zmienione dawki na liście');
+      const changedFields = RECIPE_FIELDS.filter(id => String(cur.fields[id] ?? '') !== String(saved.fields[id] ?? ''));
+      RECIPE_FIELD_GROUPS.forEach(g => { if (changedFields.some(g.test)) parts.push(g.label); });
+      if (cur.stage !== saved.stage) parts.push('etap: ' + (MEHLICH3_STAGES[cur.stage] ? MEHLICH3_STAGES[cur.stage].label : cur.stage));
+      if (stableStringify(cur.targetOverrides || {}) !== stableStringify(saved.targetOverrides || {})) parts.push('własne targety');
+      if (saved.compost && stableStringify(cur.compost) !== stableStringify(saved.compost)) parts.push('dane kompostu');
+      return parts;
+    }
+
+    // Nadpisuje recepturę bieżącym stanem strony (lista produktów, dane gleby, etap, targety, kompost).
+    // Nazwa, doniczki i skład podłoża zostają. Dwa kliknięcia — podgląd nie pokazuje okienek confirm().
+    async function overwriteRecipe(id) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r) return;
+      if (recipeStoreMode === 'connecting') {
+        setRecipeStatus('Chwila — łączę się z magazynem receptur. Spróbuj za moment.', true);
+        return;
+      }
+      if (!window._amendmentCart.length) {
+        setRecipeStatus('Lista produktów w punkcie 5 jest pusta — nie nadpisuję receptury pustą listą.', true);
+        return;
+      }
+      if (recipePendingOverwrite !== id) {
+        recipePendingOverwrite = id;
+        renderRecipes();
+        renderCurrentRecipeBar();
+        setTimeout(() => {
+          if (recipePendingOverwrite === id) { recipePendingOverwrite = null; renderRecipes(); renderCurrentRecipeBar(); }
+        }, 6000);
+        return;
+      }
+      recipePendingOverwrite = null;
+      const changes = recipeChanges(r);
+      const now = new Date().toISOString();
+      const updated = Object.assign({}, r, {
+        savedAt: now, usedAt: now,
+        state: collectRecipeState(), summary: summarizeCart(), report: buildRecipeReport()
+      });
+      delete recipeViewVolume[id];  // receptura zapisana jest teraz dla objętości gleby ze strony
+      // Od razu podmieniamy ją na liście, żeby widok nie czekał na odpowiedź magazynu.
+      window._recipes = window._recipes.map(x => (x.id === id ? updated : x));
+      currentRecipeId = id;
+      try {
+        await storeRecipe(updated);
+        setRecipeStatus(`Nadpisano recepturę „${r.name}”` + (changes.length ? ` — ${changes.join('; ')}.` : ' (bez zmian w treści, nowa data zapisu).'));
+      } catch (e) {
+        window._recipes = window._recipes.map(x => (x.id === id ? r : x));
+        setRecipeStatus(recipeErrorText(e), true);
+      }
+      renderRecipes();
+      renderCurrentRecipeBar();
+    }
+    window.overwriteRecipe = overwriteRecipe;
+
+    function renderCurrentRecipeBar() {
+      const box = document.getElementById('recipe_current');
+      if (!box) return;
+      const r = currentRecipeId && window._recipes.find(x => x.id === currentRecipeId);
+      if (!r) { box.innerHTML = ''; return; }
+      const changes = recipeChanges(r);
+      const id = escapeHtml(r.id);
+      const confirming = recipePendingOverwrite === r.id;
+      box.innerHTML = `<div class="recipe-current${changes.length ? ' changed' : ''}">`
+        + `<div>Bieżąca receptura: <strong>${escapeHtml(r.name)}</strong> — `
+        + (changes.length
+          ? `<span class="recipe-current-changes">zmiany od zapisu: ${escapeHtml(changes.join('; '))}</span>`
+          : '<span class="explain">bez zmian od zapisu</span>')
+        + '</div>'
+        + (changes.length
+          ? `<button class="col-btn${confirming ? ' danger' : ' selected'}" onclick="overwriteRecipe('${id}')">`
+            + (confirming ? `Na pewno nadpisać „${escapeHtml(r.name)}”?` : `Nadpisz „${escapeHtml(r.name)}”`) + '</button>'
+          : '')
+        + '</div>';
+    }
 
     function lastUsedRecipe() {
       return window._recipes.reduce((best, r) => {
@@ -4059,6 +4176,7 @@
         const f = r.state.fields;
         const stage = MEHLICH3_STAGES[r.state.stage] ? MEHLICH3_STAGES[r.state.stage].label : '—';
         const confirming = recipePendingDelete === r.id;
+        const overwriting = recipePendingOverwrite === r.id;
         const collapsed = recipeCollapsed.has(r.id);
         const id = escapeHtml(r.id);
         const savedV = recipeSavedVolume(r);
@@ -4078,6 +4196,7 @@
               + `<span class="explain" id="recipe_volhint_${id}">${recipeVolumeHint(V, savedV)}</span></label>` : '')
           + `<button class="col-btn" onclick="loadRecipe('${id}')">Wczytaj</button>`
           + `<button class="col-btn" onclick="downloadRecipePdf('${id}')">PDF</button>`
+          + `<button class="col-btn${overwriting ? ' danger' : ''}" onclick="overwriteRecipe('${id}')" title="Zapisz w tej recepturze bieżący stan strony: listę produktów, dane gleby, etap">${overwriting ? 'Na pewno nadpisać?' : 'Nadpisz'}</button>`
           + `<button class="col-btn${confirming ? ' danger' : ''}" onclick="deleteRecipe('${id}')">${confirming ? 'Na pewno usunąć?' : 'Usuń'}</button></div></div>`
           + `</td></tr>`
           + (rep ? `<tr class="recipe-pots-row"><td colspan="4">${potsControlsHtml(r)}</td></tr>` : '')
@@ -4675,6 +4794,7 @@
       window._recipes = readLocalRecipes();
       setRecipeStorageNote();
       renderRecipes();
+      renderCurrentRecipeBar();
       maybeAutoLoadRecipe();
     }
 
@@ -4685,9 +4805,10 @@
       db.collection(RECIPE_COLLECTION).onSnapshot(snap => {
         const next = snap.docs.map(d => sanitizeRecipe(d.id, d.data())).filter(Boolean);
         // Własny zapis wraca z magazynu bez zmian — wtedy nie przerysowujemy listy (zostaje kursor i zaznaczenie w polu).
-        const same = JSON.stringify(next) === JSON.stringify(window._recipes);
+        const same = stableStringify(next) === stableStringify(window._recipes);
         window._recipes = next;
         if (!same) renderRecipes();
+        renderCurrentRecipeBar();
         // Pusta odpowiedź z pamięci podręcznej to jeszcze nie odpowiedź serwera — czekamy na właściwą.
         if (!(snap.metadata.fromCache && snap.empty)) maybeAutoLoadRecipe();
       }, () => {

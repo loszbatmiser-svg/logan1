@@ -222,6 +222,10 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   (orientacyjna rozpuszczalność w 20 °C, celowo zaniżona), podawane w jednym roztworze (woda na doniczkę ×
   liczba doniczek) i trzymane do połowy rozpuszczalności (`SOLUTION_SAFETY`). Reszta partii zostaje bez
   siarczanów; gdy doniczek jest więcej niż partii — ostrzeżenie. Ostrzeżenie też przy > 3 g soli/l
+- `overwriteRecipe()` / `recipeChanges()` / `renderCurrentRecipeBar()` — nadpisywanie receptury bieżącym stanem
+  strony (lista produktów, dane gleby, etap, targety, kompost; nazwa, doniczki i skład zostają), w dwóch
+  kliknięciach. Pasek „Bieżąca receptura” porównuje stronę z ostatnio wczytaną/zapisaną recepturą
+  (`stableStringify()` — magazyn potrafi zwrócić klucze w innej kolejności) i pokazuje, co doszło lub ubyło
 - `mixEditorHtml()` / `setMixPct()` — skład podłoża (krok 0, pole `mix` receptury: nazwa + procent): litry
   każdego składnika z objętości receptury (przy doniczkach także na doniczkę), kontrola sumy 100%; nazwy
   z podpowiedzi `MIX_COMPONENTS` albo własne. Ustawienia doniczek i skład przechodzą przy zapisie pod tą samą nazwą
