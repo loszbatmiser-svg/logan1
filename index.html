@@ -8,12 +8,12 @@
     .container { max-width: 980px; margin: 0 auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
     h1 { text-align: center; color: #2d3748; margin: 0 0 8px 0; font-size: 1.7rem; }
     .subtitle { text-align: center; color: #718096; font-size: 0.95rem; margin-bottom: 24px; }
-    .tabs { display: flex; gap: 6px; margin-bottom: 24px; border-bottom: 2px solid #e2e8f0; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; border-bottom: 2px solid #e2e8f0; }
     .tab-btn { padding: 11px 22px; border: none; background: #edf2f7; cursor: pointer; border-radius: 8px 8px 0 0; font-weight: 600; font-size: 0.95rem; color: #4a5568; }
     .tab-btn.active { background: #2b6cb0; color: #fff; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-    .section { background: #f7fafc; padding: 18px; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 20px; }
+    .section { background: #f7fafc; padding: 18px; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 20px; overflow-x: auto; }
     .section h2 { margin: 0 0 14px 0; font-size: 1.15rem; color: #2d3748; }
     .section h3 { margin: 0 0 12px 0; font-size: 1.05rem; color: #2b6cb0; }
     .input-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin-bottom: 12px; }
@@ -51,7 +51,14 @@
     .status-item.el-micro { background: #f0fff4; border-left: 4px solid #38a169; }
     .status-ico { font-weight: 700; flex-shrink: 0; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .grid-2 > * { min-width: 0; }
     @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+    /* Telefon: zakładki w dwóch rzędach, węższe marginesy; szerokie tabele przewijają się w swojej sekcji */
+    @media (max-width: 600px) {
+      .container { padding: 18px 14px; }
+      .tab-btn { padding: 9px 14px; font-size: 0.9rem; }
+      .section { padding: 14px; }
+    }
     .note { font-size: 0.78rem; color: #718096; margin-top: 6px; line-height: 1.4; }
     .explain { font-size: 0.75rem; color: #a0aec0; font-style: italic; margin-top: 3px; }
     .lime-box { background: #f0fff4; border: 1px solid #9ae6b4; padding: 16px; border-radius: 8px; margin-top: 14px; }
@@ -355,14 +362,14 @@
       <div class="section">
         <h2>2. Wapnowanie – dawka</h2>
         <div class="quick-btns">
-          <button class="quick-btn" onclick="setSat(68)">68%</button>
-          <button class="quick-btn active" onclick="setSat(72)">72% – zalecane</button>
-          <button class="quick-btn" onclick="setSat(75)">75%</button>
+          <button class="quick-btn" data-sat="68" onclick="setSat(68)">68%</button>
+          <button class="quick-btn active" data-sat="72" onclick="setSat(72)">72% – zalecane</button>
+          <button class="quick-btn" data-sat="75" onclick="setSat(75)">75%</button>
         </div>
         <div class="input-group">
           <div>
             <label>Docelowe nasycenie Ca (%)</label>
-            <input type="number" id="lime_target_sat" value="72" step="1" min="60" max="85" oninput="calculateLime()">
+            <input type="number" id="lime_target_sat" value="72" step="1" min="60" max="85" oninput="syncSatButtons(); calculateLime()">
           </div>
           <div>
             <label>Objętość gleby (litry)</label>
@@ -2218,10 +2225,16 @@
     }
     window.switchTab = switchTab;
 
+    // Podświetla przycisk 68/72/75% zgodny z polem — tylko w zakładce CAC, przyciski etapów w Nawożeniu zostają.
+    function syncSatButtons() {
+      const v = parseFloat(document.getElementById('lime_target_sat').value);
+      document.querySelectorAll('#tab-cac .quick-btn[data-sat]').forEach(b => b.classList.toggle('active', +b.dataset.sat === v));
+    }
+    window.syncSatButtons = syncSatButtons;
+
     function setSat(val) {
       document.getElementById('lime_target_sat').value = val;
-      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-      if (event && event.target) event.target.classList.add('active');
+      syncSatButtons();
       calculateLime();
     }
     window.setSat = setSat;
@@ -3343,16 +3356,70 @@
     }
     window.calculateLime = calculateLime;
 
-    window.onload = function() {
+    // Stan przenoszony przy aktualizacji w locie: przeglądarka artefaktu podmienia otwartą stronę na nowszą
+    // wersję bez przeładowania. Poza wartościami pól zbieramy to, co żyje tylko w pamięci strony (receptura
+    // dawek, lista produktów, etap, wczytany kompost) — nowa wersja odtwarza to przed pierwszym przeliczeniem.
+    function collectPageState() {
+      const form = {};
+      document.querySelectorAll('input[id], select[id]').forEach(el => {
+        if (el.type !== 'file' && !el.disabled) form[el.id] = el.value;
+      });
+      return {
+        form,
+        doseRecipe: window._doseRecipe,
+        cart: window._amendmentCart,
+        stage: window._targetStage,
+        targetOverrides: window._targetOverrides,
+        compost: window._compost
+      };
+    }
+
+    function restorePageState(s) {
+      if (!s || typeof s !== 'object') return;
+      if (s.form) Object.keys(s.form).forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.type !== 'file' && !el.disabled) el.value = s.form[id];
+      });
+      if (s.doseRecipe && s.doseRecipe.V > 0 && s.doseRecipe.doses) window._doseRecipe = s.doseRecipe;
+      if (Array.isArray(s.cart)) window._amendmentCart = s.cart;
+      if (s.targetOverrides) window._targetOverrides = s.targetOverrides;
+      if (s.compost && s.compost.m3 && s.compost.sp) window._compost = s.compost;
+      if (s.stage && MEHLICH3_STAGES[s.stage]) window._targetStage = s.stage;
+    }
+
+    // Start strony. Skrypt stoi na końcu <body>, więc wszystkie pola już istnieją — nie czekamy na
+    // window.onload, które nie przychodzi, gdy strona jest podmieniana w już załadowanym oknie.
+    let pageStarted = false;
+    function startPage(data) {
+      if (pageStarted) return;
+      pageStarted = true;
       populateProductSelect();
       renderProductsTable();
-      snapshotDoseRecipe();
+      try { restorePageState(data && data.page); } catch (e) { /* stan poprzedniej wersji nieczytelny — zostają wartości domyślne */ }
+      if (!window._doseRecipe) snapshotDoseRecipe();
+      syncSatButtons();
       calculatePPM();
       calculateCAC();
       loadSavedPhasesFromStorage();
       renderSavedPhases();
       renderCompostAll();
-    };
+      if (window._targetStage !== 'flo') setTargetStage(window._targetStage);
+    }
+
+    (function bootPage() {
+      const hot = window.claude && window.claude.hot;
+      try {
+        if (hot && typeof hot.snapshot === 'function') hot.snapshot(() => ({ page: collectPageState() }));
+      } catch (e) { /* bez przenoszenia stanu — strona startuje normalnie */ }
+      try {
+        if (hot && typeof hot.ready === 'function') hot.ready(startPage);
+        else startPage((hot && hot.data) || {});
+      } catch (e) {
+        startPage({});
+      }
+      // Siatka bezpieczeństwa: gdyby hak aktualizacji nie wywołał startu, strona i tak rusza.
+      setTimeout(() => startPage({}), 2000);
+    })();
   </script>
 </body>
 </html>

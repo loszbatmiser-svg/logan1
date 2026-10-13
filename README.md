@@ -206,6 +206,14 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 - `renderCompostExtract()` — profil PPM wyciągu wodnego (jak zakładka PPM, ale dla kompostu)
 - `renderCompostCalibration()` — kalibracja przelicznika wyciągu na podstawie zmierzonego TDS
 
+**Start strony** (koniec skryptu)
+- `bootPage()` → `startPage()` — inicjalizacja uruchamiana od razu, nie przez `window.onload`:
+  gdy przeglądarka artefaktu podmienia otwartą stronę na nowszą wersję, zdarzenie `load` już
+  nie przychodzi i strona zostałaby bez inicjalizacji
+- `collectPageState()` / `restorePageState()` — stan przekazywany przez hak `window.claude.hot`
+  przy aktualizacji w locie (pola, receptura dawek, lista produktów, etap, wczytany kompost);
+  poza przeglądarką artefaktu haka nie ma i strona startuje z wartości domyślnych
+
 ### Konwencje kodu
 
 - **Polskie komentarze i etykiety UI** — to narzędzie dla polskojęzycznego użytkownika, kod
