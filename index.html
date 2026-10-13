@@ -103,6 +103,13 @@
     .recipe-pot-inputs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 0.84rem; color: #4a5568; }
     .recipe-pot-inputs input { padding: 4px 6px; }
     .recipe-table tr.recipe-pots td { background: #faf5ff; }
+    .recipe-table tr.recipe-mix td { background: #fffff0; }
+    .recipe-table tr.recipe-mix-first td { border-top: 2px solid #d69e2e; }
+    .mix-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .mix-row input[type=text] { width: 210px; padding: 5px 7px; }
+    .mix-row input[type=number] { width: 72px; padding: 5px 7px; }
+    .mix-row .col-btn { margin: 0; padding: 4px 10px; }
+    .mix-liters { min-width: 190px; font-weight: 600; color: #4a5568; }
     .recipe-table tr.recipe-pots-first td { border-top: 2px solid #9f7aea; }
   </style>
 </head>
@@ -679,6 +686,7 @@
         <button class="col-btn selected" id="recipe_save_btn" onclick="saveRecipe()">Zapisz recepturę</button>
         <div id="recipe_status" class="explain" style="margin-top:6px;"></div>
         <div id="recipe_list" style="margin-top:16px;"></div>
+        <datalist id="mix_components"></datalist>
         <p id="recipe_storage_note" class="note"></p>
         </div>
       </div>
@@ -3539,6 +3547,7 @@
         summary: Array.isArray(r.summary) ? r.summary : [],
         report: r.report && typeof r.report === 'object' && Array.isArray(r.report.groups) ? r.report : null,
         pots: sanitizePots(r.pots),
+        mix: sanitizeMix(r.mix),
         state: Object.assign({}, st, { cart })
       };
     }
@@ -3553,6 +3562,14 @@
         count: count >= 1 ? count : POTS_DEFAULT.count,
         waterMl: waterMl > 0 ? waterMl : POTS_DEFAULT.waterMl
       };
+    }
+
+    function sanitizeMix(m) {
+      if (!Array.isArray(m)) return [];
+      return m.slice(0, 20).filter(c => c && typeof c === 'object').map(c => ({
+        name: typeof c.name === 'string' ? c.name.trim().slice(0, 60) : '',
+        pct: Math.min(100, Math.max(0, Number(c.pct) || 0))
+      }));
     }
 
     function readLocalRecipes() {
@@ -3629,7 +3646,10 @@
         name, savedAt: now, usedAt: now,
         state: collectRecipeState(),
         summary: summarizeCart(),
-        report: buildRecipeReport()
+        report: buildRecipeReport(),
+        // Ustawienia doniczek i skład podłoża należą do receptury, nie do stanu strony — przy nadpisaniu zostają.
+        pots: existing ? existing.pots : null,
+        mix: existing ? existing.mix : []
       };
       const btn = document.getElementById('recipe_save_btn');
       btn.disabled = true;
@@ -3822,6 +3842,96 @@
       return html;
     }
 
+    // ===== SKŁAD PODŁOŻA (mieszanka) =====
+    // Kolejność = kolejność podpowiadania przy „+ Dodaj składnik”: najpierw najczęstsze składniki podłoży.
+    const MIX_COMPONENTS = ['Torf', 'Kompost', 'Pumeks', 'Biochar', 'Perlit', 'Włókno kokosowe', 'Wermikompost (biohumus)',
+      'Wermikulit', 'Ziemia ogrodowa', 'Keramzyt', 'Zeolit', 'Piasek', 'Glina / bentonit', 'Mączka bazaltowa',
+      'Kora kompostowana', 'Łuska ryżowa'];
+
+    const mixSum = mix => mix.reduce((a, c) => a + (Number(c.pct) || 0), 0);
+    const fmtPct = x => fmtNum(x, Math.abs(x % 1) > 1e-9 ? 1 : 0);
+
+    function mixLitersText(r, pct) {
+      const total = (recipeVolume(r) * pct) / 100;
+      const pots = r.pots && r.pots.enabled ? r.pots : null;
+      return `= ${fmtNum(total, total < 10 ? 2 : 1)} l` + (pots ? ` · ${fmtNum(total / pots.count, 2)} l / doniczkę` : '');
+    }
+
+    function mixSumHtml(mix) {
+      const sum = mixSum(mix);
+      if (Math.abs(sum - 100) < 0.05) return '<span style="color:#276749; font-weight:600;">suma 100% ✓</span>';
+      return `<span style="color:#c53030; font-weight:600;">suma ${fmtPct(sum)}% — `
+        + (sum < 100 ? `brakuje ${fmtPct(100 - sum)}%` : `o ${fmtPct(sum - 100)}% za dużo`) + '</span>';
+    }
+
+    function mixEditorHtml(r) {
+      const id = escapeHtml(r.id);
+      const mix = r.mix || [];
+      const V = recipeVolume(r);
+      let html = `<tr class="recipe-mix recipe-mix-first"><td colspan="4"><strong>Krok 0 — podłoże (mieszanka):</strong> `
+        + (mix.length
+          ? `<span id="mix_sum_${id}">${mixSumHtml(mix)}</span> <span class="explain">· ${fmtNum(V, V % 1 ? 1 : 0)} l gleby</span>`
+          : '<span class="explain">skład nie podany — dodaj składniki i ich procenty, a policzę litry każdego z nich</span>')
+        + '</td></tr>';
+      mix.forEach((c, i) => {
+        html += `<tr class="recipe-mix"><td colspan="4"><div class="mix-row">`
+          + `<input type="text" list="mix_components" id="mix_name_${id}_${i}" value="${escapeHtml(c.name)}" placeholder="składnik"`
+          + ` onchange="setMixName('${id}', ${i}, this.value)">`
+          + `<input type="number" id="mix_pct_${id}_${i}" value="${c.pct}" min="0" max="100" step="1"`
+          + ` oninput="setMixPct('${id}', ${i}, this.value)" onchange="persistRecipe('${id}')"><span>%</span>`
+          + `<span class="mix-liters" id="mix_l_${id}_${i}">${mixLitersText(r, c.pct)}</span>`
+          + `<button class="col-btn" onclick="removeMixComponent('${id}', ${i})" title="Usuń składnik">✕</button></div></td></tr>`;
+      });
+      html += `<tr class="recipe-mix"><td colspan="4"><button class="col-btn" style="margin:0;" onclick="addMixComponent('${id}')">+ Dodaj składnik</button>`
+        + (mix.length ? ' <span class="explain">Litry to objętości składników przed wymieszaniem — mieszanka zwykle trochę osiada, więc zrób kilka procent zapasu.</span>' : '')
+        + '</td></tr>';
+      return html;
+    }
+
+    // Wpisywanie procentów odświeża w miejscu tylko litry i sumę; zapis — po zmianie pola.
+    function setMixPct(id, i, raw) {
+      const r = window._recipes.find(x => x.id === id);
+      const v = parseFloat(raw);
+      if (!r || !r.mix || !r.mix[i] || !(v >= 0)) return;
+      r.mix[i].pct = Math.min(100, v);
+      const l = document.getElementById(`mix_l_${id}_${i}`);
+      if (l) l.textContent = mixLitersText(r, r.mix[i].pct);
+      const sum = document.getElementById('mix_sum_' + id);
+      if (sum) sum.innerHTML = mixSumHtml(r.mix);
+    }
+    window.setMixPct = setMixPct;
+
+    function setMixName(id, i, value) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r || !r.mix || !r.mix[i]) return;
+      r.mix[i].name = String(value).trim().slice(0, 60);
+      persistRecipe(id);
+    }
+    window.setMixName = setMixName;
+
+    function addMixComponent(id) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r) return;
+      r.mix = r.mix || [];
+      const used = new Set(r.mix.map(c => c.name));
+      const name = MIX_COMPONENTS.find(n => !used.has(n)) || '';
+      r.mix.push({ name, pct: Math.max(0, Math.round((100 - mixSum(r.mix)) * 10) / 10) });  // nowy składnik dopełnia do 100%
+      renderRecipes();
+      const input = document.getElementById(`mix_pct_${id}_${r.mix.length - 1}`);
+      if (input) { input.focus(); input.select(); }
+      persistRecipe(id);
+    }
+    window.addMixComponent = addMixComponent;
+
+    function removeMixComponent(id, i) {
+      const r = window._recipes.find(x => x.id === id);
+      if (!r || !r.mix) return;
+      r.mix.splice(i, 1);
+      renderRecipes();
+      persistRecipe(id);
+    }
+    window.removeMixComponent = removeMixComponent;
+
     function potsControlsHtml(r) {
       const id = escapeHtml(r.id);
       const pots = r.pots && r.pots.enabled ? r.pots : null;
@@ -3880,11 +3990,12 @@
       const lime = !L ? '' : !L.needed ? ' · wapnowanie niepotrzebne'
         : ` · wapnowanie: ${fmtNum(L.perL.caco3 * L.volumeL, 1)} g CaCO₃ albo ${fmtNum(L.perL.woll * L.volumeL, 1)} g wolastenitu`;
       const pots = r && r.pots && r.pots.enabled ? ` · ${r.pots.count} doniczek × ${fmtNum(r.pots.potL, r.pots.potL % 1 ? 1 : 0)} l` : '';
-      return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}${pots}`;
+      const mix = r && r.mix && r.mix.length ? ` · podłoże: ${r.mix.map(c => `${c.name || '?'} ${fmtPct(c.pct)}%`).join(', ')}` : '';
+      return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}${pots}${mix}`;
     }
 
     function recipeBodyHtml(r, rep) {
-      return recipeStepsHtml(rep) + (r.pots && r.pots.enabled ? potPlanHtml(buildPotPlan(rep, r.pots)) : '');
+      return mixEditorHtml(r) + recipeStepsHtml(rep) + (r.pots && r.pots.enabled ? potPlanHtml(buildPotPlan(rep, r.pots)) : '');
     }
 
     function recipeStepsHtml(rep) {
@@ -4006,15 +4117,17 @@
     }
     window.setRecipePots = setRecipePots;
 
-    async function saveRecipePots(id) {
+    async function persistRecipe(id) {
       const r = window._recipes.find(x => x.id === id);
       if (!r) return;
       try {
         await storeRecipe(r);
       } catch (e) {
-        setRecipeStatus('Nie udało się zapisać ustawień doniczek — ' + recipeErrorText(e), true);
+        setRecipeStatus('Nie udało się zapisać zmian receptury — ' + recipeErrorText(e), true);
       }
     }
+    window.persistRecipe = persistRecipe;
+    const saveRecipePots = persistRecipe;
     window.saveRecipePots = saveRecipePots;
 
     function toggleRecipePots(id, on) {
@@ -4239,6 +4352,26 @@
       const s = r.soil || {};
       paragraph(`Gleba: ${plNum(s.volumeL, 1)} l, gęstość nasypowa ${plNum(s.bd, 2)} g/cm³, masa ${plNum(s.massKg, 2)} kg.   `
         + `Test glebowy (Value Found): pH ${plNum(s.ph, 1)}, Ca ${plNum(s.ca, 0)}, Mg ${plNum(s.mg, 0)}, K ${plNum(s.k, 0)}, Na ${plNum(s.na, 0)} ppm.`, 9, C.muted);
+
+      // Krok 0 — podłoże
+      const mix = (recipe.mix || []).filter(c => c.name || c.pct);
+      if (mix.length) {
+        const V = Number(s.volumeL);
+        const pots = recipe.pots && recipe.pots.enabled ? recipe.pots : null;
+        heading(`Krok 0 — Podłoże (mieszanka) na ${plNum(V, 1)} l`);
+        const cols = [{ label: 'Składnik', w: CW * (pots ? 0.4 : 0.5) }, { label: 'Udział', w: CW * 0.16, align: 'right' },
+                      { label: 'Razem', w: CW * (pots ? 0.22 : 0.34), align: 'right' }];
+        if (pots) cols.push({ label: 'Na doniczkę', w: CW * 0.22, align: 'right' });
+        table(cols, mix.map(c => {
+          const l = (V * c.pct) / 100;
+          const cells = [c.name || '—', `${plNum(c.pct, c.pct % 1 ? 1 : 0)}%`, `${plNum(l, l < 10 ? 2 : 1)} l`];
+          if (pots) cells.push(`${plNum(l / pots.count, 2)} l`);
+          return { cells };
+        }));
+        const sum = mixSum(mix);
+        if (Math.abs(sum - 100) >= 0.05) paragraph(`Uwaga: udziały sumują się do ${plNum(sum, sum % 1 ? 1 : 0)}%, nie do 100%.`, 9.5, C.warn, 600);
+        paragraph('Litry to objętości składników przed wymieszaniem — mieszanka zwykle trochę osiada, więc zrób kilka procent zapasu.', 8.5, C.muted);
+      }
 
       // Krok 1 — wapnowanie
       heading('Krok 1 — Wapnowanie (zakładka CAC / Gleba)');
@@ -4529,6 +4662,7 @@
     }
 
     function initRecipes() {
+      document.getElementById('mix_components').innerHTML = MIX_COMPONENTS.map(n => `<option value="${escapeHtml(n)}">`).join('');
       // Każde własne działanie w zakładkach z danymi gleby blokuje automatyczne wczytanie receptury.
       ['tab-cac', 'tab-nawoz', 'tab-kompost'].forEach(tabId => {
         const tab = document.getElementById(tabId);

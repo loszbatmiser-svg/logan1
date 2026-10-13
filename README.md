@@ -220,6 +220,9 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   liczba doniczek; produkty z `sol` w `AMENDMENTS` (orientacyjna rozpuszczalność w 20 °C, celowo zaniżona) idą
   do jednego roztworu (woda na doniczkę × liczba doniczek) i trzymamy je do połowy rozpuszczalności
   (`SOLUTION_SAFETY`), reszta i wapnowanie — na sucho, porcja na doniczkę; ostrzeżenie przy > 3 g soli/l
+- `mixEditorHtml()` / `setMixPct()` — skład podłoża (krok 0, pole `mix` receptury: nazwa + procent): litry
+  każdego składnika z objętości receptury (przy doniczkach także na doniczkę), kontrola sumy 100%; nazwy
+  z podpowiedzi `MIX_COMPONENTS` albo własne. Ustawienia doniczek i skład przechodzą przy zapisie pod tą samą nazwą
 - `paintRecipePdfPages()` / `assemblePdf()` / `offerFile()` — PDF do wydruku bez bibliotek: strony A4 rysowane
   na płótnie (czcionka systemowa, więc polskie znaki bez osadzania fontów), składane w PDF 1.4 z obrazami
   Flate (`CompressionStream`, awaryjnie JPEG); zapis przez capability `downloads` w podglądzie artefaktu,
