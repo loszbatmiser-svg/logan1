@@ -202,6 +202,11 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 - `getPostTargetTotals()`, `getRatioAddRequirements()`, `getBindingRatioNeed()`,
   `computeAutoDoseGroups()` — silnik dawkowania dwuetapowego (patrz „Filozofia”, punkty 5–6)
 - `AMENDMENTS` — baza produktów (nawozy mineralne/organiczne) z zawartością % pierwiastków
+- `saveRecipe()` / `loadRecipe()` / `deleteRecipe()` — receptury (punkt 6): zapisują cały stan, z którego
+  liczy się lista produktów (`RECIPE_FIELDS` z CAC i punktu 1, etap, własne targety, kompost, lista), bo dawki
+  „auto” i „cel ppm” przeliczają się z tego stanu; ostatnio używana wczytuje się sama przy otwarciu, o ile
+  użytkownik niczego jeszcze nie zaczął. Magazyn: w podglądzie artefaktu capability `db` (kolekcja
+  `receptury`, te same na każdym urządzeniu), z dysku — `localStorage` (`nawoz_receptury`)
 
 **Zakładka Kompost**
 - `getCompostContent()` — zawartość pierwiastka w kompoście, `{min, max}` z dwóch raportów

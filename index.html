@@ -637,6 +637,30 @@
           </div>
         </div>
       </div>
+
+      <div class="section">
+        <h2 class="collapsible-heading" onclick="toggleCollapse('am_cbody_6', this)"><span class="caret">▾</span> 6. Receptury — zapisz i wczytaj</h2>
+        <div class="collapsible-body" id="am_cbody_6">
+        <p class="note">
+          Receptura zapamiętuje wszystko, z czego liczy się lista produktów: listę z punktu 5, etap wzrostu,
+          własne targety, wartości startowe gleby z punktu 1, dane z zakładki CAC/Gleba (pH, Ca, Mg, K, Na,
+          wapnowanie, objętość i gęstość gleby) oraz wczytany kompost. Po wczytaniu dawki wychodzą dokładnie
+          takie jak przy zapisie — bez ponownego importu PDF. Ostatnio zapisana lub wczytana receptura
+          wczytuje się sama przy otwarciu strony.
+        </p>
+        <div class="input-group">
+          <div>
+            <label>Nazwa receptury</label>
+            <input type="text" id="recipe_name_input" placeholder="np. Grządka 1 — kwitnienie"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();saveRecipe();}">
+          </div>
+        </div>
+        <button class="col-btn selected" id="recipe_save_btn" onclick="saveRecipe()">Zapisz recepturę</button>
+        <div id="recipe_status" class="explain" style="margin-top:6px;"></div>
+        <div id="recipe_list" style="margin-top:16px;"></div>
+        <p id="recipe_storage_note" class="note"></p>
+        </div>
+      </div>
     </div>
 
     <!-- TAB KOMPOST -->
@@ -3368,6 +3392,322 @@
     }
     window.calculateLime = calculateLime;
 
+    // ===== RECEPTURY NAWOŻENIA (zakładka Nawożenie gleby, punkt 6) =====
+    // Receptura to cały stan, z którego liczy się lista produktów — nie same gramy. Dawki „auto” i „cel ppm”
+    // przeliczają się z masy gleby, wapnowania, etapu i wcześniejszych pozycji listy, więc zapis samej listy
+    // dałby po wczytaniu na innych danych gleby inne liczby.
+    const RECIPE_FIELDS = ['cac_ph', 'cac_ca', 'cac_mg', 'cac_k', 'cac_na',
+      'lime_target_sat', 'lime_volume_l', 'lime_bd', 'lime_caco3_cce', 'lime_woll_ca', 'lime_woll_cce', 'komp_bd',
+      'am_base_n', 'am_base_p', 'am_base_s', 'am_base_b', 'am_base_fe', 'am_base_mn', 'am_base_cu',
+      'am_base_zn', 'am_base_al', 'am_base_co', 'am_base_mo', 'am_base_se', 'am_base_si'];
+    const RECIPE_LS_KEY = 'nawoz_receptury';
+    const RECIPE_COLLECTION = 'receptury';
+    const CART_MODES = ['grams', 'ppm', 'auto'];
+
+    window._recipes = [];
+    // Gdzie leżą receptury: 'db' — magazyn artefaktu na koncie Claude (te same na każdym urządzeniu),
+    // 'local' — ta przeglądarka (plik otwarty z dysku), 'connecting' — czekamy na odpowiedź podglądu.
+    let recipeStoreMode = 'local';
+    let recipeDb = null;
+    let recipeAutoLoadDone = false;
+    let recipeUserTouched = false;
+    let recipePendingDelete = null;
+
+    function cloneJson(x) { return x == null ? x : JSON.parse(JSON.stringify(x)); }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function setRecipeStatus(msg, isErr) {
+      const el = document.getElementById('recipe_status');
+      el.textContent = msg;
+      el.style.color = isErr ? '#c53030' : '';
+    }
+
+    function collectRecipeState() {
+      const fields = {};
+      RECIPE_FIELDS.forEach(id => { fields[id] = document.getElementById(id).value; });
+      return {
+        fields,
+        stage: window._targetStage,
+        targetOverrides: cloneJson(window._targetOverrides),
+        cart: cloneJson(window._amendmentCart),
+        compost: cloneJson(window._compost)
+      };
+    }
+
+    // Opis do listy: produkty z dawkami policzonymi w chwili zapisu.
+    function summarizeCart() {
+      return window._amendmentCart.map((item, idx) => {
+        const product = getAmendment(item.productId);
+        const grams = getCartItemGrams(item, idx);
+        return {
+          name: product ? product.name : item.productId,
+          grams: Math.round(grams * 100) / 100,
+          ml: product && product.volumeBased ? Math.round(compostMlFromGrams(grams)) : null
+        };
+      });
+    }
+
+    // Dane z magazynu są niezaufane (zapisy z innych urządzeń, starsze wersje strony) — przepuszczamy
+    // tylko recepturę o znanym kształcie, a w liście produktów tylko znane produkty i tryby dawki.
+    function sanitizeRecipe(id, r) {
+      if (!r || typeof r !== 'object' || typeof r.name !== 'string' || !r.name.trim()) return null;
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(id || r.id))) return null;  // id trafia do onclick w liście
+      const st = r.state;
+      if (!st || typeof st !== 'object' || !st.fields || typeof st.fields !== 'object' || !Array.isArray(st.cart)) return null;
+      const cart = st.cart.filter(it => it && typeof it === 'object' && CART_MODES.includes(it.mode) && getAmendment(it.productId));
+      return {
+        id: String(id || r.id),
+        name: r.name.trim().slice(0, 120),
+        savedAt: typeof r.savedAt === 'string' ? r.savedAt : '',
+        usedAt: typeof r.usedAt === 'string' ? r.usedAt : '',
+        summary: Array.isArray(r.summary) ? r.summary : [],
+        state: Object.assign({}, st, { cart })
+      };
+    }
+
+    function readLocalRecipes() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(RECIPE_LS_KEY) || '[]');
+        return Array.isArray(raw) ? raw.map(r => sanitizeRecipe(r && r.id, r)).filter(Boolean) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function writeLocalRecipes(list) {
+      try {
+        localStorage.setItem(RECIPE_LS_KEY, JSON.stringify(list));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function newRecipeId() {
+      return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    async function storeRecipe(recipe) {
+      if (recipeStoreMode === 'db') {
+        await recipeDb.collection(RECIPE_COLLECTION).doc(recipe.id).set(recipe);  // listę odświeży subskrypcja
+        return;
+      }
+      const list = window._recipes.filter(r => r.id !== recipe.id).concat([recipe]);
+      if (!writeLocalRecipes(list)) throw { code: 'local_storage' };
+      window._recipes = list;
+      renderRecipes();
+    }
+
+    async function removeRecipe(id) {
+      if (recipeStoreMode === 'db') {
+        await recipeDb.collection(RECIPE_COLLECTION).doc(id).delete();
+        return;
+      }
+      window._recipes = window._recipes.filter(r => r.id !== id);
+      writeLocalRecipes(window._recipes);
+      renderRecipes();
+    }
+
+    function recipeErrorText(e) {
+      const code = e && e.code;
+      if (code === 'quota_exceeded') return 'Magazyn receptur jest pełny — usuń kilka starych receptur i spróbuj ponownie.';
+      if (code === 'local_storage') return 'Ta przeglądarka nie pozwala zapisywać danych (np. tryb prywatny) — receptura nie została zapisana.';
+      if (code === 'invalid_argument') return 'Nie masz uprawnień do zapisu receptur w tym artefakcie.';
+      return 'Nie udało się zapisać — sprawdź połączenie i spróbuj ponownie.';
+    }
+
+    async function saveRecipe() {
+      const nameInput = document.getElementById('recipe_name_input');
+      const name = nameInput.value.trim();
+      if (recipeStoreMode === 'connecting') {
+        setRecipeStatus('Chwila — łączę się z magazynem receptur. Spróbuj za moment.', true);
+        return;
+      }
+      if (!name) {
+        setRecipeStatus('Wpisz najpierw nazwę receptury.', true);
+        nameInput.focus();
+        return;
+      }
+      if (!window._amendmentCart.length) {
+        setRecipeStatus('Lista produktów w punkcie 5 jest pusta — dodaj produkty, zanim zapiszesz recepturę.', true);
+        return;
+      }
+      const existing = window._recipes.find(r => r.name.toLowerCase() === name.toLowerCase());
+      const now = new Date().toISOString();
+      const recipe = {
+        id: existing ? existing.id : newRecipeId(),
+        name, savedAt: now, usedAt: now,
+        state: collectRecipeState(),
+        summary: summarizeCart()
+      };
+      const btn = document.getElementById('recipe_save_btn');
+      btn.disabled = true;
+      try {
+        await storeRecipe(recipe);
+        nameInput.value = '';
+        setRecipeStatus(existing ? `Zaktualizowano recepturę „${name}”.` : `Zapisano recepturę „${name}”.`);
+      } catch (e) {
+        setRecipeStatus(recipeErrorText(e), true);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    window.saveRecipe = saveRecipe;
+
+    function applyRecipe(recipe) {
+      const st = recipe.state;
+      RECIPE_FIELDS.forEach(id => {
+        if (st.fields[id] != null) document.getElementById(id).value = st.fields[id];
+      });
+      if (st.compost && st.compost.m3 && st.compost.sp) window._compost = cloneJson(st.compost);
+      const ov = st.targetOverrides && typeof st.targetOverrides === 'object' ? cloneJson(st.targetOverrides) : {};
+      window._targetOverrides = { soil: ov.soil || {}, veg: ov.veg || {}, flo: ov.flo || {} };
+      window._amendmentCart = cloneJson(st.cart);
+      window._targetStage = MEHLICH3_STAGES[st.stage] ? st.stage : 'flo';
+      syncSatButtons();
+      calculateCAC();           // TCEC i wapnowanie z odtworzonych danych gleby → punkt startowy w Nawożeniu
+      renderCompostAll();
+      setTargetStage(window._targetStage);  // przyciski etapu, cele, lista produktów i podsumowanie
+    }
+
+    function formatRecipeDate(iso) {
+      const d = new Date(iso);
+      return isNaN(d) ? '' : d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    async function loadRecipe(id, auto) {
+      const recipe = window._recipes.find(r => r.id === id);
+      if (!recipe) return;
+      recipeAutoLoadDone = true;
+      applyRecipe(recipe);
+      const when = formatRecipeDate(recipe.savedAt);
+      setRecipeStatus((auto ? 'Wczytano automatycznie ostatnią recepturę' : 'Wczytano recepturę')
+        + ` „${recipe.name}”${when ? ` (zapisana ${when})` : ''} — dane gleby, etap i lista produktów odtworzone.`);
+      if (auto) return;
+      // Zapamiętujemy, która receptura była ostatnio używana — ta wczyta się sama przy następnym otwarciu.
+      const used = Object.assign({}, recipe, { usedAt: new Date().toISOString() });
+      try { await storeRecipe(used); } catch (e) { /* receptura wczytana; nie udało się tylko oznaczyć jej jako ostatniej */ }
+    }
+    window.loadRecipe = loadRecipe;
+
+    // Usuwanie w dwóch kliknięciach — podgląd artefaktu nie pokazuje okienek confirm().
+    async function deleteRecipe(id) {
+      if (recipePendingDelete !== id) {
+        recipePendingDelete = id;
+        renderRecipes();
+        setTimeout(() => { if (recipePendingDelete === id) { recipePendingDelete = null; renderRecipes(); } }, 5000);
+        return;
+      }
+      recipePendingDelete = null;
+      const recipe = window._recipes.find(r => r.id === id);
+      try {
+        await removeRecipe(id);
+        setRecipeStatus(`Usunięto recepturę „${recipe ? recipe.name : ''}”.`);
+      } catch (e) {
+        setRecipeStatus('Nie udało się usunąć receptury — spróbuj ponownie.', true);
+      }
+    }
+    window.deleteRecipe = deleteRecipe;
+
+    function lastUsedRecipe() {
+      return window._recipes.reduce((best, r) => {
+        const t = r.usedAt || r.savedAt;
+        return !best || t > (best.usedAt || best.savedAt) ? r : best;
+      }, null);
+    }
+
+    function renderRecipes() {
+      const box = document.getElementById('recipe_list');
+      if (!box) return;
+      if (!window._recipes.length) {
+        box.innerHTML = '<p class="note">Brak zapisanych receptur — ułóż listę produktów w punkcie 5, wpisz nazwę i kliknij „Zapisz recepturę”.</p>';
+        return;
+      }
+      const last = lastUsedRecipe();
+      const sorted = [...window._recipes].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+      let html = '<table><thead><tr><th>Receptura</th><th>Produkty (dawka przy zapisie)</th><th></th></tr></thead><tbody>';
+      sorted.forEach(r => {
+        const f = r.state.fields;
+        const stage = MEHLICH3_STAGES[r.state.stage] ? MEHLICH3_STAGES[r.state.stage].label : '—';
+        const soil = `gleba ${escapeHtml(f.lime_volume_l || '—')} l, pH ${escapeHtml(f.cac_ph || '—')}, cel Ca ${escapeHtml(f.lime_target_sat || '—')}%`;
+        const products = r.summary.length
+          ? r.summary.map(p => `${escapeHtml(p.name)}: <strong>${Number(p.grams).toFixed(2)} g</strong>`
+              + (p.ml != null ? ` <span class="explain">(${Number(p.ml).toFixed(0)} ml)</span>` : '')).join('<br>')
+          : '<span class="explain">—</span>';
+        const confirming = recipePendingDelete === r.id;
+        html += `<tr><td><strong>${escapeHtml(r.name)}</strong>`
+          + (r === last ? ' <span class="badge" style="min-width:0;">otwiera się sama</span>' : '')
+          + `<br><span class="explain">etap: ${escapeHtml(stage)} · ${soil}</span>`
+          + `<br><span class="explain">zapisana ${escapeHtml(formatRecipeDate(r.savedAt))}</span></td>`
+          + `<td>${products}</td>`
+          + `<td style="white-space:nowrap;"><button class="col-btn" style="padding:5px 10px;" onclick="loadRecipe('${escapeHtml(r.id)}')">Wczytaj</button>`
+          + `<button class="col-btn" style="padding:5px 10px;${confirming ? ' background:#c53030; border-color:#c53030; color:#fff;' : ''}" onclick="deleteRecipe('${escapeHtml(r.id)}')">${confirming ? 'Na pewno usunąć?' : 'Usuń'}</button></td></tr>`;
+      });
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }
+
+    // Sama wczytuje ostatnią recepturę przy otwarciu strony — ale tylko gdy użytkownik jeszcze niczego
+    // nie zaczął (lista pusta, nic nie wpisane w CAC/Nawożeniu/Kompoście), żeby nie nadpisać jego pracy.
+    function maybeAutoLoadRecipe() {
+      if (recipeAutoLoadDone) return;
+      recipeAutoLoadDone = true;
+      if (recipeUserTouched || window._amendmentCart.length) return;
+      const last = lastUsedRecipe();
+      if (last) loadRecipe(last.id, true);
+    }
+
+    function setRecipeStorageNote() {
+      const notes = {
+        db: 'Receptury są zapisane w tym artefakcie na Twoim koncie Claude — widać je na każdym urządzeniu, na którym go otworzysz.',
+        local: 'Receptury są zapisane w tej przeglądarce — nie przeniosą się na inne urządzenie ani do innej przeglądarki.',
+        connecting: 'Łączę się z magazynem receptur…'
+      };
+      document.getElementById('recipe_storage_note').textContent = notes[recipeStoreMode];
+    }
+
+    function useLocalRecipes() {
+      recipeStoreMode = 'local';
+      recipeDb = null;
+      window._recipes = readLocalRecipes();
+      setRecipeStorageNote();
+      renderRecipes();
+      maybeAutoLoadRecipe();
+    }
+
+    function connectRecipeDb(db) {
+      recipeDb = db;
+      recipeStoreMode = 'db';
+      setRecipeStorageNote();
+      db.collection(RECIPE_COLLECTION).onSnapshot(snap => {
+        window._recipes = snap.docs.map(d => sanitizeRecipe(d.id, d.data())).filter(Boolean);
+        renderRecipes();
+        // Pusta odpowiedź z pamięci podręcznej to jeszcze nie odpowiedź serwera — czekamy na właściwą.
+        if (!(snap.metadata.fromCache && snap.empty)) maybeAutoLoadRecipe();
+      }, () => {
+        useLocalRecipes();
+      });
+    }
+
+    function initRecipes() {
+      // Każde własne działanie w zakładkach z danymi gleby blokuje automatyczne wczytanie receptury.
+      ['tab-cac', 'tab-nawoz', 'tab-kompost'].forEach(tabId => {
+        const tab = document.getElementById(tabId);
+        ['input', 'click'].forEach(type => tab.addEventListener(type, e => { if (e.isTrusted) recipeUserTouched = true; }, true));
+      });
+      const rt = window.claude;
+      if (rt && typeof rt.use === 'function') {
+        recipeStoreMode = 'connecting';
+        setRecipeStorageNote();
+        rt.use('db').then(db => (db ? connectRecipeDb(db) : useLocalRecipes()), () => useLocalRecipes());
+      } else {
+        useLocalRecipes();
+      }
+    }
+
     // Stan przenoszony przy aktualizacji w locie: przeglądarka artefaktu podmienia otwartą stronę na nowszą
     // wersję bez przeładowania. Poza wartościami pól zbieramy to, co żyje tylko w pamięci strony (receptura
     // dawek, lista produktów, etap, wczytany kompost) — nowa wersja odtwarza to przed pierwszym przeliczeniem.
@@ -3416,6 +3756,7 @@
       renderSavedPhases();
       renderCompostAll();
       if (window._targetStage !== 'flo') setTargetStage(window._targetStage);
+      initRecipes();
     }
 
     (function bootPage() {
