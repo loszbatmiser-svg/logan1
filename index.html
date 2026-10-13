@@ -1906,6 +1906,31 @@
       return getCartItemDose(item, idx).grams;
     }
 
+    // Jeden przebieg po liście (te same sumy co getTotalsUpToIndex): dla każdej pozycji dawka, poziom jej
+    // pierwiastka przed nią i po niej oraz target Mehlich 3 wybranego etapu — do opisów, nie do liczenia dawek.
+    function getCartBreakdown() {
+      const totals = Object.assign({}, getBaselineTotals());
+      const soilKg = getSoilMassKg();
+      return window._amendmentCart.map((item, idx) => {
+        const product = getAmendment(item.productId);
+        const el = cartItemElement(item);
+        const dose = getCartItemDose(item, idx);
+        const fromLevel = totals[el] || 0;
+        if (product && soilKg > 0) {
+          Object.keys(product.pct).forEach(e => { totals[e] = (totals[e] || 0) + (dose.grams * product.pct[e] * 1000) / soilKg; });
+        }
+        const t = el ? getEffectiveTarget(window._targetStage, el) : null;
+        return { item, product, el, dose, fromLevel, afterLevel: totals[el] || 0, target: t ? { min: t.min, max: t.max } : null };
+      });
+    }
+
+    function targetRangeText(t, fmt) {
+      const f = fmt || (x => Number(x).toFixed(1));
+      if (!t || t.min == null) return '—';
+      if (t.max == null) return `≥ ${f(t.min)} ppm`;
+      return t.max === t.min ? `${f(t.min)} ppm` : `${f(t.min)}–${f(t.max)} ppm`;
+    }
+
     function autoAddToCart(idx) {
       const row = window._autoDoseRows && window._autoDoseRows[idx];
       if (!row || row.status !== 'need') return;
@@ -1946,18 +1971,17 @@
         cartDiv.innerHTML = '<p class="note">Lista jest pusta — dodaj produkty powyżej.</p>';
       } else {
         let html = '<table><thead><tr><th>Produkt</th><th>Podstawa dawki</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
-        window._amendmentCart.forEach((item, idx) => {
-          const product = getAmendment(item.productId);
-          const dose = getCartItemDose(item, idx);
+        getCartBreakdown().forEach(({ item, product, el, dose, fromLevel, afterLevel, target }, idx) => {
           const grams = dose.grams;
-          const elName = ELEMENT_LABELS[item.targetElement] || item.targetElement;
-          const level = dose.toLevel != null ? `: ${dose.toLevel.toFixed(1)} ppm` : '';
+          const elName = ELEMENT_LABELS[el] || el || '—';
+          const levels = el ? ` · ${elName}: ${fromLevel.toFixed(1)} → ${afterLevel.toFixed(1)} ppm (target Mehlich 3: ${targetRangeText(target)})` : '';
           let basis;
-          if (item.mode === 'grams') basis = 'stała dawka';
-          else if (item.mode === 'auto') basis = item.step === 'ratio'
-            ? `auto krok 2: dopłata wg proporcji dla ${elName}${dose.toLevel != null ? ` do ${dose.toLevel.toFixed(1)} ppm` : ''} (przelicza się z etapem i masą gleby)`
-            : `auto krok 1: do targetu Mehlich 3 dla ${elName}${level} (przelicza się z etapem i masą gleby)`;
-          else basis = `cel: +${item.targetPpm.toFixed(1)} ppm ${ELEMENT_LABELS[item.targetElement] || item.targetElement} (przelicza się z masą gleby)`;
+          if (item.mode === 'grams') basis = `stała dawka (g)${levels}`;
+          else if (item.mode === 'auto') basis = (item.step === 'ratio'
+            ? `auto krok 2: dopłata wg proporcji${dose.toLevel != null ? ` do ${dose.toLevel.toFixed(1)} ppm` : ''}`
+            : `auto krok 1: do targetu Mehlich 3${dose.toLevel != null ? `: ${dose.toLevel.toFixed(1)} ppm` : ''}`)
+            + `${levels} — przelicza się z etapem i masą gleby`;
+          else basis = `ręcznie: +${item.targetPpm.toFixed(1)} ppm${levels} — przelicza się z masą gleby`;
           const amount = product && product.volumeBased
             ? `${grams.toFixed(2)} g <span class="explain">= ${compostMlFromGrams(grams).toFixed(0)} ml</span>`
             : `${grams.toFixed(2)} g`;
@@ -3729,9 +3753,10 @@
 
     function recipeAddsHtml(it) {
       if (it.addPpm == null) return '<span class="explain">—</span>';
-      const sym = it.el || '';
-      return `+${fmtNum(it.addPpm, 1)} ppm ${escapeHtml(sym)}`
-        + (it.elGrams != null ? `<br><span class="explain">= ${fmtNum(it.elGrams, 2)} g ${escapeHtml(sym)}</span>` : '');
+      const sym = escapeHtml(it.el || '');
+      return `+${fmtNum(it.addPpm, 1)} ppm ${sym}`
+        + (it.fromLevel != null ? `<br><span class="explain">${fmtNum(it.fromLevel, 1)} → ${fmtNum(it.afterLevel, 1)} ppm</span>` : '')
+        + (it.elGrams != null ? `<br><span class="explain">= ${fmtNum(it.elGrams, 2)} g ${sym}</span>` : '');
     }
 
     function recipeCollapsedLine(rep) {
@@ -3751,7 +3776,9 @@
         html += `<tr class="${def.cls}"><td colspan="4"><span class="explain">${gi === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
         g.items.forEach(it => {
           html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}</td>`
-            + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
+            + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}`
+            + (it.target ? `<br><span class="explain">target Mehlich 3: ${escapeHtml(targetRangeText(it.target))}</span>` : '')
+            + `<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
             + `<td style="white-space:nowrap;">${recipeAddsHtml(it)}</td>`
             + `<td style="white-space:nowrap;"><strong>${fmtNum(it.grams, 2)} g</strong>${it.ml != null ? `<br><span class="explain">${fmtNum(it.ml, 0)} ml</span>` : ''}</td></tr>`;
         });
@@ -3875,14 +3902,14 @@
     }
 
     function cartItemBasisShort(item, dose) {
-      if (item.mode === 'grams') return 'stała dawka';
+      if (item.mode === 'grams') return 'stała dawka (g)';
       if (item.mode === 'auto') {
         const level = dose && dose.toLevel != null ? dose.toLevel.toFixed(1) + ' ppm' : null;
         return item.step === 'ratio'
           ? 'auto, krok 2 — dopłata wg proporcji' + (level ? ` do ${level}` : '')
           : 'auto, krok 1 — do targetu Mehlich 3' + (level ? `: ${level}` : '');
       }
-      return `cel +${Number(item.targetPpm).toFixed(1)} ppm`;
+      return `ręcznie: +${Number(item.targetPpm).toFixed(1)} ppm`;
     }
 
     const round2 = x => Math.round(Number(x) * 100) / 100;
@@ -3891,10 +3918,7 @@
     // Migawka tego, co widać po wczytaniu receptury — liczona z bieżącego stanu strony.
     function buildRecipeReport() {
       const groups = ELEMENT_GROUPS.map(g => ({ key: g.key, items: [] }));
-      window._amendmentCart.forEach((item, idx) => {
-        const product = getAmendment(item.productId);
-        const dose = getCartItemDose(item, idx);
-        const el = cartItemElement(item);
+      getCartBreakdown().forEach(({ item, product, el, dose, fromLevel, afterLevel, target }, idx) => {
         const pct = product && el ? product.pct[el] || 0 : 0;
         // Gramy zapisane z zapasem miejsc po przecinku — przy przeliczaniu na inną objętość
         // zaokrąglenie nie może się mnożyć.
@@ -3902,6 +3926,7 @@
           productId: item.productId, product: product ? product.name : item.productId,
           el, basis: cartItemBasisShort(item, dose), grams: round4(dose.grams), order: idx,
           addPpm: round4(dose.addPpm), elGrams: round4(dose.grams * pct), toLevel: dose.toLevel,
+          fromLevel: round4(fromLevel), afterLevel: round4(afterLevel), target,
           ml: product && product.volumeBased ? round2(compostMlFromGrams(dose.grams)) : null
         });
       });
@@ -4087,16 +4112,20 @@
         const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
         prodRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
         g.items.forEach(it => prodRows.push({
-          cells: [it.product, ELEMENT_LABELS[it.el] || it.el || '—', (it.basis || '').replace(/(\d)\.(\d)/g, '$1,$2'),
-                  it.addPpm != null ? `+${plNum(it.addPpm, 1)} ppm` + (it.elGrams != null ? `\n${plNum(it.elGrams, 2)} g ${it.el}` : '') : '—',
+          cells: [it.product,
+                  (ELEMENT_LABELS[it.el] || it.el || '—') + (it.target ? `\ntarget: ${targetRangeText(it.target, x => plNum(x, 1))}` : ''),
+                  (it.basis || '').replace(/(\d)\.(\d)/g, '$1,$2'),
+                  it.addPpm != null ? `+${plNum(it.addPpm, 1)} ppm`
+                    + (it.fromLevel != null ? `\n${plNum(it.fromLevel, 1)} → ${plNum(it.afterLevel, 1)}` : '')
+                    + (it.elGrams != null ? `\n${plNum(it.elGrams, 2)} g ${it.el}` : '') : '—',
                   `${plNum(it.grams, 2)} g` + (it.ml != null ? `\n(${plNum(it.ml, 0)} ml)` : '')],
           bar: def.bar
         }));
       });
       if (prodRows.length) {
-        table([{ label: 'Produkt', w: CW * 0.28 }, { label: 'Pierwiastek', w: CW * 0.15 },
-               { label: 'Podstawa dawki', w: CW * 0.27 }, { label: 'Dodaje', w: CW * 0.15, align: 'right' },
-               { label: 'Dawka', w: CW * 0.15, align: 'right' }], prodRows);
+        table([{ label: 'Produkt', w: CW * 0.25 }, { label: 'Pierwiastek', w: CW * 0.19 },
+               { label: 'Podstawa dawki', w: CW * 0.24 }, { label: 'Dodaje (ppm)', w: CW * 0.18, align: 'right' },
+               { label: 'Dawka', w: CW * 0.14, align: 'right' }], prodRows);
         paragraph(`Dawki na ${plNum(s.volumeL, 1)} l gleby (${plNum(s.massKg, 2)} kg), liczone od stanu po wapnowaniu.`, 8.5, C.muted);
       } else {
         paragraph('Brak produktów w recepturze.', 9.5, C.muted);
