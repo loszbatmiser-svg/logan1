@@ -104,6 +104,9 @@
     .recipe-pot-inputs input { padding: 4px 6px; }
     .recipe-table tr.recipe-pots td { background: #faf5ff; }
     .recipe-table tr.recipe-mix td { background: #fffff0; }
+    .dest { display: inline-block; margin-top: 2px; font-size: 0.72rem; font-weight: 600; color: #975a16; background: #fefcbf;
+      border-radius: 4px; padding: 1px 6px; }
+    .dest.dest-sol { color: #553c9a; background: #e9d8fd; }
     .recipe-table tr.recipe-mix-first td { border-top: 2px solid #d69e2e; }
     .mix-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
     .mix-row input[type=text] { width: 210px; padding: 5px 7px; }
@@ -3760,9 +3763,20 @@
       const v = r.report && r.report.soil ? Number(r.report.soil.volumeL) : parseFloat(r.state.fields.lime_volume_l);
       return v > 0 ? v : null;
     }
+    // Partia mieszanki (pole „gleba”): na nią liczą się podłoże, wapnowanie i wszystko, co sypie się na sucho.
     function recipeVolume(r) {
-      if (r.pots && r.pots.enabled) return r.pots.potL * r.pots.count;
       return recipeViewVolume[r.id] > 0 ? recipeViewVolume[r.id] : recipeSavedVolume(r);
+    }
+
+    // Mieszanka, która trafia do doniczek — na nią liczą się produkty podawane w roztworze. Bywa mniejsza od
+    // partii (reszta mieszanki zostaje bez siarczanów), a gdy doniczki są wyłączone — null.
+    function recipePotsVolume(r) {
+      return r.pots && r.pots.enabled ? r.pots.potL * r.pots.count : null;
+    }
+
+    function isSolubleItem(it) {
+      const prod = productForReportItem(it);
+      return !!(prod && prod.sol);
     }
 
     // ===== DAWKOWANIE DO DONICZEK =====
@@ -3776,40 +3790,45 @@
       return (it.productId && getAmendment(it.productId)) || AMENDMENTS.find(a => a.name === it.product) || null;
     }
 
-    function buildPotPlan(rep, pots) {
+    // potsRep — raport przeliczony na objętość doniczek; batchL — partia mieszanki, z której je napełniasz.
+    function buildPotPlan(potsRep, pots, batchL) {
       const n = pots.count, waterL = (pots.waterMl * n) / 1000;
-      const solution = [], dry = [];
-      rep.groups.forEach(g => (g.items || []).forEach(it => {
+      const solution = [];
+      potsRep.groups.forEach(g => (g.items || []).forEach(it => {
         const prod = productForReportItem(it);
-        const entry = { product: it.product, total: Number(it.grams), perPot: Number(it.grams) / n, ml: it.ml != null ? Number(it.ml) : null };
-        if (prod && prod.sol) {
-          entry.sol = prod.sol;
-          entry.conc = entry.total / waterL;
-          entry.status = entry.conc <= prod.sol * SOLUTION_SAFETY ? 'ok' : entry.conc <= prod.sol ? 'near' : 'over';
-          solution.push(entry);
-        } else {
-          dry.push(entry);
-        }
+        if (!prod || !prod.sol) return;  // nierozpuszczalne idą na sucho do całej partii (krok 1 i 2)
+        const total = Number(it.grams);
+        const conc = total / waterL;
+        solution.push({
+          product: it.product, total, perPot: total / n, sol: prod.sol, conc,
+          status: conc <= prod.sol * SOLUTION_SAFETY ? 'ok' : conc <= prod.sol ? 'near' : 'over'
+        });
       }));
-      const L = rep.lime;
-      const lime = L && L.needed ? [
-        { product: `Węglan wapnia CaCO₃ (${fmtNum(L.cce, 0)}%)`, total: L.perL.caco3 * L.volumeL, perPot: (L.perL.caco3 * L.volumeL) / n },
-        { product: `albo wolastenit (Ca ${fmtNum(L.wollCa, 0)}%)`, total: L.perL.woll * L.volumeL, perPot: (L.perL.woll * L.volumeL) / n }
-      ] : [];
       const minWaterL = solution.reduce((m, e) => Math.max(m, e.total / (e.sol * SOLUTION_SAFETY)), 0);
       const saltTotal = solution.reduce((sum, e) => sum + e.total, 0);
+      const soilL = pots.potL * n;
       return {
-        n, potL: pots.potL, waterMl: pots.waterMl, waterL, soilL: pots.potL * n, solution, dry, lime,
+        n, potL: pots.potL, waterMl: pots.waterMl, waterL, soilL, batchL, leftoverL: batchL - soilL, solution,
         minWaterPerPotMl: (minWaterL / n) * 1000, saltConc: waterL > 0 ? saltTotal / waterL : 0
       };
+    }
+
+    function potBatchText(plan, fmt) {
+      if (!(plan.batchL > 0)) return '';
+      if (plan.leftoverL < -1e-9) return `za mało mieszanki — partia ma ${fmt(plan.batchL, 1)} l, brakuje ${fmt(-plan.leftoverL, 1)} l`;
+      if (plan.leftoverL > 1e-9) return `z partii ${fmt(plan.batchL, 1)} l zostaje ${fmt(plan.leftoverL, 1)} l mieszanki bez siarczanów`;
+      return `cała partia ${fmt(plan.batchL, 1)} l idzie do doniczek`;
     }
 
     const POT_STATUS = { ok: '✓', near: 'blisko granicy rozpuszczalności — dolej wody', over: 'nie rozpuści się — za mało wody' };
 
     function potPlanHtml(plan) {
       const g = x => fmtNum(x, x < 1 ? 3 : 2);
+      const short = plan.leftoverL < -1e-9;
       let html = `<tr class="recipe-pots recipe-pots-first"><td colspan="4"><strong>Krok 3 — do doniczek:</strong> ${plan.n} × ${fmtNum(plan.potL, plan.potL % 1 ? 1 : 0)} l`
-        + ` = ${fmtNum(plan.soilL, 1)} l gleby · woda ${plan.n} × ${fmtNum(plan.waterMl, 0)} ml = <strong>${fmtNum(plan.waterL, 2)} l</strong></td></tr>`;
+        + ` = <strong>${fmtNum(plan.soilL, 1)} l</strong> mieszanki · woda ${plan.n} × ${fmtNum(plan.waterMl, 0)} ml = <strong>${fmtNum(plan.waterL, 2)} l</strong>`
+        + `<br><span class="explain"${short ? ' style="color:#c53030; font-weight:600;"' : ''}>${potBatchText(plan, fmtNum)}`
+        + `${short ? '' : ' (siarczany liczone tylko na mieszankę w doniczkach)'}</span></td></tr>`;
       if (plan.solution.length) {
         html += `<tr class="recipe-pots"><td colspan="4"><span class="explain">Roztwór — rozpuść w ${fmtNum(plan.waterL, 2)} l wody i wlej po ${fmtNum(plan.waterMl, 0)} ml do każdej doniczki:</span></td></tr>`;
         plan.solution.forEach(e => {
@@ -3828,16 +3847,8 @@
           + (plan.saltConc > SALT_ROOT_WARN_GL ? ' — jeśli w doniczkach już rosną rośliny, to mocny roztwór: podziel dawkę na kilka podlewań albo daj więcej wody.' : '.')
           + `</span></td></tr>`;
       }
-      if (plan.lime.length || plan.dry.length) {
-        html += `<tr class="recipe-pots"><td colspan="4"><span class="explain">Na sucho — wymieszaj z ziemią w każdej doniczce:</span></td></tr>`;
-        plan.lime.forEach((e, i) => {
-          html += `<tr class="recipe-pots"><td>${i === 0 ? 'Wapnowanie: ' : ''}${escapeHtml(e.product)}</td><td>razem <strong>${g(e.total)} g</strong></td>`
-            + `<td>${g(e.perPot)} g / doniczkę</td><td><span class="explain">${i === 0 ? 'wybierz jeden' : ''}</span></td></tr>`;
-        });
-        plan.dry.forEach(e => {
-          html += `<tr class="recipe-pots"><td>${escapeHtml(e.product)}</td><td>razem <strong>${g(e.total)} g</strong></td>`
-            + `<td>${g(e.perPot)} g / doniczkę${e.ml != null ? ` <span class="explain">(${fmtNum(e.ml / plan.n, 0)} ml)</span>` : ''}</td><td></td></tr>`;
-        });
+      if (!plan.solution.length) {
+        html += '<tr class="recipe-pots"><td colspan="4"><span class="explain">W recepturze nie ma produktów rozpuszczalnych — nic nie idzie do roztworu.</span></td></tr>';
       }
       return html;
     }
@@ -3854,7 +3865,7 @@
     function mixLitersText(r, pct) {
       const total = (recipeVolume(r) * pct) / 100;
       const pots = r.pots && r.pots.enabled ? r.pots : null;
-      return `= ${fmtNum(total, total < 10 ? 2 : 1)} l` + (pots ? ` · ${fmtNum(total / pots.count, 2)} l / doniczkę` : '');
+      return `= ${fmtNum(total, total < 10 ? 2 : 1)} l` + (pots ? ` · ${fmtNum((pots.potL * pct) / 100, 2)} l / doniczkę` : '');
     }
 
     function mixSumHtml(mix) {
@@ -3989,29 +4000,44 @@
       const L = rep.lime;
       const lime = !L ? '' : !L.needed ? ' · wapnowanie niepotrzebne'
         : ` · wapnowanie: ${fmtNum(L.perL.caco3 * L.volumeL, 1)} g CaCO₃ albo ${fmtNum(L.perL.woll * L.volumeL, 1)} g wolastenitu`;
-      const pots = r && r.pots && r.pots.enabled ? ` · ${r.pots.count} doniczek × ${fmtNum(r.pots.potL, r.pots.potL % 1 ? 1 : 0)} l` : '';
+      const pots = r && r.pots && r.pots.enabled
+        ? ` · ${r.pots.count} doniczek × ${fmtNum(r.pots.potL, r.pots.potL % 1 ? 1 : 0)} l (${fmtNum(r.pots.count * r.pots.potL, 1)} l z partii ${fmtNum(rep.soil.volumeL, 1)} l)` : '';
       const mix = r && r.mix && r.mix.length ? ` · podłoże: ${r.mix.map(c => `${c.name || '?'} ${fmtPct(c.pct)}%`).join(', ')}` : '';
       return `${count} ${count === 1 ? 'produkt' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) ? 'produkty' : 'produktów'}${lime}${pots}${mix}`;
     }
 
     function recipeBodyHtml(r, rep) {
-      return mixEditorHtml(r) + recipeStepsHtml(rep) + (r.pots && r.pots.enabled ? potPlanHtml(buildPotPlan(rep, r.pots)) : '');
+      const potsV = recipePotsVolume(r);
+      const potsRep = potsV ? scaleReport(rep, potsV) : null;
+      return mixEditorHtml(r) + recipeStepsHtml(rep, potsRep)
+        + (potsRep ? potPlanHtml(buildPotPlan(potsRep, r.pots, Number(rep.soil.volumeL))) : '');
     }
 
-    function recipeStepsHtml(rep) {
+    // Przy doniczkach produkty rozpuszczalne pokazujemy w dawce na mieszankę w doniczkach (idą do roztworu),
+    // a pozostałe — na całą partię (sypie się je na sucho). Oba raporty mają te same grupy i pozycje.
+    function recipeStepsHtml(rep, potsRep) {
       let html = `<tr><td colspan="4"><span class="explain">Krok 1 — wapnowanie:</span> ${limeSummaryHtml(rep.lime)}</td></tr>`;
-      const groups = rep.groups.filter(g => Array.isArray(g.items) && g.items.length);
-      if (!groups.length) html += '<tr><td colspan="4" class="explain">Krok 2 — brak produktów</td></tr>';
-      groups.forEach((g, gi) => {
+      const anyItems = rep.groups.some(g => Array.isArray(g.items) && g.items.length);
+      if (!anyItems) html += '<tr><td colspan="4" class="explain">Krok 2 — brak produktów</td></tr>';
+      const batchL = fmtNum(rep.soil.volumeL, rep.soil.volumeL % 1 ? 1 : 0);
+      const potsL = potsRep ? fmtNum(potsRep.soil.volumeL, potsRep.soil.volumeL % 1 ? 1 : 0) : '';
+      let shown = 0;
+      rep.groups.forEach((g, gIdx) => {
+        if (!Array.isArray(g.items) || !g.items.length) return;
         const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
-        html += `<tr class="${def.cls}"><td colspan="4"><span class="explain">${gi === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
-        g.items.forEach(it => {
+        html += `<tr class="${def.cls}"><td colspan="4"><span class="explain">${shown++ === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
+        g.items.forEach((batchIt, iIdx) => {
+          const toSolution = potsRep && isSolubleItem(batchIt);
+          const it = toSolution ? potsRep.groups[gIdx].items[iIdx] : batchIt;
+          const dest = !potsRep ? ''
+            : toSolution ? `<br><span class="dest dest-sol">roztwór · ${potsL} l w doniczkach</span>`
+            : `<br><span class="dest">na sucho · partia ${batchL} l</span>`;
           html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}</td>`
             + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}`
             + (it.target ? `<br><span class="explain">target Mehlich 3: ${escapeHtml(targetRangeText(it.target))}</span>` : '')
             + `<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
             + `<td style="white-space:nowrap;">${recipeAddsHtml(it)}</td>`
-            + `<td style="white-space:nowrap;"><strong>${fmtNum(it.grams, 2)} g</strong>${it.ml != null ? `<br><span class="explain">${fmtNum(it.ml, 0)} ml</span>` : ''}</td></tr>`;
+            + `<td style="white-space:nowrap;"><strong>${fmtNum(it.grams, 2)} g</strong>${it.ml != null ? `<br><span class="explain">${fmtNum(it.ml, 0)} ml</span>` : ''}${dest}</td></tr>`;
         });
       });
       return html;
@@ -4048,7 +4074,7 @@
           + `</div></div>`
           + `<div class="recipe-actions">`
           + (savedV ? `<label class="recipe-vol">gleba <input type="number" id="recipe_vol_${id}" min="0.1" step="1" value="${fmtNum(V, V % 1 ? 1 : 0)}"`
-              + ` oninput="setRecipeVolume('${id}', this.value)"${r.pots && r.pots.enabled ? ' disabled title="Liczona z doniczek"' : ''}> l`
+              + ` oninput="setRecipeVolume('${id}', this.value)"> l`
               + `<span class="explain" id="recipe_volhint_${id}">${recipeVolumeHint(V, savedV)}</span></label>` : '')
           + `<button class="col-btn" onclick="loadRecipe('${id}')">Wczytaj</button>`
           + `<button class="col-btn" onclick="downloadRecipePdf('${id}')">PDF</button>`
@@ -4091,6 +4117,11 @@
       if (!r) return;
       if (v > 0) recipeViewVolume[id] = v;
       else delete recipeViewVolume[id];  // puste pole — liczymy dla objętości z zapisu
+      refreshRecipeBody(r);
+    }
+
+    function refreshRecipeBody(r) {
+      const id = r.id;
       if (!r.report) return;
       const V = recipeVolume(r);
       const rep = scaleReport(r.report, V);
@@ -4110,10 +4141,7 @@
       const potL = val('l'), count = Math.round(val('n')), waterMl = val('w');
       if (!(potL > 0) || !(count >= 1) || !(waterMl > 0)) return;  // pole w trakcie wpisywania
       r.pots = Object.assign({}, r.pots, { potL, count, waterMl });
-      const V = recipeVolume(r);
-      const vol = document.getElementById('recipe_vol_' + id);
-      if (vol) vol.value = fmtNum(V, V % 1 ? 1 : 0);
-      setRecipeVolume(id, String(V));
+      refreshRecipeBody(r);
     }
     window.setRecipePots = setRecipePots;
 
@@ -4349,6 +4377,10 @@
       const stageLabel = MEHLICH3_STAGES[r.stage] ? MEHLICH3_STAGES[r.stage].label : '—';
       paragraph(`Etap: ${stageLabel}   ·   zapisana ${formatRecipeDate(recipe.savedAt)}   ·   wydruk ${formatRecipeDate(new Date().toISOString())}`, 9, C.muted);
       if (r.scaledFrom) paragraph(`Przeliczona z ${plNum(r.scaledFrom, 1)} l na ${plNum(r.soil.volumeL, 1)} l gleby — gramy zmienione proporcjonalnie, ppm bez zmian.`, 9, C.accent, 600);
+      const potsOn = recipe.pots && recipe.pots.enabled ? recipe.pots : null;
+      const potsRep = potsOn ? scaleReport(r, potsOn.potL * potsOn.count) : null;
+      if (potsOn) paragraph(`Partia mieszanki ${plNum(r.soil.volumeL, 1)} l (podłoże, wapnowanie i produkty na sucho) · doniczki ${potsOn.count} × `
+        + `${plNum(potsOn.potL, potsOn.potL % 1 ? 1 : 0)} l = ${plNum(potsOn.count * potsOn.potL, 1)} l (produkty rozpuszczalne w roztworze).`, 9, C.accent, 600);
       const s = r.soil || {};
       paragraph(`Gleba: ${plNum(s.volumeL, 1)} l, gęstość nasypowa ${plNum(s.bd, 2)} g/cm³, masa ${plNum(s.massKg, 2)} kg.   `
         + `Test glebowy (Value Found): pH ${plNum(s.ph, 1)}, Ca ${plNum(s.ca, 0)}, Mg ${plNum(s.mg, 0)}, K ${plNum(s.k, 0)}, Na ${plNum(s.na, 0)} ppm.`, 9, C.muted);
@@ -4357,7 +4389,7 @@
       const mix = (recipe.mix || []).filter(c => c.name || c.pct);
       if (mix.length) {
         const V = Number(s.volumeL);
-        const pots = recipe.pots && recipe.pots.enabled ? recipe.pots : null;
+        const pots = potsOn;
         heading(`Krok 0 — Podłoże (mieszanka) na ${plNum(V, 1)} l`);
         const cols = [{ label: 'Składnik', w: CW * (pots ? 0.4 : 0.5) }, { label: 'Udział', w: CW * 0.16, align: 'right' },
                       { label: 'Razem', w: CW * (pots ? 0.22 : 0.34), align: 'right' }];
@@ -4365,7 +4397,7 @@
         table(cols, mix.map(c => {
           const l = (V * c.pct) / 100;
           const cells = [c.name || '—', `${plNum(c.pct, c.pct % 1 ? 1 : 0)}%`, `${plNum(l, l < 10 ? 2 : 1)} l`];
-          if (pots) cells.push(`${plNum(l / pots.count, 2)} l`);
+          if (pots) cells.push(`${plNum((pots.potL * c.pct) / 100, 2)} l`);
           return { cells };
         }));
         const sum = mixSum(mix);
@@ -4403,36 +4435,44 @@
       // Krok 2 — produkty w grupach
       heading('Krok 2 — Nawożenie: kationy, aniony, mikroelementy');
       const prodRows = [];
-      r.groups.forEach(g => {
+      r.groups.forEach((g, gIdx) => {
         if (!g.items || !g.items.length) return;
         const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
         prodRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
-        g.items.forEach(it => prodRows.push({
-          cells: [it.product,
-                  (ELEMENT_LABELS[it.el] || it.el || '—') + (it.target ? `\ntarget: ${targetRangeText(it.target, x => plNum(x, 1))}` : ''),
-                  (it.basis || '').replace(/(\d)\.(\d)/g, '$1,$2'),
-                  it.addPpm != null ? `+${plNum(it.addPpm, 1)} ppm`
-                    + (it.fromLevel != null ? `\n${plNum(it.fromLevel, 1)} → ${plNum(it.afterLevel, 1)}` : '')
-                    + (it.elGrams != null ? `\n${plNum(it.elGrams, 2)} g ${it.el}` : '') : '—',
-                  `${plNum(it.grams, 2)} g` + (it.ml != null ? `\n(${plNum(it.ml, 0)} ml)` : '')],
-          bar: def.bar
-        }));
+        g.items.forEach((batchIt, iIdx) => {
+          const toSolution = potsRep && isSolubleItem(batchIt);
+          const it = toSolution ? potsRep.groups[gIdx].items[iIdx] : batchIt;
+          const dest = !potsRep ? '' : toSolution ? `\nroztwór ${plNum(potsRep.soil.volumeL, 0)} l` : `\nna sucho ${plNum(r.soil.volumeL, 0)} l`;
+          prodRows.push({
+            cells: [it.product,
+                    (ELEMENT_LABELS[it.el] || it.el || '—') + (it.target ? `\ntarget: ${targetRangeText(it.target, x => plNum(x, 1))}` : ''),
+                    (it.basis || '').replace(/(\d)\.(\d)/g, '$1,$2'),
+                    it.addPpm != null ? `+${plNum(it.addPpm, 1)} ppm`
+                      + (it.fromLevel != null ? `\n${plNum(it.fromLevel, 1)} → ${plNum(it.afterLevel, 1)}` : '')
+                      + (it.elGrams != null ? `\n${plNum(it.elGrams, 2)} g ${it.el}` : '') : '—',
+                    `${plNum(it.grams, 2)} g` + (it.ml != null ? `\n(${plNum(it.ml, 0)} ml)` : '') + dest],
+            bar: def.bar
+          });
+        });
       });
       if (prodRows.length) {
-        table([{ label: 'Produkt', w: CW * 0.25 }, { label: 'Pierwiastek', w: CW * 0.19 },
-               { label: 'Podstawa dawki', w: CW * 0.24 }, { label: 'Dodaje (ppm)', w: CW * 0.18, align: 'right' },
-               { label: 'Dawka', w: CW * 0.14, align: 'right' }], prodRows);
-        paragraph(`Dawki na ${plNum(s.volumeL, 1)} l gleby (${plNum(s.massKg, 2)} kg), liczone od stanu po wapnowaniu.`, 8.5, C.muted);
+        table([{ label: 'Produkt', w: CW * 0.24 }, { label: 'Pierwiastek', w: CW * 0.18 },
+               { label: 'Podstawa dawki', w: CW * 0.22 }, { label: 'Dodaje (ppm)', w: CW * 0.18, align: 'right' },
+               { label: 'Dawka', w: CW * 0.18, align: 'right' }], prodRows);
+        paragraph(potsRep
+          ? `Produkty na sucho — na całą partię ${plNum(s.volumeL, 1)} l; rozpuszczalne — na ${plNum(potsRep.soil.volumeL, 1)} l mieszanki w doniczkach (krok 3). Liczone od stanu po wapnowaniu.`
+          : `Dawki na ${plNum(s.volumeL, 1)} l gleby (${plNum(s.massKg, 2)} kg), liczone od stanu po wapnowaniu.`, 8.5, C.muted);
       } else {
         paragraph('Brak produktów w recepturze.', 9.5, C.muted);
       }
 
       // Krok 3 — doniczki
-      if (recipe.pots && recipe.pots.enabled) {
-        const plan = buildPotPlan(r, recipe.pots);
+      if (potsRep) {
+        const plan = buildPotPlan(potsRep, potsOn, Number(r.soil.volumeL));
         const g = x => plNum(x, x < 1 ? 3 : 2);
         heading(`Krok 3 — Do doniczek: ${plan.n} × ${plNum(plan.potL, plan.potL % 1 ? 1 : 0)} l`);
-        paragraph(`Gleba razem ${plNum(plan.soilL, 1)} l. Woda: ${plan.n} × ${plNum(plan.waterMl, 0)} ml = ${plNum(plan.waterL, 2)} l.`, 9.5);
+        paragraph(`Mieszanka w doniczkach ${plNum(plan.soilL, 1)} l — ${potBatchText(plan, plNum)}. Woda: ${plan.n} × ${plNum(plan.waterMl, 0)} ml = ${plNum(plan.waterL, 2)} l.`,
+          9.5, plan.leftoverL < -1e-9 ? C.warn : C.text, plan.leftoverL < -1e-9 ? 600 : 400);
         if (plan.solution.length) {
           paragraph(`Roztwór — rozpuść w ${plNum(plan.waterL, 2)} l wody, mieszaj i wlej po ${plNum(plan.waterMl, 0)} ml do każdej doniczki:`, 9.5, C.text, 600);
           y += 3;
@@ -4451,13 +4491,7 @@
             + '(siarczan żelaza utlenia się i brązowieje) i zamieszaj przed każdym nalaniem.', 9, C.muted);
           y += 4;
         }
-        if (plan.lime.length || plan.dry.length) {
-          paragraph('Na sucho — wymieszaj z ziemią w każdej doniczce:', 9.5, C.text, 600);
-          y += 3;
-          table([{ label: 'Produkt', w: CW * 0.52 }, { label: 'Razem', w: CW * 0.24, align: 'right' }, { label: 'Na doniczkę', w: CW * 0.24, align: 'right' }],
-            plan.lime.map((e, i) => ({ cells: [(i === 0 ? 'Wapnowanie: ' : '') + e.product + (i === 0 ? ' — wybierz jeden' : ''), `${g(e.total)} g`, `${g(e.perPot)} g`], bold: true }))
-              .concat(plan.dry.map(e => ({ cells: [e.product, `${g(e.total)} g`, `${g(e.perPot)} g` + (e.ml != null ? `\n(${plNum(e.ml / plan.n, 0)} ml)` : '')] }))));
-        }
+        if (!plan.solution.length) paragraph('W recepturze nie ma produktów rozpuszczalnych — nic nie idzie do roztworu.', 9.5, C.muted);
       }
 
       // Profil końcowy

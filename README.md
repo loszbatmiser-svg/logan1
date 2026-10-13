@@ -216,10 +216,12 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 - `scaleReport()` / `setRecipeVolume()` — receptura pokazana dla innej objętości gleby: dawki są w ppm na masę
   gleby, więc gramy produktów i wapna skalują się liniowo, a ppm zostają; „Wczytaj” przy zmienionej objętości
   ustawia ją w CAC i skaluje stałe dawki w gramach, więc wynik zgadza się z listą
-- `buildPotPlan()` — dawkowanie do doniczek (opcja receptury, zapisywana z nią w polu `pots`): gleba = doniczka ×
-  liczba doniczek; produkty z `sol` w `AMENDMENTS` (orientacyjna rozpuszczalność w 20 °C, celowo zaniżona) idą
-  do jednego roztworu (woda na doniczkę × liczba doniczek) i trzymamy je do połowy rozpuszczalności
-  (`SOLUTION_SAFETY`), reszta i wapnowanie — na sucho, porcja na doniczkę; ostrzeżenie przy > 3 g soli/l
+- `buildPotPlan()` — dawkowanie do doniczek (opcja receptury, pole `pots`). Dwie objętości: partia mieszanki
+  (pole „gleba”, `recipeVolume()`) — na nią liczą się podłoże, wapnowanie i produkty na sucho — oraz mieszanka
+  w doniczkach (doniczka × liczba, `recipePotsVolume()`) — na nią liczą się produkty z `sol` w `AMENDMENTS`
+  (orientacyjna rozpuszczalność w 20 °C, celowo zaniżona), podawane w jednym roztworze (woda na doniczkę ×
+  liczba doniczek) i trzymane do połowy rozpuszczalności (`SOLUTION_SAFETY`). Reszta partii zostaje bez
+  siarczanów; gdy doniczek jest więcej niż partii — ostrzeżenie. Ostrzeżenie też przy > 3 g soli/l
 - `mixEditorHtml()` / `setMixPct()` — skład podłoża (krok 0, pole `mix` receptury: nazwa + procent): litry
   każdego składnika z objętości receptury (przy doniczkach także na doniczkę), kontrola sumy 100%; nazwy
   z podpowiedzi `MIX_COMPONENTS` albo własne. Ustawienia doniczek i skład przechodzą przy zapisie pod tą samą nazwą
