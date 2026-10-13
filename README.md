@@ -224,6 +224,9 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   siarczanów; gdy doniczek jest więcej niż partii — ostrzeżenie. Ostrzeżenie też przy > 3 g soli/l. Krok 3
   pokazuje też, ile produktów na sucho (i wapna) wypada na doniczkę — tę samą dawkę co w partii, przeliczoną
   na doniczkę, z uwagą, żeby nie dodawać jej drugi raz
+- `groupCartRows()` / `aggregateReportItems()` — ten sam produkt dla tego samego pierwiastka dodany kilka razy
+  pokazywany jest jako jeden wiersz z sumą (punkt 5, receptury, krok 3, PDF). Pozycje listy zostają osobno,
+  bo każda liczy się po swojemu (np. „auto” z etapem) — sumowany jest tylko widok; „Usuń” usuwa wszystkie
 - `buildRecipePdf()` / `importRecipeFromPdf()` — PDF receptury ma w sobie osadzony plik `receptura.json`
   (`/EmbeddedFiles`, bez kompresji): pełną recepturę w zapisanej objętości i objętość wydruku. Wczytanie
   szuka go najpierw wprost w bajtach pliku, a gdy inny program przepakował PDF — przez `getAttachments()`

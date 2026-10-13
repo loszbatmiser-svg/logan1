@@ -1956,6 +1956,58 @@
       });
     }
 
+    // Wiersze z getCartBreakdown() zsumowane po produkcie i pierwiastku, w kolejności pierwszego wystąpienia.
+    function groupCartRows(rows) {
+      const groups = [], byKey = {};
+      rows.forEach((row, idx) => {
+        const key = row.item.productId + '|' + (row.el || '');
+        if (!byKey[key]) {
+          byKey[key] = { product: row.product, el: row.el, target: row.target, parts: [], indices: [] };
+          groups.push(byKey[key]);
+        }
+        byKey[key].parts.push(row);
+        byKey[key].indices.push(idx);
+      });
+      groups.forEach(g => {
+        g.grams = g.parts.reduce((a, r) => a + r.dose.grams, 0);
+        g.addPpm = g.parts.reduce((a, r) => a + r.dose.addPpm, 0);
+        g.fromLevel = g.parts[0].fromLevel;
+        g.afterLevel = g.parts[g.parts.length - 1].afterLevel;
+      });
+      return groups;
+    }
+
+    // Opis kilku dodań jednego produktu: „ręcznie: +1.2 +1.0 = +2.2 ppm” albo części połączone „ + ”.
+    function combineBasis(bases, addPpmSum) {
+      if (bases.length < 2) return bases[0] || '';
+      const manual = bases.map(b => /^ręcznie: (\+[\d.,]+) ppm$/.exec(b));
+      if (manual.every(Boolean)) return `ręcznie: ${manual.map(m => m[1]).join(' ')} = +${Number(addPpmSum).toFixed(1)} ppm`;
+      return bases.join(' + ') + (addPpmSum != null ? ` = +${Number(addPpmSum).toFixed(1)} ppm` : '');
+    }
+
+    // Pozycje raportu receptury zsumowane po produkcie i pierwiastku — także w recepturach zapisanych wcześniej,
+    // gdzie ten sam produkt bywa kilka razy. Kolejność pierwszego wystąpienia zostaje.
+    function aggregateReportItems(items) {
+      const out = [], byKey = {};
+      (items || []).forEach(it => {
+        const key = (it.productId || it.product) + '|' + (it.el || '');
+        if (!byKey[key]) { byKey[key] = { parts: [] }; out.push(byKey[key]); }
+        byKey[key].parts.push(it);
+      });
+      return out.map(({ parts }) => {
+        if (parts.length === 1) return parts[0];
+        const sum = f => parts.every(p => p[f] != null) ? parts.reduce((a, p) => a + Number(p[f]), 0) : null;
+        const last = parts[parts.length - 1];
+        const toLevels = parts.map(p => p.toLevel).filter(v => v != null);
+        const addPpm = sum('addPpm');
+        return Object.assign({}, parts[0], {
+          grams: sum('grams'), ml: parts.some(p => p.ml != null) ? parts.reduce((a, p) => a + (Number(p.ml) || 0), 0) : null,
+          addPpm, elGrams: sum('elGrams'), afterLevel: last.afterLevel, toLevel: toLevels.length ? toLevels[toLevels.length - 1] : null,
+          basis: combineBasis(parts.map(p => p.basis || ''), addPpm), count: parts.length
+        });
+      });
+    }
+
     function targetRangeText(t, fmt) {
       const f = fmt || (x => Number(x).toFixed(1));
       if (!t || t.min == null) return '—';
@@ -1997,28 +2049,37 @@
     }
     window.removeAmendmentFromCart = removeAmendmentFromCart;
 
+    // Usuwa wszystkie pozycje zsumowanego wiersza (indeksy po przecinku), od końca, żeby się nie przesuwały.
+    function removeAmendmentsFromCart(csv) {
+      String(csv).split(',').map(Number).filter(i => i >= 0).sort((a, b) => b - a)
+        .forEach(i => window._amendmentCart.splice(i, 1));
+      renderCartAndSummary();
+    }
+    window.removeAmendmentsFromCart = removeAmendmentsFromCart;
+
     function renderCartAndSummary() {
       const cartDiv = document.getElementById('am_cart_table');
       if (!window._amendmentCart.length) {
         cartDiv.innerHTML = '<p class="note">Lista jest pusta — dodaj produkty powyżej.</p>';
       } else {
         let html = '<table><thead><tr><th>Produkt</th><th>Podstawa dawki</th><th>Dawka (g)</th><th></th></tr></thead><tbody>';
-        getCartBreakdown().forEach(({ item, product, el, dose, fromLevel, afterLevel, target }, idx) => {
-          const grams = dose.grams;
-          const elName = ELEMENT_LABELS[el] || el || '—';
-          const levels = el ? ` · ${elName}: ${fromLevel.toFixed(1)} → ${afterLevel.toFixed(1)} ppm (target Mehlich 3: ${targetRangeText(target)})` : '';
-          let basis;
-          if (item.mode === 'grams') basis = `stała dawka (g)${levels}`;
-          else if (item.mode === 'auto') basis = (item.step === 'ratio'
-            ? `auto krok 2: dopłata wg proporcji${dose.toLevel != null ? ` do ${dose.toLevel.toFixed(1)} ppm` : ''}`
-            : `auto krok 1: do targetu Mehlich 3${dose.toLevel != null ? `: ${dose.toLevel.toFixed(1)} ppm` : ''}`)
-            + `${levels} — przelicza się z etapem i masą gleby`;
-          else basis = `ręcznie: +${item.targetPpm.toFixed(1)} ppm${levels} — przelicza się z masą gleby`;
-          const amount = product && product.volumeBased
-            ? `${grams.toFixed(2)} g <span class="explain">= ${compostMlFromGrams(grams).toFixed(0)} ml</span>`
-            : `${grams.toFixed(2)} g`;
-          html += `<tr><td>${product ? product.name : item.productId}</td><td class="explain">${basis}</td><td>${amount}</td>`
-            + `<td><button class="col-btn" style="padding:5px 12px;" onclick="removeAmendmentFromCart(${idx})">Usuń</button></td></tr>`;
+        // Ten sam produkt dla tego samego pierwiastka dodany kilka razy — jeden wiersz z sumą. Pozycje zostają
+        // osobno na liście (każda liczy się po swojemu, np. „auto” przelicza się z etapem), sumujemy tylko widok.
+        groupCartRows(getCartBreakdown()).forEach(g => {
+          const elName = ELEMENT_LABELS[g.el] || g.el || '—';
+          const levels = g.el ? ` · ${elName}: ${g.fromLevel.toFixed(1)} → ${g.afterLevel.toFixed(1)} ppm (target Mehlich 3: ${targetRangeText(g.target)})` : '';
+          const modes = g.parts.map(r => r.item.mode);
+          const recalc = modes.includes('auto') ? ' — przelicza się z etapem i masą gleby' : modes.includes('ppm') ? ' — przelicza się z masą gleby' : '';
+          const basis = combineBasis(g.parts.map(r => cartItemBasisShort(r.item, r.dose)), g.addPpm) + levels + recalc;
+          const amount = (g.product && g.product.volumeBased
+            ? `${g.grams.toFixed(2)} g <span class="explain">= ${compostMlFromGrams(g.grams).toFixed(0)} ml</span>`
+            : `${g.grams.toFixed(2)} g`)
+            + (g.parts.length > 1 ? `<br><span class="explain" style="white-space:nowrap;">${g.parts.map(r => r.dose.grams.toFixed(2)).join(' + ')}</span>` : '');
+          html += `<tr><td>${g.product ? g.product.name : g.parts[0].item.productId}`
+            + (g.parts.length > 1 ? `<br><span class="explain">dodany ${g.parts.length} razy</span>` : '') + `</td>`
+            + `<td class="explain">${basis}</td><td>${amount}</td>`
+            + `<td><button class="col-btn" style="padding:5px 12px;" onclick="removeAmendmentsFromCart('${g.indices.join(',')}')"`
+            + (g.parts.length > 1 ? ` title="Usuwa wszystkie ${g.parts.length} dodania tego produktu"` : '') + `>Usuń</button></td></tr>`;
         });
         html += '</tbody></table>';
         cartDiv.innerHTML = html;
@@ -3611,7 +3672,9 @@
       return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
 
-    async function storeRecipe(recipe) {
+    // quiet — zmiana już widoczna na stronie (pola doniczek, skład podłoża): bez przerysowania listy, które
+    // podmieniłoby pola w trakcie przechodzenia z jednego do drugiego i gubiło to, co się w nie wpisuje.
+    async function storeRecipe(recipe, quiet) {
       if (recipeStoreMode === 'db') {
         await recipeDb.collection(RECIPE_COLLECTION).doc(recipe.id).set(recipe);  // listę odświeży subskrypcja
         return;
@@ -3619,7 +3682,7 @@
       const list = window._recipes.filter(r => r.id !== recipe.id).concat([recipe]);
       if (!writeLocalRecipes(list)) throw { code: 'local_storage' };
       window._recipes = list;
-      renderRecipes();
+      if (!quiet) renderRecipes();
     }
 
     async function removeRecipe(id) {
@@ -3916,7 +3979,7 @@
     function buildPotPlan(potsRep, pots, batchL) {
       const n = pots.count, waterL = (pots.waterMl * n) / 1000;
       const solution = [], dry = [];
-      potsRep.groups.forEach(g => (g.items || []).forEach(it => {
+      potsRep.groups.forEach(g => aggregateReportItems(g.items).forEach(it => {
         const prod = productForReportItem(it);
         if (!prod || !prod.sol) {
           // Na sucho dawka idzie do całej partii (krok 1 i 2) — tu tylko jej przeliczenie na doniczkę.
@@ -4149,7 +4212,7 @@
     }
 
     function recipeCollapsedLine(rep, r) {
-      const count = rep.groups.reduce((n, g) => n + (g.items ? g.items.length : 0), 0);
+      const count = rep.groups.reduce((n, g) => n + aggregateReportItems(g.items).length, 0);
       const L = rep.lime;
       const lime = !L ? '' : !L.needed ? ' · wapnowanie niepotrzebne'
         : ` · wapnowanie: ${fmtNum(L.perL.caco3 * L.volumeL, 1)} g CaCO₃ albo ${fmtNum(L.perL.woll * L.volumeL, 1)} g wolastenitu`;
@@ -4179,13 +4242,16 @@
         if (!Array.isArray(g.items) || !g.items.length) return;
         const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
         html += `<tr class="${def.cls}"><td colspan="4"><span class="explain">${shown++ === 0 ? 'Krok 2 — nawożenie · ' : ''}</span><strong>${def.label}</strong></td></tr>`;
-        g.items.forEach((batchIt, iIdx) => {
+        const batchItems = aggregateReportItems(g.items);
+        const potsItems = potsRep ? aggregateReportItems(potsRep.groups[gIdx].items) : null;
+        batchItems.forEach((batchIt, iIdx) => {
           const toSolution = potsRep && isSolubleItem(batchIt);
-          const it = toSolution ? potsRep.groups[gIdx].items[iIdx] : batchIt;
+          const it = toSolution ? potsItems[iIdx] : batchIt;
           const dest = !potsRep ? ''
             : toSolution ? `<br><span class="dest dest-sol">roztwór · ${potsL} l w doniczkach</span>`
             : `<br><span class="dest">na sucho · partia ${batchL} l</span>`;
-          html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}</td>`
+          html += `<tr class="${def.cls}"><td>${escapeHtml(it.product)}`
+            + (it.count > 1 ? `<br><span class="explain">dodany ${it.count} razy</span>` : '') + `</td>`
             + `<td>${escapeHtml(ELEMENT_LABELS[it.el] || it.el || '—')}`
             + (it.target ? `<br><span class="explain">target Mehlich 3: ${escapeHtml(targetRangeText(it.target))}</span>` : '')
             + `<br><span class="explain">${escapeHtml(it.basis || '')}</span></td>`
@@ -4304,7 +4370,7 @@
       const r = window._recipes.find(x => x.id === id);
       if (!r) return;
       try {
-        await storeRecipe(r);
+        await storeRecipe(r, true);
       } catch (e) {
         setRecipeStatus('Nie udało się zapisać zmian receptury — ' + recipeErrorText(e), true);
       }
@@ -4594,9 +4660,11 @@
         if (!g.items || !g.items.length) return;
         const def = ELEMENT_GROUPS.find(x => x.key === g.key) || ELEMENT_GROUPS[2];
         prodRows.push({ group: { label: def.label, bar: def.bar, fill: def.fill } });
-        g.items.forEach((batchIt, iIdx) => {
+        const batchItems = aggregateReportItems(g.items);
+        const potsItems = potsRep ? aggregateReportItems(potsRep.groups[gIdx].items) : null;
+        batchItems.forEach((batchIt, iIdx) => {
           const toSolution = potsRep && isSolubleItem(batchIt);
-          const it = toSolution ? potsRep.groups[gIdx].items[iIdx] : batchIt;
+          const it = toSolution ? potsItems[iIdx] : batchIt;
           const dest = !potsRep ? '' : toSolution ? `\nroztwór ${plNum(potsRep.soil.volumeL, 0)} l` : `\nna sucho ${plNum(r.soil.volumeL, 0)} l`;
           prodRows.push({
             cells: [it.product,
