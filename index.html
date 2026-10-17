@@ -91,6 +91,8 @@
     .recipe-actions .col-btn { margin: 0; padding: 5px 12px; }
     .col-btn.danger { background: #c53030; border-color: #c53030; color: #fff; }
     .recipe-tools { display: flex; gap: 6px; margin-bottom: 6px; }
+    .pot-ppm-table input { max-width: 90px; padding: 5px 7px; }
+    .pot-ppm-table td { vertical-align: top; }
     .recipe-current { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px;
       padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 0.9rem; }
     .recipe-current.changed { border-color: #f6ad55; background: #fffaf0; }
@@ -249,6 +251,58 @@
         <p class="note">
           Proporcje wagowe, liczone z wariantu wodnego profilu wyżej — razem z wapniem i magnezem
           z wody startowej.
+        </p>
+
+        <h3 style="margin-top:20px;">Podlewanie doniczek tym roztworem</h3>
+        <p class="note">
+          Ile pierwiastków dostanie doniczka, gdy wlejesz do niej część roztworu, i o ile podniesie się w niej
+          gleba (ppm = mg na kg podłoża — tak jak w teście Logan Labs). Wpisz cel, np. K +100 i Ca +50, a policzę,
+          jakie stężenie musi mieć roztwór i ile produktu dosypać do zbiornika.
+        </p>
+        <div class="input-group">
+          <div>
+            <label>Objętość doniczki (l)</label>
+            <input type="number" id="pot_ppm_potl" value="2" step="0.1" min="0.1" oninput="onPotDosingInput()">
+          </div>
+          <div>
+            <label>Gęstość nasypowa podłoża (g/cm³)</label>
+            <input type="number" id="pot_ppm_bd" value="" step="0.05" min="0.05" max="2" oninput="onPotDosingInput()">
+            <div class="explain" id="pot_ppm_bd_hint">Puste — z zakładki CAC/Gleba.</div>
+          </div>
+          <div>
+            <label>Liczba doniczek</label>
+            <input type="number" id="pot_ppm_count" value="32" step="1" min="1" oninput="onPotDosingInput()">
+          </div>
+          <div>
+            <label>Roztworu na doniczkę (ml)</label>
+            <input type="number" id="pot_ppm_ml" value="200" step="10" min="1" oninput="onPotDosingInput()">
+          </div>
+        </div>
+        <div id="pot_ppm_water" class="note"></div>
+        <table class="pot-ppm-table">
+          <thead><tr><th>Pierwiastek</th><th>W roztworze</th><th>Doniczka dostaje</th><th>Gleba w doniczce</th><th>Cel: podnieś o (ppm)</th><th>Potrzeba w roztworze</th></tr></thead>
+          <tbody>
+            <tr class="el-anion"><td><strong>N</strong></td><td id="pot_ppm_sol_n"></td><td id="pot_ppm_mg_n"></td><td id="pot_ppm_rise_n"></td>
+              <td><input type="number" id="pot_ppm_target_n" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_n"></td></tr>
+            <tr class="el-anion"><td><strong>P</strong></td><td id="pot_ppm_sol_p"></td><td id="pot_ppm_mg_p"></td><td id="pot_ppm_rise_p"></td>
+              <td><input type="number" id="pot_ppm_target_p" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_p"></td></tr>
+            <tr class="el-cation"><td><strong>K</strong></td><td id="pot_ppm_sol_k"></td><td id="pot_ppm_mg_k"></td><td id="pot_ppm_rise_k"></td>
+              <td><input type="number" id="pot_ppm_target_k" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_k"></td></tr>
+            <tr class="el-cation"><td><strong>Ca</strong></td><td id="pot_ppm_sol_ca"></td><td id="pot_ppm_mg_ca"></td><td id="pot_ppm_rise_ca"></td>
+              <td><input type="number" id="pot_ppm_target_ca" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_ca"></td></tr>
+            <tr class="el-anion"><td><strong>S</strong></td><td id="pot_ppm_sol_s"></td><td id="pot_ppm_mg_s"></td><td id="pot_ppm_rise_s"></td>
+              <td><input type="number" id="pot_ppm_target_s" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_s"></td></tr>
+            <tr class="el-cation"><td><strong>Mg</strong></td><td id="pot_ppm_sol_mg"></td><td id="pot_ppm_mg_mg"></td><td id="pot_ppm_rise_mg"></td>
+              <td><input type="number" id="pot_ppm_target_mg" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_mg"></td></tr>
+          </tbody>
+        </table>
+        <button class="col-btn selected" style="margin-top:10px;" onclick="applyPotTargets()">Dobierz dawki do celu</button>
+        <div id="pot_ppm_status" class="explain" style="margin-top:6px;"></div>
+        <p class="note">
+          Dobieranie dosypuje do zbiornika produkty jednoskładnikowe z punktu 2: siarczan potasu (K), gips (Ca),
+          siarczan magnezu (Mg) i aminokwasy (N). Fosfor i siarkę pokazuję tylko informacyjnie — siarka dochodzi
+          razem z siarczanami, a fosfor jest tu tylko w Bio-Bloom, który wnosi też N i K. Liczę z kolumny
+          „Maksimum (glebowe)”: wszystko, co wlejesz, zostaje w doniczce (bez kompostu obie kolumny są równe).
         </p>
       </div>
 
@@ -2421,6 +2475,15 @@
     }
     window.setSat = setSat;
 
+    // Zawartość pierwiastków w produktach jednoskładnikowych zakładki PPM (ułamek masy). Ta sama stała liczy
+    // profil roztworu i dobiera dawki do celu w doniczkach — nie może być dwóch kopii tych liczb.
+    const PPM_SINGLE_PRODUCTS = {
+      dose_sk:    { k: 0.50 * 0.8302, s: 0.1800 },   // siarczan potasu: 50% K₂O → K
+      dose_gips:  { ca: 0.2328, s: 0.1862 },          // gips CaSO₄·2H₂O
+      dose_ms:    { mg: 0.0986, s: 0.1301 },          // siarczan magnezu MgSO₄·7H₂O
+      dose_amino: { n: 0.12 }                         // aminokwasy: N organiczny 12%
+    };
+
     function calculatePPM() {
       const V = parseFloat(document.getElementById('water_volume').value) || 1;
       const d_bloom = parseFloat(document.getElementById('dose_biobloom').value) || 0;
@@ -2444,22 +2507,23 @@
       const mg_msulf = d_ms * 1000; // miligramy siarczanu magnezu (MgSO₄·7H₂O)
       const mg_amino = d_amino * 1000; // miligramy proszku aminokwasowego (N organiczny 12%)
 
-      const n_base = (mg_bloom * 0.02) + (mg_sorbK * 0.01) + (mg_sorbCa * 0.05) + (mg_amino * 0.12);
+      const SP = PPM_SINGLE_PRODUCTS;
+      const n_base = (mg_bloom * 0.02) + (mg_sorbK * 0.01) + (mg_sorbCa * 0.05) + (mg_amino * SP.dose_amino.n);
       const n_min = n_base + komp('n').min * kg_komp;
       const n_max = n_base + komp('n').max * kg_komp;
       const p_base = mg_bloom * 0.07 * 0.4364;
       const p_min = p_base + komp('p').min * kg_komp;
       const p_max = p_base + komp('p').max * kg_komp;
-      const k_base = (mg_bloom * 0.04 * 0.8302) + (mg_sorbK * 0.24 * 0.8302) + (mg_sk * 0.50 * 0.8302);
+      const k_base = (mg_bloom * 0.04 * 0.8302) + (mg_sorbK * 0.24 * 0.8302) + (mg_sk * SP.dose_sk.k);
       const k_min = k_base + komp('k').min * kg_komp;
       const k_max = k_base + komp('k').max * kg_komp;
-      const ca_base = (mg_sorbCa * 0.08 * 0.7147) + (mg_gips * 0.2328);
+      const ca_base = (mg_sorbCa * 0.08 * 0.7147) + (mg_gips * SP.dose_gips.ca);
       const ca_min = ca_base + komp('ca').min * kg_komp;
       const ca_max = ca_base + komp('ca').max * kg_komp;
-      const s_base = (mg_gips * 0.1862) + (mg_sk * 0.1800) + (mg_msulf * 0.1301);
+      const s_base = (mg_gips * SP.dose_gips.s) + (mg_sk * SP.dose_sk.s) + (mg_msulf * SP.dose_ms.s);
       const s_min = s_base + komp('s').min * kg_komp;
       const s_max = s_base + komp('s').max * kg_komp;
-      const mg_base = mg_msulf * 0.0986;
+      const mg_base = mg_msulf * SP.dose_ms.mg;
       const mg_min = mg_base + komp('mg').min * kg_komp;
       const mg_max = mg_base + komp('mg').max * kg_komp;
 
@@ -2540,8 +2604,179 @@
 
       window._solutionProfile = profile;
       renderSolutionRatios(profile);
+      renderPotDosing();
     }
     window.calculatePPM = calculatePPM;
+
+    // ===== PODLEWANIE DONICZEK ROZTWOREM (punkt 3) =====
+    // Doniczka dostaje ml roztworu: mg pierwiastka = ppm roztworu (mg/l) × litry. W glebie ppm to mg na kg
+    // podłoża, a masa podłoża w doniczce = objętość × gęstość nasypowa. Odwrotnie: żeby podnieść glebę o X ppm,
+    // roztwór musi mieć X × kg podłoża ÷ litry na doniczkę.
+    const POT_PPM_ELEMENTS = ['n', 'p', 'k', 'ca', 's', 'mg'];
+    const POT_PPM_LABELS = { n: 'N', p: 'P', k: 'K', ca: 'Ca', s: 'S', mg: 'Mg' };
+    // Produkt, którym dobieramy pierwiastek do celu — tylko jednoskładnikowe (poza siarką), więc dobranie
+    // jednego nie zmienia pozostałych celów.
+    const POT_TARGET_PRODUCTS = {
+      k:  { field: 'dose_sk',    name: 'siarczanu potasu' },
+      ca: { field: 'dose_gips',  name: 'gipsu' },
+      mg: { field: 'dose_ms',    name: 'siarczanu magnezu' },
+      n:  { field: 'dose_amino', name: 'aminokwasów' }
+    };
+    const GYPSUM_SOLUBILITY_GL = 2.0;   // gips rozpuszcza się najwyżej ok. 2 g na litr wody
+    const POT_PPM_STORE_KEY = 'ppm_doniczki';
+    const POT_PPM_FIELDS = ['pot_ppm_potl', 'pot_ppm_bd', 'pot_ppm_count', 'pot_ppm_ml']
+      .concat(POT_PPM_ELEMENTS.map(el => 'pot_ppm_target_' + el));
+
+    function readPotDosing() {
+      const num = id => parseFloat(document.getElementById(id).value);
+      const cacBd = parseFloat(document.getElementById('lime_bd').value) || 1.3;
+      const ownBd = num('pot_ppm_bd');
+      const bd = ownBd > 0 ? ownBd : cacBd;
+      const potL = num('pot_ppm_potl'), count = Math.round(num('pot_ppm_count')), ml = num('pot_ppm_ml');
+      if (!(potL > 0) || !(count >= 1) || !(ml > 0) || !(bd > 0)) return null;
+      const targets = {};
+      POT_PPM_ELEMENTS.forEach(el => { const t = num('pot_ppm_target_' + el); if (t > 0) targets[el] = t; });
+      return { potL, count, ml, bd, ownBd: ownBd > 0, cacBd, soilKg: potL * bd, litresPerPot: ml / 1000, targets };
+    }
+
+    // Stężenie roztworu (mg/l) potrzebne, żeby gleba w doniczce urosła o riseppm.
+    const neededSolutionPpm = (riseppm, d) => (riseppm * d.soilKg) / d.litresPerPot;
+
+    // Dawki wpisuje się z dokładnością 0,01 g, więc różnica mniejsza niż pół kroku dawki (w ppm roztworu)
+    // to trafienie w cel, a nie „brakuje 0,2 ppm — dosyp 0,00 g”.
+    function potTargetTolerance(el, tankL) {
+      const prod = POT_TARGET_PRODUCTS[el];
+      if (!prod || !(tankL > 0)) return 0.05;
+      return Math.max(0.05, (0.005 * 1000 * PPM_SINGLE_PRODUCTS[prod.field][el]) / tankL);
+    }
+
+    function renderPotDosing() {
+      const profile = window._solutionProfile;
+      const d = readPotDosing();
+      const box = document.getElementById('pot_ppm_water');
+      if (!box || !profile) return;
+      document.getElementById('pot_ppm_bd_hint').textContent = d && d.ownBd
+        ? `Własna wartość (w zakładce CAC: ${d.cacBd}).` : `Puste — z zakładki CAC/Gleba: ${d ? d.cacBd : '—'} g/cm³.`;
+      if (!d) {
+        box.textContent = 'Uzupełnij objętość doniczki, liczbę doniczek i ilość roztworu.';
+        return;
+      }
+      const tankL = parseFloat(document.getElementById('water_volume').value) || 0;
+      const needL = d.count * d.litresPerPot;
+      const fmtL = x => x.toFixed(x < 10 ? 2 : 1);
+      let water = `Podłoże w doniczce: ${d.potL} l × ${d.bd} g/cm³ = <strong>${d.soilKg.toFixed(2)} kg</strong>. `
+        + `Roztwór: ${d.count} × ${d.ml} ml = <strong>${fmtL(needL)} l</strong>; zbiornik (punkt 1): ${fmtL(tankL)} l — `;
+      if (tankL + 1e-9 < needL) {
+        water += `<span style="color:#c53030; font-weight:600;">za mało, brakuje ${fmtL(needL - tankL)} l.</span> `
+          + `<button class="col-btn" style="padding:3px 10px;" onclick="setTankToPots()">Ustaw zbiornik na ${fmtL(needL)} l</button>`
+          + ` <span class="explain">(dawki przeliczą się na nową objętość, ppm zostaną)</span>`;
+      } else {
+        water += tankL - needL > 1e-9 ? `wystarczy, zostanie ${fmtL(tankL - needL)} l.` : 'dokładnie tyle, ile trzeba.';
+      }
+      box.innerHTML = water;
+
+      POT_PPM_ELEMENTS.forEach(el => {
+        const sol = profile[el].max;
+        const mgPerPot = sol * d.litresPerPot;
+        const rise = mgPerPot / d.soilKg;
+        document.getElementById('pot_ppm_sol_' + el).textContent = `${sol.toFixed(1)} ppm`;
+        document.getElementById('pot_ppm_mg_' + el).textContent = `${mgPerPot.toFixed(1)} mg`;
+        document.getElementById('pot_ppm_rise_' + el).innerHTML = `<strong>+${rise.toFixed(1)} ppm</strong>`;
+        const needCell = document.getElementById('pot_ppm_need_' + el);
+        const target = d.targets[el];
+        if (!target) { needCell.innerHTML = '<span class="explain">—</span>'; return; }
+        const need = neededSolutionPpm(target, d);
+        const diff = need - sol;
+        const tol = potTargetTolerance(el, tankL);
+        let txt = `${need.toFixed(1)} ppm`;
+        if (diff > tol) {
+          const prod = POT_TARGET_PRODUCTS[el];
+          const pct = prod ? PPM_SINGLE_PRODUCTS[prod.field][el] : 0;
+          txt += `<br><span style="color:#c05621; font-weight:600;">brakuje ${diff.toFixed(1)} ppm</span>`
+            + (prod ? `<br><span class="explain">dosyp ${((diff * tankL) / 1000 / pct).toFixed(2)} g ${prod.name}</span>`
+                    : `<br><span class="explain">${el === 's' ? 'siarka dochodzi z siarczanami' : 'brak produktu jednoskładnikowego'}</span>`);
+        } else if (diff < -tol) {
+          txt += `<br><span class="explain">ponad cel: gleba +${(sol * d.litresPerPot / d.soilKg - target).toFixed(1)} ppm więcej</span>`;
+        } else {
+          txt += ' <span style="color:#276749; font-weight:600;">✓</span>';
+        }
+        needCell.innerHTML = txt;
+      });
+      const gyps = parseFloat(document.getElementById('dose_gips').value) || 0;
+      const status = document.getElementById('pot_ppm_status');
+      if (tankL > 0 && gyps / tankL > GYPSUM_SOLUBILITY_GL && !status.dataset.sticky) {
+        status.innerHTML = `<span style="color:#c53030; font-weight:600;">Gips: ${(gyps / tankL).toFixed(1)} g/l — rozpuści się najwyżej ok. `
+          + `${GYPSUM_SOLUBILITY_GL} g/l, reszta zostanie na dnie i nie trafi równo do doniczek. Daj więcej wody albo podaj Ca inaczej.</span>`;
+      }
+    }
+
+    function onPotDosingInput() {
+      const status = document.getElementById('pot_ppm_status');
+      delete status.dataset.sticky;
+      status.textContent = '';
+      try {
+        const saved = {};
+        POT_PPM_FIELDS.forEach(id => { saved[id] = document.getElementById(id).value; });
+        localStorage.setItem(POT_PPM_STORE_KEY, JSON.stringify(saved));
+      } catch (e) { /* tylko wygoda — pola wrócą do wartości domyślnych */ }
+      renderPotDosing();
+    }
+    window.onPotDosingInput = onPotDosingInput;
+
+    function restorePotDosing() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(POT_PPM_STORE_KEY) || 'null');
+        if (saved) POT_PPM_FIELDS.forEach(id => { if (saved[id] != null) document.getElementById(id).value = saved[id]; });
+      } catch (e) { /* zostają wartości domyślne */ }
+    }
+
+    function setTankToPots() {
+      const d = readPotDosing();
+      if (!d) return;
+      const input = document.getElementById('water_volume');
+      input.value = Math.round(d.count * d.ml) / 1000;
+      onWaterVolumeChange();
+    }
+    window.setTankToPots = setTankToPots;
+
+    // Dosypuje do zbiornika tyle produktu jednoskładnikowego, żeby roztwór miał stężenie potrzebne do celu.
+    // Każdy z tych produktów podnosi tylko swój pierwiastek (i siarkę), więc dobór jest dokładny w jednym kroku.
+    function applyPotTargets() {
+      const d = readPotDosing();
+      const status = document.getElementById('pot_ppm_status');
+      const profile = window._solutionProfile;
+      if (!d || !profile) return;
+      const tankL = parseFloat(document.getElementById('water_volume').value) || 0;
+      if (!Object.keys(d.targets).length) {
+        status.textContent = 'Wpisz najpierw cel w kolumnie „Cel: podnieś o (ppm)”, np. K 100 i Ca 50.';
+        return;
+      }
+      const added = [], over = [], skipped = [];
+      Object.keys(d.targets).forEach(el => {
+        const prod = POT_TARGET_PRODUCTS[el];
+        const diff = neededSolutionPpm(d.targets[el], d) - profile[el].max;
+        const tol = potTargetTolerance(el, tankL);
+        if (!prod) { if (diff > tol) skipped.push(POT_PPM_LABELS[el]); return; }
+        if (diff < -tol) { over.push(POT_PPM_LABELS[el]); return; }
+        if (diff <= tol) return;
+        const grams = (diff * tankL) / 1000 / PPM_SINGLE_PRODUCTS[prod.field][el];
+        const input = document.getElementById(prod.field);
+        const before = parseFloat(input.value) || 0;
+        input.value = roundDose(before + grams);
+        added.push(`+${grams.toFixed(2)} g ${prod.name} (${POT_PPM_LABELS[el]}: ${before} → ${input.value} g)`);
+      });
+      onDoseInput();  // zapamiętuje nowe dawki jako przepis zbiornika i przelicza profil
+      const rises = Object.keys(d.targets).map(el => `${POT_PPM_LABELS[el]} +${(window._solutionProfile[el].max * d.litresPerPot / d.soilKg).toFixed(1)} ppm`);
+      let msg = added.length ? `Dosypano do zbiornika (${tankL} l): ${added.join(', ')}. ` : 'Nic nie trzeba było dosypywać. ';
+      msg += `Teraz gleba w doniczce rośnie o: ${rises.join(', ')}.`;
+      if (over.length) msg += ` Ponad cel już teraz: ${over.join(', ')} — żeby zejść niżej, zmniejsz ręcznie dawki w punkcie 2.`;
+      if (skipped.length) msg += ` Bez dobrania: ${skipped.join(', ')} — brak produktu jednoskładnikowego w punkcie 2.`;
+      status.textContent = msg;
+      status.dataset.sticky = '1';
+      renderPotDosing();
+    }
+    window.applyPotTargets = applyPotTargets;
+
 
     // Proporcje wagowe w roztworze. Liczone z gotowego profilu, więc uwzględniają wodę startową.
     const SOLUTION_RATIOS = [
@@ -5083,6 +5318,7 @@
       pageStarted = true;
       populateProductSelect();
       renderProductsTable();
+      restorePotDosing();
       try { restorePageState(data && data.page); } catch (e) { /* stan poprzedniej wersji nieczytelny — zostają wartości domyślne */ }
       if (!window._doseRecipe) snapshotDoseRecipe();
       syncSatButtons();

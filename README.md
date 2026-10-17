@@ -186,6 +186,11 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
 - `onWaterVolumeChange()`, `onDoseInput()`, `applyDoseRecipe()` — objętość jako wielkość partii:
   zmiana litrów przelicza dawki, profil PPM zostaje ten sam
 - `computeSolutionRatios()` — proporcje N:K, Ca:Mg, K:Ca, N:S w roztworze
+- `renderPotDosing()` / `applyPotTargets()` — „Podlewanie doniczek tym roztworem” (punkt 3): mg pierwiastka na
+  doniczkę = ppm roztworu × litry na doniczkę, wzrost w glebie = mg ÷ (objętość doniczki × gęstość nasypowa);
+  odwrotnie — cel „podnieś o X ppm” → potrzebne stężenie roztworu. Dobieranie dosypuje produkty
+  jednoskładnikowe (`PPM_SINGLE_PRODUCTS`: siarczan potasu → K, gips → Ca, siarczan magnezu → Mg,
+  aminokwasy → N) — ta sama stała liczy profil w `calculatePPM()`. Liczone z kolumny „Maksimum (glebowe)”
 - `savePhaseProfile()` / `loadPhaseProfile()` — zapisane profile faz w `localStorage`,
   wczytywane w skali aktualnej objętości
 
