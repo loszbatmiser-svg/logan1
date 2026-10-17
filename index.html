@@ -93,6 +93,9 @@
     .recipe-tools { display: flex; gap: 6px; margin-bottom: 6px; }
     .pot-ppm-table input { max-width: 90px; padding: 5px 7px; }
     .pot-ppm-table td { vertical-align: top; }
+    .sat-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .sat-row input { flex: 0 0 90px; }
+    .sat-row select { flex: 1 1 160px; }
     .recipe-current { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px;
       padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 0.9rem; }
     .recipe-current.changed { border-color: #f6ad55; background: #fffaf0; }
@@ -277,27 +280,56 @@
             <label>Roztworu na doniczkę (ml)</label>
             <input type="number" id="pot_ppm_ml" value="200" step="10" min="1" oninput="onPotDosingInput()">
           </div>
+          <div>
+            <label>Woda przy nasyceniu</label>
+            <div class="sat-row">
+              <input type="number" id="pot_ppm_satw" value="50" step="1" min="0.1" oninput="onPotDosingInput()">
+              <select id="pot_ppm_satw_unit" onchange="onSatUnitChange(this)">
+                <option value="pct" selected>% objętości</option>
+                <option value="ml">ml na doniczkę</option>
+              </select>
+            </div>
+            <div class="explain">
+              Jak zmierzyć: zważ doniczkę z suchym podłożem, podlewaj do pierwszego wycieku spod spodu
+              i zważ jeszcze raz. Różnica w gramach to ml wody przy nasyceniu.
+            </div>
+          </div>
+        </div>
+        <div class="input-group">
+          <div>
+            <label>Cel liczę jako</label>
+            <select id="pot_ppm_target_mode" onchange="onPotDosingInput()">
+              <option value="m3" selected>Mehlich 3 (mg na kg podłoża)</option>
+              <option value="sp">Saturated Paste (mg na litr wody przy nasyceniu)</option>
+            </select>
+          </div>
         </div>
         <div id="pot_ppm_water" class="note"></div>
         <table class="pot-ppm-table">
-          <thead><tr><th>Pierwiastek</th><th>W roztworze</th><th>Doniczka dostaje</th><th>Gleba w doniczce</th><th>Cel: podnieś o (ppm)</th><th>Potrzeba w roztworze</th></tr></thead>
+          <thead><tr><th>Pierwiastek</th><th>W roztworze</th><th>Doniczka dostaje</th><th>Gleba w doniczce (Mehlich 3)</th><th>Saturated Paste (ppm)</th><th id="pot_ppm_target_head">Cel: podnieś o (ppm Mehlich 3)</th><th>Potrzeba w roztworze</th></tr></thead>
           <tbody>
-            <tr class="el-anion"><td><strong>N</strong></td><td id="pot_ppm_sol_n"></td><td id="pot_ppm_mg_n"></td><td id="pot_ppm_rise_n"></td>
+            <tr class="el-anion"><td><strong>N</strong></td><td id="pot_ppm_sol_n"></td><td id="pot_ppm_mg_n"></td><td id="pot_ppm_rise_n"></td><td id="pot_ppm_sp_n"></td>
               <td><input type="number" id="pot_ppm_target_n" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_n"></td></tr>
-            <tr class="el-anion"><td><strong>P</strong></td><td id="pot_ppm_sol_p"></td><td id="pot_ppm_mg_p"></td><td id="pot_ppm_rise_p"></td>
+            <tr class="el-anion"><td><strong>P</strong></td><td id="pot_ppm_sol_p"></td><td id="pot_ppm_mg_p"></td><td id="pot_ppm_rise_p"></td><td id="pot_ppm_sp_p"></td>
               <td><input type="number" id="pot_ppm_target_p" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_p"></td></tr>
-            <tr class="el-cation"><td><strong>K</strong></td><td id="pot_ppm_sol_k"></td><td id="pot_ppm_mg_k"></td><td id="pot_ppm_rise_k"></td>
+            <tr class="el-cation"><td><strong>K</strong></td><td id="pot_ppm_sol_k"></td><td id="pot_ppm_mg_k"></td><td id="pot_ppm_rise_k"></td><td id="pot_ppm_sp_k"></td>
               <td><input type="number" id="pot_ppm_target_k" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_k"></td></tr>
-            <tr class="el-cation"><td><strong>Ca</strong></td><td id="pot_ppm_sol_ca"></td><td id="pot_ppm_mg_ca"></td><td id="pot_ppm_rise_ca"></td>
+            <tr class="el-cation"><td><strong>Ca</strong></td><td id="pot_ppm_sol_ca"></td><td id="pot_ppm_mg_ca"></td><td id="pot_ppm_rise_ca"></td><td id="pot_ppm_sp_ca"></td>
               <td><input type="number" id="pot_ppm_target_ca" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_ca"></td></tr>
-            <tr class="el-anion"><td><strong>S</strong></td><td id="pot_ppm_sol_s"></td><td id="pot_ppm_mg_s"></td><td id="pot_ppm_rise_s"></td>
+            <tr class="el-anion"><td><strong>S</strong></td><td id="pot_ppm_sol_s"></td><td id="pot_ppm_mg_s"></td><td id="pot_ppm_rise_s"></td><td id="pot_ppm_sp_s"></td>
               <td><input type="number" id="pot_ppm_target_s" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_s"></td></tr>
-            <tr class="el-cation"><td><strong>Mg</strong></td><td id="pot_ppm_sol_mg"></td><td id="pot_ppm_mg_mg"></td><td id="pot_ppm_rise_mg"></td>
+            <tr class="el-cation"><td><strong>Mg</strong></td><td id="pot_ppm_sol_mg"></td><td id="pot_ppm_mg_mg"></td><td id="pot_ppm_rise_mg"></td><td id="pot_ppm_sp_mg"></td>
               <td><input type="number" id="pot_ppm_target_mg" step="1" min="0" placeholder="—" oninput="onPotDosingInput()"></td><td id="pot_ppm_need_mg"></td></tr>
           </tbody>
         </table>
         <button class="col-btn selected" style="margin-top:10px;" onclick="applyPotTargets()">Dobierz dawki do celu</button>
         <div id="pot_ppm_status" class="explain" style="margin-top:6px;"></div>
+        <p class="note">
+          <strong>Saturated Paste</strong> = mg, które dostaje doniczka ÷ litry wody przy nasyceniu, czyli ppm roztworu
+          × (ml wlane ÷ ml wody przy nasyceniu). Wynik jest dokładny dla azotanów (N) i siarczanów (S), bo zostają
+          w wodzie. Dla K, Ca i Mg to górna granica, bo część wiąże się na kompleksie sorpcyjnym (CEC). Dla P pewność
+          jest najniższa, bo fosfor wiąże się najmocniej.
+        </p>
         <p class="note">
           Dobieranie dosypuje do zbiornika produkty jednoskładnikowe z punktu 2: siarczan potasu (K), gips (Ca),
           siarczan magnezu (Mg) i aminokwasy (N). Fosfor i siarkę pokazuję tylko informacyjnie — siarka dochodzi
@@ -2624,7 +2656,8 @@
     };
     const GYPSUM_SOLUBILITY_GL = 2.0;   // gips rozpuszcza się najwyżej ok. 2 g na litr wody
     const POT_PPM_STORE_KEY = 'ppm_doniczki';
-    const POT_PPM_FIELDS = ['pot_ppm_potl', 'pot_ppm_bd', 'pot_ppm_count', 'pot_ppm_ml']
+    const POT_PPM_FIELDS = ['pot_ppm_potl', 'pot_ppm_bd', 'pot_ppm_count', 'pot_ppm_ml',
+      'pot_ppm_satw', 'pot_ppm_satw_unit', 'pot_ppm_target_mode']
       .concat(POT_PPM_ELEMENTS.map(el => 'pot_ppm_target_' + el));
 
     function readPotDosing() {
@@ -2636,11 +2669,48 @@
       if (!(potL > 0) || !(count >= 1) || !(ml > 0) || !(bd > 0)) return null;
       const targets = {};
       POT_PPM_ELEMENTS.forEach(el => { const t = num('pot_ppm_target_' + el); if (t > 0) targets[el] = t; });
-      return { potL, count, ml, bd, ownBd: ownBd > 0, cacBd, soilKg: potL * bd, litresPerPot: ml / 1000, targets };
+      // Woda przy nasyceniu: w % objętości doniczki albo wprost w ml na doniczkę.
+      const satRaw = num('pot_ppm_satw');
+      const satUnit = document.getElementById('pot_ppm_satw_unit').value;
+      const satL = satRaw > 0 ? (satUnit === 'ml' ? satRaw / 1000 : (potL * satRaw) / 100) : null;
+      const mode = document.getElementById('pot_ppm_target_mode').value === 'sp' ? 'sp' : 'm3';
+      return { potL, count, ml, bd, ownBd: ownBd > 0, cacBd, soilKg: potL * bd, litresPerPot: ml / 1000, satL, mode, targets };
     }
 
-    // Stężenie roztworu (mg/l) potrzebne, żeby gleba w doniczce urosła o riseppm.
-    const neededSolutionPpm = (riseppm, d) => (riseppm * d.soilKg) / d.litresPerPot;
+    // Wzrost w doniczce z mg, które dostaje: Mehlich 3 — mg na kg podłoża; Saturated Paste — mg na litr wody
+    // przy nasyceniu (ppm roztworu × ml wlane ÷ ml wody przy nasyceniu).
+    const riseMehlich = (mgPerPot, d) => mgPerPot / d.soilKg;
+    const riseSatPaste = (mgPerPot, d) => (d.satL > 0 ? mgPerPot / d.satL : null);
+    const riseInMode = (mgPerPot, d) => (d.mode === 'sp' ? riseSatPaste(mgPerPot, d) : riseMehlich(mgPerPot, d));
+
+    // Stężenie roztworu (mg/l) potrzebne, żeby wzrost w wybranym trybie wyniósł riseppm:
+    // Mehlich 3 — X × kg podłoża ÷ litry na doniczkę; Saturated Paste — X × litry wody przy nasyceniu ÷ litry na doniczkę.
+    function neededSolutionPpm(riseppm, d) {
+      const base = d.mode === 'sp' ? d.satL : d.soilKg;
+      return base > 0 ? (riseppm * base) / d.litresPerPot : null;
+    }
+
+    // Pewność wyniku SP: azotany i siarczany zostają w wodzie; kationy częściowo wiążą się na CEC, fosfor najmocniej.
+    const SP_CERTAINTY = {
+      n: 'dokładne — azotany', s: 'dokładne — siarczany',
+      k: 'górna granica — część na CEC', ca: 'górna granica — część na CEC', mg: 'górna granica — część na CEC',
+      p: 'najmniej pewne — P wiąże się najmocniej'
+    };
+    const POT_MODE_LABEL = { m3: 'Mehlich 3', sp: 'Saturated Paste' };
+
+    // Zmiana jednostki wody przy nasyceniu przelicza wpisaną wartość, żeby oznaczała tę samą ilość wody.
+    function onSatUnitChange(sel) {
+      const input = document.getElementById('pot_ppm_satw');
+      const potL = parseFloat(document.getElementById('pot_ppm_potl').value);
+      const v = parseFloat(input.value);
+      const prev = sel.dataset.prev || (sel.value === 'ml' ? 'pct' : 'ml');
+      if (v > 0 && potL > 0 && prev !== sel.value) {
+        input.value = sel.value === 'ml' ? Math.round(potL * v * 10) : Math.round((v / 1000 / potL) * 1000) / 10;
+      }
+      sel.dataset.prev = sel.value;
+      onPotDosingInput();
+    }
+    window.onSatUnitChange = onSatUnitChange;
 
     // Dawki wpisuje się z dokładnością 0,01 g, więc różnica mniejsza niż pół kroku dawki (w ppm roztworu)
     // to trafienie w cel, a nie „brakuje 0,2 ppm — dosyp 0,00 g”.
@@ -2673,19 +2743,34 @@
       } else {
         water += tankL - needL > 1e-9 ? `wystarczy, zostanie ${fmtL(tankL - needL)} l.` : 'dokładnie tyle, ile trzeba.';
       }
+      if (d.satL > 0) {
+        water += `<br>Woda przy nasyceniu: <strong>${Math.round(d.satL * 1000)} ml</strong> na doniczkę`
+          + ` (${((d.satL / d.potL) * 100).toFixed(0)}% objętości doniczki).`;
+        if (d.ml > d.satL * 1000 + 1e-9) {
+          water += ` <span style="color:#c05621; font-weight:600;">Wlewasz więcej (${d.ml} ml), niż podłoże zatrzyma — nadmiar wycieknie`
+            + ` i wyniesie część pierwiastków; Saturated Paste liczę bez tych strat.</span>`;
+        }
+      } else {
+        water += '<br><span class="explain">Podaj wodę przy nasyceniu, żeby policzyć Saturated Paste.</span>';
+      }
       box.innerHTML = water;
+      document.getElementById('pot_ppm_target_head').textContent = `Cel: podnieś o (ppm ${POT_MODE_LABEL[d.mode]})`;
 
       POT_PPM_ELEMENTS.forEach(el => {
         const sol = profile[el].max;
         const mgPerPot = sol * d.litresPerPot;
-        const rise = mgPerPot / d.soilKg;
+        const rise = riseMehlich(mgPerPot, d);
+        const sp = riseSatPaste(mgPerPot, d);
         document.getElementById('pot_ppm_sol_' + el).textContent = `${sol.toFixed(1)} ppm`;
         document.getElementById('pot_ppm_mg_' + el).textContent = `${mgPerPot.toFixed(1)} mg`;
         document.getElementById('pot_ppm_rise_' + el).innerHTML = `<strong>+${rise.toFixed(1)} ppm</strong>`;
+        document.getElementById('pot_ppm_sp_' + el).innerHTML = sp == null ? '<span class="explain">—</span>'
+          : `<strong>+${sp.toFixed(1)} ppm</strong><br><span class="explain">${SP_CERTAINTY[el]}</span>`;
         const needCell = document.getElementById('pot_ppm_need_' + el);
         const target = d.targets[el];
         if (!target) { needCell.innerHTML = '<span class="explain">—</span>'; return; }
         const need = neededSolutionPpm(target, d);
+        if (need == null) { needCell.innerHTML = '<span class="explain">podaj wodę przy nasyceniu</span>'; return; }
         const diff = need - sol;
         const tol = potTargetTolerance(el, tankL);
         let txt = `${need.toFixed(1)} ppm`;
@@ -2696,7 +2781,7 @@
             + (prod ? `<br><span class="explain">dosyp ${((diff * tankL) / 1000 / pct).toFixed(2)} g ${prod.name}</span>`
                     : `<br><span class="explain">${el === 's' ? 'siarka dochodzi z siarczanami' : 'brak produktu jednoskładnikowego'}</span>`);
         } else if (diff < -tol) {
-          txt += `<br><span class="explain">ponad cel: gleba +${(sol * d.litresPerPot / d.soilKg - target).toFixed(1)} ppm więcej</span>`;
+          txt += `<br><span class="explain">ponad cel: +${(riseInMode(mgPerPot, d) - target).toFixed(1)} ppm więcej (${POT_MODE_LABEL[d.mode]})</span>`;
         } else {
           txt += ' <span style="color:#276749; font-weight:600;">✓</span>';
         }
@@ -2727,6 +2812,8 @@
       try {
         const saved = JSON.parse(localStorage.getItem(POT_PPM_STORE_KEY) || 'null');
         if (saved) POT_PPM_FIELDS.forEach(id => { if (saved[id] != null) document.getElementById(id).value = saved[id]; });
+        const unit = document.getElementById('pot_ppm_satw_unit');
+        unit.dataset.prev = unit.value;
       } catch (e) { /* zostają wartości domyślne */ }
     }
 
@@ -2752,6 +2839,10 @@
         return;
       }
       const added = [], over = [], skipped = [];
+      if (d.mode === 'sp' && !(d.satL > 0)) {
+        status.textContent = 'Podaj wodę przy nasyceniu — bez niej nie policzę celu w trybie Saturated Paste.';
+        return;
+      }
       Object.keys(d.targets).forEach(el => {
         const prod = POT_TARGET_PRODUCTS[el];
         const diff = neededSolutionPpm(d.targets[el], d) - profile[el].max;
@@ -2766,9 +2857,9 @@
         added.push(`+${grams.toFixed(2)} g ${prod.name} (${POT_PPM_LABELS[el]}: ${before} → ${input.value} g)`);
       });
       onDoseInput();  // zapamiętuje nowe dawki jako przepis zbiornika i przelicza profil
-      const rises = Object.keys(d.targets).map(el => `${POT_PPM_LABELS[el]} +${(window._solutionProfile[el].max * d.litresPerPot / d.soilKg).toFixed(1)} ppm`);
+      const rises = Object.keys(d.targets).map(el => `${POT_PPM_LABELS[el]} +${riseInMode(window._solutionProfile[el].max * d.litresPerPot, d).toFixed(1)} ppm`);
       let msg = added.length ? `Dosypano do zbiornika (${tankL} l): ${added.join(', ')}. ` : 'Nic nie trzeba było dosypywać. ';
-      msg += `Teraz gleba w doniczce rośnie o: ${rises.join(', ')}.`;
+      msg += `Teraz w doniczce (${POT_MODE_LABEL[d.mode]}): ${rises.join(', ')}.`;
       if (over.length) msg += ` Ponad cel już teraz: ${over.join(', ')} — żeby zejść niżej, zmniejsz ręcznie dawki w punkcie 2.`;
       if (skipped.length) msg += ` Bez dobrania: ${skipped.join(', ')} — brak produktu jednoskładnikowego w punkcie 2.`;
       status.textContent = msg;

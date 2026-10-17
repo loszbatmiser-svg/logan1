@@ -190,7 +190,11 @@ leniwie (dopiero przy pierwszym imporcie PDF) do prawdziwego skryptu i Blob URL 
   doniczkę = ppm roztworu × litry na doniczkę, wzrost w glebie = mg ÷ (objętość doniczki × gęstość nasypowa);
   odwrotnie — cel „podnieś o X ppm” → potrzebne stężenie roztworu. Dobieranie dosypuje produkty
   jednoskładnikowe (`PPM_SINGLE_PRODUCTS`: siarczan potasu → K, gips → Ca, siarczan magnezu → Mg,
-  aminokwasy → N) — ta sama stała liczy profil w `calculatePPM()`. Liczone z kolumny „Maksimum (glebowe)”
+  aminokwasy → N) — ta sama stała liczy profil w `calculatePPM()`. Liczone z kolumny „Maksimum (glebowe)”.
+  Tryb Saturated Paste: wzrost SP = mg na doniczkę ÷ litry wody przy nasyceniu (pole w ml albo % objętości
+  doniczki), czyli ppm roztworu × ml wlane ÷ ml wody przy nasyceniu; przełącznik „Cel liczę jako” wybiera,
+  czy cel i dobieranie liczą się z masy podłoża (Mehlich 3), czy z wody przy nasyceniu (SP). SP dokładne dla
+  N (azotany) i S (siarczany), dla K/Ca/Mg górna granica (CEC), dla P najmniej pewne
 - `savePhaseProfile()` / `loadPhaseProfile()` — zapisane profile faz w `localStorage`,
   wczytywane w skali aktualnej objętości
 
